@@ -11,8 +11,10 @@ display_id){
 
 EGLBoolean eglInitialize(EGLDisplay dpy, EGLint
 *major, EGLint *minor){
-    //iniciar context aqui? (quien sabe)
     if (!dpy) return EGL_FALSE;
+    
+    //iniciar context aqui? (quien sabe)
+    
 
     if(major) *major=1;
     if (minor) *minor=5;
