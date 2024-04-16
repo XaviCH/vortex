@@ -1,0 +1,11 @@
+main.o: main.cc /home/pau/tools/pocl/runtime/include/CL/opencl.h \
+ /home/pau/tools/pocl/runtime/include/CL/cl.h \
+ /home/pau/tools/pocl/runtime/include/CL/cl_version.h \
+ /home/pau/tools/pocl/runtime/include/CL/cl_platform.h \
+ /home/pau/tools/pocl/runtime/include/CL/cl_gl.h \
+ /home/pau/tools/pocl/runtime/include/CL/cl_ext.h \
+ /home/pau/tools/pocl/runtime/include/CL/cl_ext_pocl.h GLSC2/binary.c \
+ GLSC2/kernel.color.c GLSC2/kernel.perspective_division.c \
+ GLSC2/kernel.viewport_division.c GLSC2/kernel.rasterization.triangle.c \
+ GLSC2/kernel.readnpixels.c test/test.h test/test_perspective_div.c \
+ test/test_color_kernel.c
