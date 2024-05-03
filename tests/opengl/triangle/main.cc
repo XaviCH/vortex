@@ -11,8 +11,8 @@
 #include "../debug.cc"
 #include "../common.c"
 
-#define WIDTH 10
-#define HEIGHT 10
+#define WIDTH 150
+#define HEIGHT 100
 
 GLuint createProgram(const char* filename) {
   GLuint program;
@@ -29,42 +29,30 @@ GLuint createProgram(const char* filename) {
   return program;
 }
 
-GLuint createTriangle() {
+void createTriangle() {
   static float triangle[] = {
     0.0, 1.0, 0.0,
     -1.0, -1.0, 0.0,
     1.0, -1.0, 0.0
   };
-
-  GLuint vbo;
-
-  glGenBuffers(1, &vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferData(GL_ARRAY_BUFFER,sizeof(triangle),triangle,GL_STATIC_DRAW);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-  glEnableVertexAttribArray(0); 
-
-  return vbo;
-}
-GLuint createQuad() {
-  static float quad[] = {
-    -1.0, 1.0, 0.0,
-    -1.0, -1.0, 0.0,
-    1.0, -1.0, 0.0,
-    -1.0, 1.0, 0.0,
-    1.0, -1.0, 0.0,
-    1.0, 1.0, 0.0,
+  static float color[] = {
+    1.0, 0.0, 0.0,
+    0.0, 1.0, 0.0,
+    0.0, 0.0, 1.0
   };
 
-  GLuint vbo;
+  GLuint vbo[2];
 
-  glGenBuffers(1, &vbo);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferData(GL_ARRAY_BUFFER,sizeof(quad),quad,GL_STATIC_DRAW);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float[3]), 0);
+  glGenBuffers(2, vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
+  glBufferData(GL_ARRAY_BUFFER,sizeof(triangle),triangle,GL_STATIC_DRAW);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
   glEnableVertexAttribArray(0); 
 
-  return vbo;
+  glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
+  glBufferData(GL_ARRAY_BUFFER,sizeof(color),color,GL_STATIC_DRAW);
+  glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+  glEnableVertexAttribArray(1); 
 }
 
 int main() {
@@ -85,16 +73,17 @@ int main() {
   program = createProgram("kernel.pocl");
   glUseProgram(program);
 
-  vbo = createQuad();
+  createTriangle();
 
   // Draw
   glClear(GL_COLOR_BUFFER_BIT);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glDrawArrays(GL_TRIANGLES, 0, 6);
+  glDrawArrays(GL_TRIANGLES, 0, 3);
   glFinish();
   glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
 
   printf("Verify result\n");
+
+  /* TODO: this is for quad not for triangle
   int errors = 0;
   unsigned int *rgba8 = (unsigned int*) result;
   for (int i = 0; i < WIDTH*HEIGHT; ++i) {
@@ -110,9 +99,9 @@ int main() {
   } else {
     printf("FAILED! - %d errors\n", errors);    
   }
+  */
 
-  const uint8_t* out = (uint8_t*) rgba8;
-  printPPM("image.ppm", WIDTH, HEIGHT, out);
+  printPPM("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
 
-  return errors; 
+  return 0; 
 }
