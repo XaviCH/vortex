@@ -236,9 +236,9 @@ module VX_lru_queue #(
                                 end
                             end
                             // Move the respective positions
-                            for (integer i = ptr+1; i < used_n-1; i = i +1) {
+                            for (integer i = ptr+1; i < used_n-1; i = i +1) begin
                                 queue_ptr_reg[i-1] <= queue_ptr_reg[i];
-                            }
+                            end
                             queue_ptr_reg[used_n-1] <= queue_ptr_reg[ptr];
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
