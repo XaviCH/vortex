@@ -163,11 +163,9 @@ module VX_lru_queue #(
 
                 reg [DATAW-1:0] data_reg [DEPTH-1:0]; // Memory were data is stored
                 reg [ADDRW-1:0] queue_ptr_reg [DEPTH-1:0]; // Ptr to memory data, 0 is lru, DEPTH-1 is mru
-                reg [DEPTH-1:0] used_reg; // Memory were data is stored
                 
                 always @(posedge clk) begin
                     if (reset) begin
-                        used_reg <= '0;
                         for (integer i = 0; i < DEPTH; i = i + 1) begin // Set all the positions in the queue
                             queue_ptr_reg[i] <= ADDRW'(i);
                         end
@@ -191,20 +189,16 @@ module VX_lru_queue #(
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
                                 if (pop) begin // insert the data were is going to pop
-                                    if (used_n == DEPTH) begin
+                                    if (used_n == ADDRW'(DEPTH)) begin
                                         data_reg[queue_ptr_reg[0]] <= data_in; 
                                     end else begin
                                         data_reg[queue_ptr_reg[used_n-1]] <= data_in;
                                     end
                                 end else begin // find a position were to store new data
                                     data_reg[queue_ptr_reg[used_n-1]] <= data_in;
-                                    used_reg[queue_ptr_reg[used_n-1]] <= 1;
                                 end
                             end
                             if (pop) begin
-                                if (~push) begin // register gets empty
-                                    used_reg[queue_ptr_reg[0]] <= 0;
-                                end
                                 // move all the queue one step
                                 for (integer i = 0; i < DEPTH-1; i = i + 1) begin
                                     queue_ptr_reg[i] <= queue_ptr_reg[i+1];
@@ -222,13 +216,11 @@ module VX_lru_queue #(
                 reg [DATAW-1:0] dout_r;
                 reg [DEPTH-1:0][DATAW-1:0] data_reg; // Memory were data is stored
                 reg [DEPTH-1:0][ADDRW-1:0] queue_ptr_reg; // Ptr to memory data, 0 is lru, DEPTH-1 is mru
-                reg [DEPTH-1:0] used_reg; // Memory were data is stored
 
                 // reg [`CS_LINE_ADDR_WIDTH-1:0] addr_r [DEPTH-1:0]; // Address stored
 
                 always @(posedge clk) begin
                     if (reset) begin  
-                        used_reg <= '0; // Set all registers to unused
                         for (integer i = 0; i < DEPTH; i = i + 1) begin // Set all the positions in the queue
                             queue_ptr_reg[i] <= ADDRW'(i);
                         end
@@ -252,20 +244,16 @@ module VX_lru_queue #(
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
                                 if (pop) begin // insert the data were is going to pop
-                                    if (used_n == DEPTH) begin
+                                    if (used_n == ADDRW'(DEPTH)) begin
                                         data_reg[queue_ptr_reg[0]] <= data_in; 
                                     end else begin
                                         data_reg[queue_ptr_reg[used_n-1]] <= data_in;
                                     end
                                 end else begin // find a position were to store new data
                                     data_reg[queue_ptr_reg[used_n-1]] <= data_in;
-                                    used_reg[queue_ptr_reg[used_n-1]] <= 1;
                                 end
                             end
                             if (pop) begin
-                                if (~push) begin // register gets empty
-                                    used_reg[queue_ptr_reg[0]] <= 0;
-                                end
                                 // move all the queue one step
                                 for (integer i = 0; i < DEPTH-1; i = i + 1) begin
                                     queue_ptr_reg[i] <= queue_ptr_reg[i+1];
