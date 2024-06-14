@@ -482,7 +482,7 @@ module VX_cache_bank #(
 
     `RESET_RELAY (mreq_reset, reset);
 
-    VX_fifo_queue #(
+    VX_lru_queue #(
         .DATAW    (1 + `CS_LINE_ADDR_WIDTH + MSHR_ADDR_WIDTH + WORD_SIZE + WORD_SEL_WIDTH + `CS_WORD_WIDTH), 
         .DEPTH    (MREQ_SIZE),
         .ALM_FULL (MREQ_SIZE-2),

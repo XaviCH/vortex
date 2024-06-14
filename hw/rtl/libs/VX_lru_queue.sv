@@ -21,7 +21,7 @@ module VX_lru_queue #(
     parameter ALM_FULL  = (DEPTH - 1),
     parameter ALM_EMPTY = 1,
     parameter OUT_REG   = 0,
-    parameter LUTRAM    = 1,
+    //parameter LUTRAM    = 1,
     parameter SIZEW     = `CLOG2(DEPTH+1)
 ) ( 
     input  wire             clk,
@@ -104,7 +104,6 @@ module VX_lru_queue #(
                             full_r <= 1;
                         if (used_r == ADDRW'(ALM_FULL-1))
                             alm_full_r <= 1;
-                        lru_ptr_r <= lru_ptr_r + 1; // Move lru ptr to next position
                     end 
                 end else if (pop) begin
                     full_r <= 0;
@@ -114,7 +113,6 @@ module VX_lru_queue #(
                         empty_r <= 1;
                     if (used_r == ADDRW'(ALM_EMPTY+1))
                         alm_empty_r <= 1;
-                    lru_ptr_r <= access_order[used_r]; // Select the addr to be pop
                 end                
                 used_r <= used_n;  
             end                   
@@ -173,18 +171,20 @@ module VX_lru_queue #(
                     end else begin
                         if (~push && ~pop ) begin // write or read on a load memory, PRE memory is on data_reg
                             // Set to first position ADDR of the read
-                            reg [ADDRW-1:0] ptr = DEPTH-1;
+                            /*
+			    reg [ADDRW-1:0] ptr;
                             for (integer i = 0; i < DEPTH; i = i + 1) begin
-                                if (data_reg[queue_ptr_reg[i]][DATAW-2:DATAW-1-`CS_LINE_ADDR_WIDTH] == data_in[DATAW-2:DATAW-1-`CS_LINE_ADDR_WIDTH]) begin
-                                    ptr = i;
+                                if (data_reg[queue_ptr_reg[i]] == data_in) begin
+                                    ptr = ADDRW'(i);
                                     break;
                                 end
                             end
                             // Move the respective positions
-                            for (integer i = ptr+1; i < used_n-1; i = i +1) {
+			    for (integer i = integer'(ptr)+1; i < integer'(used_n)-1; i = i +1) begin
                                 queue_ptr_reg[i-1] <= queue_ptr_reg[i];
-                            }
+			    end
                             queue_ptr_reg[used_n-1] <= queue_ptr_reg[ptr];
+			    */
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
                                 if (pop) begin // insert the data were is going to pop
@@ -193,8 +193,8 @@ module VX_lru_queue #(
                                     reg [ADDRW-1:0] addr;
                                     for (integer i = 0; i < DEPTH; i = i + 1) begin
                                         if (~used_reg[i]) begin
-                                            used_reg[i] = 1;
-                                            addr = i;
+                                            used_reg[i] <= 1;
+                                            addr = ADDRW'(i);
                                             break;
                                         end
                                     end
@@ -228,18 +228,20 @@ module VX_lru_queue #(
                     end else begin
                         if (~push && ~pop ) begin // write or read on a load memory, PRE memory is on data_reg
                             // Set to first position ADDR of the read
-                            reg [ADDRW-1:0] ptr = DEPTH-1;
+                            /*
+			    reg [ADDRW-1:0] ptr;
                             for (integer i = 0; i < DEPTH; i = i + 1) begin
-                                if (data_reg[queue_ptr_reg[i]][DATAW-2:DATAW-1-`CS_LINE_ADDR_WIDTH] == data_in[DATAW-2:DATAW-1-`CS_LINE_ADDR_WIDTH]) begin
-                                    ptr = i;
+                                if (data_reg[queue_ptr_reg[i]] == data_in) begin
+                                    ptr = ADDRW'(i);
                                     break;
                                 end
                             end
                             // Move the respective positions
-                            for (integer i = ptr+1; i < used_n-1; i = i +1) begin
+                            for (integer i = integer'(ptr)+1; i < integer'(used_n)-1; i = i +1) begin
                                 queue_ptr_reg[i-1] <= queue_ptr_reg[i];
                             end
                             queue_ptr_reg[used_n-1] <= queue_ptr_reg[ptr];
+			    */
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
                                 if (pop) begin // insert the data were is going to pop
@@ -248,8 +250,8 @@ module VX_lru_queue #(
                                     reg [ADDRW-1:0] addr;
                                     for (integer i = 0; i < DEPTH; i = i + 1) begin
                                         if (~used_reg[i]) begin
-                                            used_reg[i] = 1;
-                                            addr = i;
+                                            used_reg[i] <= 1;
+                                            addr = ADDRW'(i);
                                             break;
                                         end
                                     end
