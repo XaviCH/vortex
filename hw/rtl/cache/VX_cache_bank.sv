@@ -486,7 +486,8 @@ module VX_cache_bank #(
         .DATAW    (1 + `CS_LINE_ADDR_WIDTH + MSHR_ADDR_WIDTH + WORD_SIZE + WORD_SEL_WIDTH + `CS_WORD_WIDTH), 
         .DEPTH    (MREQ_SIZE),
         .ALM_FULL (MREQ_SIZE-2),
-        .OUT_REG  (`TO_OUT_BUF_REG(MEM_OUT_BUF))
+        .OUT_REG  (`TO_OUT_BUF_REG(MEM_OUT_BUF)),
+	.LINE_ADDRW (`CS_LINE_ADDR_WIDTH)
     ) mem_req_queue (
         .clk        (clk),
         .reset      (mreq_reset),

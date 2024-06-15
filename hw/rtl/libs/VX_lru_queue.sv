@@ -22,7 +22,8 @@ module VX_lru_queue #(
     parameter ALM_EMPTY = 1,
     parameter OUT_REG   = 0,
     //parameter LUTRAM    = 1,
-    parameter SIZEW     = `CLOG2(DEPTH+1)
+    parameter SIZEW     = `CLOG2(DEPTH+1),
+    parameter LINE_ADDRW = 1
 ) ( 
     input  wire             clk,
     input  wire             reset,    
@@ -171,28 +172,35 @@ module VX_lru_queue #(
                         end
                     end else begin
                         if (~push && ~pop ) begin // write or read on a load memory, PRE memory is on data_reg
-                            /*
+				if (data_in[DATAW-2:DATAW-1-LINE_ADDRW] != LINE_ADDRW'(0)) begin
                             // Set to first position ADDR of the read
-			                reg [ADDRW-1:0] ptr;
+			                reg [ADDRW-1:0] ptr=ADDRW'(DEPTH);
                             for (integer i = 0; i < DEPTH; i = i + 1) begin
-                                if (data_reg[queue_ptr_reg[i]] == data_in) begin
+                                if (data_reg[queue_ptr_reg[i]][DATAW-2:DATAW-1-LINE_ADDRW] == data_in[DATAW-2:DATAW-1-LINE_ADDRW]) begin
                                     ptr = ADDRW'(i);
-                                    break;
-                                end
+				    break;
+			    //end else begin
+			    	//$display("%d: %h",i,data_reg[queue_ptr_reg[i]][DATAW-2:DATAW-1-LINE_ADDRW]);
+			    end
                             end
+			    //`ASSERT(ptr != ADDRW'(DEPTH), ("runtime error: Not found: %h",data_in[DATAW-2:DATAW-1-LINE_ADDRW]));
                             // Move the respective positions
-                            for (integer i = integer'(ptr)+1; i < integer'(used_n)-1; i = i +1) begin
-                                            queue_ptr_reg[i-1] <= queue_ptr_reg[i];
-                            end
+			    if (ptr != ADDRW'(DEPTH)) begin
+                            for (integer i = 0; i < DEPTH-1; i = i +1) begin
+				    if (ptr <= ADDRW'(i) && ADDRW'(i) < used_n-ADDRW'(1)) begin
+                                            queue_ptr_reg[i] <= queue_ptr_reg[i+1];
+				    end
+			    end
                             queue_ptr_reg[used_n-1] <= queue_ptr_reg[ptr];
-			                */
+		    end
+		    end
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
                                 if (pop) begin // insert the data were is going to pop
                                     if (used_n == ADDRW'(DEPTH)) begin
                                         data_reg[queue_ptr_reg[0]] <= data_in; 
                                     end else begin
-                                        data_reg[queue_ptr_reg[used_n-1]] <= data_in;
+                                        data_reg[queue_ptr_reg[used_n]] <= data_in;
                                     end
                                 end else begin // find a position were to store new data
                                     data_reg[queue_ptr_reg[used_n-1]] <= data_in;
@@ -226,28 +234,31 @@ module VX_lru_queue #(
                         end
                     end else begin
                         if (~push && ~pop ) begin // write or read on a load memory, PRE memory is on data_reg
-                            /*
+                            
                             // Set to first position ADDR of the read
-			                reg [ADDRW-1:0] ptr;
+			                reg [ADDRW-1:0] ptr = ADDRW'(DEPTH);
                             for (integer i = 0; i < DEPTH; i = i + 1) begin
-                                if (data_reg[queue_ptr_reg[i]] == data_in) begin
+                                if (data_reg[queue_ptr_reg[i]][DATAW-2:DATAW-1-LINE_ADDRW] == data_in[DATAW-2:DATAW-1-LINE_ADDRW]) begin
                                     ptr = ADDRW'(i);
                                     break;
                                 end
                             end
+			    `ASSERT(ptr != ADDRW'(DEPTH), ("runtime error: Not found"));
                             // Move the respective positions
-                            for (integer i = integer'(ptr)+1; i < integer'(used_n)-1; i = i +1) begin
-                                queue_ptr_reg[i-1] <= queue_ptr_reg[i];
+                            for (integer i = 0; i < DEPTH-1; i = i +1) begin
+				    if (ptr <= ADDRW'(i) && ADDRW'(i) < used_n-ADDRW'(1)) begin
+                                queue_ptr_reg[i] <= queue_ptr_reg[i+1];
+			        end
                             end
                             queue_ptr_reg[used_n-1] <= queue_ptr_reg[ptr];
-			                */
+			                
                         end else begin 
                             if (push) begin // put new data in first empty position, last if not found
                                 if (pop) begin // insert the data were is going to pop
                                     if (used_n == ADDRW'(DEPTH)) begin
                                         data_reg[queue_ptr_reg[0]] <= data_in; 
                                     end else begin
-                                        data_reg[queue_ptr_reg[used_n-1]] <= data_in;
+                                        data_reg[queue_ptr_reg[used_n]] <= data_in;
                                     end
                                 end else begin // find a position were to store new data
                                     data_reg[queue_ptr_reg[used_n-1]] <= data_in;
