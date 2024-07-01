@@ -1,7 +1,7 @@
 #include <math.h>
 #include <GLSC2/glsc2.h>
 #include "kernel.c" // TODO: may be interesting to extract it to an interface so could be re implementated with CUDA
-#include "binary.c"
+#include "binary.c" // TODO: maybe with extern
 
 #define NOT_IMPLEMENTED              \
     ({                               \
@@ -461,12 +461,12 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     void *gl_FragColor = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_fragments, NULL);
 
     // Set up kernels
+    printf("SetUp vertex");
     void* vertex_kernel = createVertexKernel(mode, first, count);
     setKernelArg(vertex_kernel,
         _programs[_current_program].active_attributes + _programs[_current_program].active_uniforms,
         sizeof(gl_Positions), &gl_Positions
     );
-
     setKernelArg(vertex_kernel,
         _programs[_current_program].active_attributes + _programs[_current_program].active_uniforms + 1,
         sizeof(gl_Primitives), &gl_Primitives
@@ -483,19 +483,19 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     void *rasterization_kernel;
     if (mode==GL_TRIANGLES) {
         rasterization_kernel = getRasterizationTriangleKernel(mode, first, count);
-        setKernelArg(rasterization_kernel, 4,
+        setKernelArg(rasterization_kernel, 3,
             sizeof(gl_FragCoord), &gl_Positions
         );
-        setKernelArg(rasterization_kernel, 5,
+        setKernelArg(rasterization_kernel, 4,
             sizeof(gl_Primitives), &gl_Primitives
         );
-        setKernelArg(rasterization_kernel, 6,
+        setKernelArg(rasterization_kernel, 5,
             sizeof(gl_FragCoord), &gl_FragCoord
         );
-        setKernelArg(rasterization_kernel, 7,
+        setKernelArg(rasterization_kernel, 6,
             sizeof(gl_Rasterization), &gl_Rasterization
         );
-        setKernelArg(rasterization_kernel, 8,
+        setKernelArg(rasterization_kernel, 7,
             sizeof(gl_Discard), &gl_Discard
         );
     } else NOT_IMPLEMENTED;
@@ -1084,10 +1084,10 @@ void* getRasterizationTriangleKernel(GLenum mode, GLint first, GLsizei count) {
     setKernelArg(kernel, 1,
         sizeof(COLOR_ATTACHMENT0.width), &COLOR_ATTACHMENT0.width
     );
+//    setKernelArg(kernel, 2,
+//        sizeof(COLOR_ATTACHMENT0.height), &COLOR_ATTACHMENT0.height
+//    );
     setKernelArg(kernel, 2,
-        sizeof(COLOR_ATTACHMENT0.height), &COLOR_ATTACHMENT0.height
-    );
-    setKernelArg(kernel, 3,
         sizeof(_programs[_current_program].active_attributes), &_programs[_current_program].active_attributes
     );
 

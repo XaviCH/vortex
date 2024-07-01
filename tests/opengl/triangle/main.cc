@@ -62,8 +62,8 @@ int main() {
   GLuint vbo, program;
 
   // TODO: linker issue
-  cl_platform_id platform_id;
-  clGetPlatformIDs(1, &platform_id, NULL);
+  // cl_platform_id platform_id;
+  // clGetPlatformIDs(1, &platform_id, NULL);
 
   // Set up context
   createContext(&context, WIDTH, HEIGHT);
