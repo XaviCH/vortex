@@ -108,10 +108,15 @@ void enqueueReadBuffer(void* command_queue, void* buffer, size_t bufSize, void* 
     clEnqueueReadBuffer(command_queue, (cl_mem) buffer, CL_TRUE, 0, bufSize, data, 0, NULL, NULL);
 }
 
-void enqueueWriteBuffer(void* command_queue, void* buffer, size_t size, const void* ptr) {
 
-    clEnqueueWriteBuffer(command_queue, buffer, CL_TRUE, 0, size, ptr, 0, NULL, NULL);
-}
+#define enqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr) (                       \
+    _err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr, 0, NULL, NULL)      \
+    )
+
+// void enqueueWriteBuffer(void* command_queue, void* buffer, size_t size, const void* ptr) {
+// 
+//     clEnqueueWriteBuffer(command_queue, buffer, CL_TRUE, 0, size, ptr, 0, NULL, NULL);
+// }
 
 
 
