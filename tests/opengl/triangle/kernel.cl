@@ -1,22 +1,21 @@
 
-__kernel void main_vs (
+kernel void main_vs (
   // uniforms
-
   // in attributes
-  constant float4 *positions,
-  constant float4 *in_color,
+  global const float4 *positions,
+  global const float4 *in_color,
   // out attributes
   global float4 *out_color,
   // GL required args
-  global float4 *gl_Positions
+  global float4 *gl_Position
 ) {
   int gid = get_global_id(0);
 
-  gl_Positions[gid] = positions[gid];
+  gl_Position[gid] = positions[gid];
   out_color[gid] = in_color[gid];
 }
 
-__kernel void main_fs (
+kernel void main_fs (
   // uniforms
 
   // in attributes
@@ -29,6 +28,6 @@ __kernel void main_fs (
 )
 {
   int gid = get_global_id(0);
-
+  
   gl_FragColor[gid] = out_color[gid];// out_color[gid];
 }
