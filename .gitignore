@@ -1,2 +1,11 @@
 
 /.vscode
+*.dump
+*.o
+*.cache
+*.a
+*.so
+*.bin
+*.elf
+*.depend
+*.pocl
