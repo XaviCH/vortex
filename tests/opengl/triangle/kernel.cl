@@ -2,7 +2,7 @@
 kernel void main_vs (
   // uniforms
   // in attributes
-  global const float4 *positions,
+  global const float4 *position,
   global const float4 *in_color,
   // out attributes
   global float4 *out_color,
@@ -11,7 +11,7 @@ kernel void main_vs (
 ) {
   int gid = get_global_id(0);
 
-  gl_Position[gid] = positions[gid];
+  gl_Position[gid] = position[gid];
   out_color[gid] = in_color[gid];
 }
 

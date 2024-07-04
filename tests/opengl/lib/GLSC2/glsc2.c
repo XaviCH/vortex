@@ -807,7 +807,13 @@ GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures) {
 }
 
 GL_APICALL GLint GL_APIENTRY glGetAttribLocation (GLuint program, const GLchar *name) {
-    NOT_IMPLEMENTED;
+    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
+    
+    for(size_t attrib=0; attrib<CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
+        if (strcmp(name, CURRENT_PROGRAM.vertex_attribs_data[attrib].name) == 0) return attrib;
+    }
+
+    return -1;
 }
 
 GL_APICALL void GL_APIENTRY glGetBooleanv (GLenum pname, GLboolean *data) {
