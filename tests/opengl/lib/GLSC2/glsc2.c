@@ -1,4 +1,5 @@
 #include <math.h>
+#include <string.h>
 #include <GLSC2/glsc2.h>
 #include "kernel.c" // TODO: may be interesting to extract it to an interface so could be re implementated with CUDA
 #include "binary.c" // TODO: maybe with extern
@@ -7,7 +8,7 @@
 
 #define NOT_IMPLEMENTED              \
     ({                               \
-        printf("NOT_IMPLEMENTED\n"); \
+        printf("NOT_IMPLEMENTED: %s:%d\n", __FILE__, __LINE__); \
         exit(0);                     \
     })
 
@@ -42,11 +43,17 @@ GLenum gl_error = 0;
 #define VIEWPORT_DIVISION_SHADER_FNAME "gl_viewport_division"
 #define FRAGMENT_SHADER_FNAME "main_fs"
 
+#define POCL_BINARY 0x0
+
 // OpenGL required definitions
 #define MAX_VERTEX_ATTRIBS 16
 #define MAX_VERTEX_UNIFORM_VECTORS sizeof(float[4])     // atMost MAX_UNIFORM_VECTORS
 #define MAX_FRAGMENT_UNIFORM_VECTORS sizeof(float[4])   // atMost MAX_UNIFORM_VECTORS
 
+#define GL_POSITION "gl_Position"
+#define GL_FRAGCOLOR "gl_FragColor"
+#define GL_FRAGCOORD "gl_FragCoord"
+#define GL_DISCARD "gl_Discard"
 
 /****** DTO objects ******\
  * TODO: externalize to could be imported from kernel cl programs
@@ -104,11 +111,11 @@ vertex_attrib_u   _vertex_attribs[MAX_VERTEX_ATTRIBS];
 
 
 #define PROGRAM_LOG_SIZE 256
-#define ARG_NAME_SIZE 256
+#define ARG_NAME_SIZE 128
 #define MAX_VARYING 16
 
 typedef struct {
-    unsigned int location, size, type;
+    unsigned int vertex_location, fragment_location, size, type;
     unsigned char name[ARG_NAME_SIZE]; 
 } arg_data_t;
 
@@ -127,7 +134,6 @@ typedef struct {
     // Kernel data
     cl_kernel               vertex_kernel;
     cl_kernel               fragment_kernel;
-    unsigned int            varying_size; // out - in connections TODO: now is expected to be provided in the same order
     // Uniform data
     unsigned int            active_uniforms;
     arg_data_t              uniforms_data[MAX_UNIFORM_SIZE];
@@ -136,6 +142,14 @@ typedef struct {
     // Vertex data
     unsigned int            active_vertex_attribs;
     arg_data_t              vertex_attribs_data[MAX_VERTEX_ATTRIBS];
+    unsigned int            gl_position_location;
+    // Varying data
+    unsigned int            varying_size;
+    arg_data_t              varying_data[16];
+    // Fragment data
+    unsigned int            gl_fragcolor_location;
+    int                     gl_fragcoord_location;
+    int                     gl_discard_location;
 } program_t;
 
 unsigned int            _current_program;
@@ -273,6 +287,8 @@ STENCIL_MASK _stencil_mask = {1, 1};
 */
 void* getCommandQueue();
 
+unsigned int size_from_name_type(const char*);
+unsigned int type_from_name_type(const char*);
 
 cl_kernel getDepthKernel();
 cl_kernel getColorKernel();
@@ -297,6 +313,9 @@ unsigned int sizeof_type(GLenum type) {
  * 
  * 
 */
+GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) {
+    NOT_IMPLEMENTED;
+}
 
 GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) {
     if (!_buffers[buffer].used) {
@@ -308,8 +327,6 @@ GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) {
     _buffers[buffer].target = target;
 }
 GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) {
-    printf("glBindFramebuffer(framebuffer: %d)\n", framebuffer);
-
     if (!_framebuffers[framebuffer].used) {
         _err = GL_INVALID_OPERATION;
         return;
@@ -337,24 +354,21 @@ GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) {
     }
 }
 
-GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
-
-    if (internalformat == GL_RGBA4) {
-        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*2, NULL);
-    } else if (internalformat == GL_DEPTH_COMPONENT16) {
-        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*2, NULL);
-    } else if (internalformat == GL_STENCIL_INDEX8) {
-        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*1, NULL);
-    } else {
-        printf("NOT IMPLEMENTED\n");
-        exit(0);
-    }
-    _renderbuffers[_renderbuffer_binding].internalformat = internalformat;
-    _renderbuffers[_renderbuffer_binding].width = width;
-    _renderbuffers[_renderbuffer_binding].height = height;
-    
+GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
+    NOT_IMPLEMENTED;
 }
-
+GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode) {
+    NOT_IMPLEMENTED;
+}
+GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha) {
+    NOT_IMPLEMENTED;
+}
+GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) {
+    NOT_IMPLEMENTED;
+}
+GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) {
+    NOT_IMPLEMENTED;
+}
 
 GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
 
@@ -366,6 +380,10 @@ GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const 
             _buffers[_buffer_binding].mem = createBuffer(MEM_READ_WRITE | MEM_COPY_HOST_PTR, size, data);
         }
     }
+}
+
+GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
+    NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
@@ -420,6 +438,7 @@ GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat bl
         pixel_size = sizeof(uint8_t[2]);
     } else RETURN_ERROR(GL_INVALID_OPERATION);
     
+    // TODO: Use the default cl implementation
     enqueueFillBuffer(getCommandQueue(), COLOR_ATTACHMENT0.mem, &pattern, 4, 0, COLOR_ATTACHMENT0.width*COLOR_ATTACHMENT0.height*pixel_size);
 }
 
@@ -454,6 +473,10 @@ GL_APICALL void GL_APIENTRY glColorMask (GLboolean red, GLboolean green, GLboole
     _color_mask.alpha = alpha;
 }
 
+GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data) {
+    NOT_IMPLEMENTED;
+}
+
 GL_APICALL GLuint GL_APIENTRY glCreateProgram (void){
     static GLuint program = 1; // Pointer to the next available program.
 
@@ -462,6 +485,10 @@ GL_APICALL GLuint GL_APIENTRY glCreateProgram (void){
     // TODO: Checkout documentation about this behaviour
     printf("No more programs available.\n");
     exit(program);
+}
+
+GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) {
+    NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) {
@@ -473,16 +500,29 @@ GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) {
 }
 
 GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) {
-    _depth_range.n=n;
-    _depth_range.f=f;
+    _depth_range = (DEPTH_RANGE) {.n=n, .f=f};
 }
 
-/**
- * TODO: first is expected to be 0
-*/
+GL_APICALL void GL_APIENTRY glDisable (GLenum cap) {
+    if (cap == GL_SCISSOR_TEST)
+        _scissor_enabled = 0;
+    else if (cap == GL_DEPTH_TEST)
+        _depth_enabled = 0;
+    else if (cap == GL_STENCIL_TEST)
+        _stencil_enabled = 0;
+    else RETURN_ERROR(GL_INVALID_ENUM);
+}
+
+GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) {
+    if (index >= GL_MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
+
+    _vertex_attrib_enable[index] = 0;
+}
+
 GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) {
     if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
     if (first <0) RETURN_ERROR(GL_INVALID_VALUE);
+    if (first != 0) NOT_IMPLEMENTED;
     /* ---- General vars ---- */
     cl_int tmp_err; 
     cl_buffer_region region;
@@ -499,7 +539,6 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     cl_mem vertex_array_mem[MAX_VERTEX_ATTRIBS];
     cl_mem temp_mem[MAX_VERTEX_ATTRIBS];
 
-    printf("Dta --- %i\n", CURRENT_PROGRAM.active_vertex_attribs);
     for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
 
         if (_vertex_attrib_enable[attrib]) {
@@ -535,17 +574,19 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     cl_kernel vertex_kernel = CURRENT_PROGRAM.vertex_kernel;
 
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        setKernelArg(vertex_kernel, 
-            CURRENT_PROGRAM.uniforms_data[uniform].location, 
-            sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
-            &CURRENT_PROGRAM.uniforms_mem[uniform]
-        );
+        if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
+            setKernelArg(vertex_kernel, 
+                CURRENT_PROGRAM.uniforms_data[uniform].vertex_location, 
+                sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
+                &CURRENT_PROGRAM.uniforms_mem[uniform]
+            );
+        }
     }
     for(int attrib = 0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
         if (_vertex_attrib_state[attrib] == VEC4) {
-            setKernelArg(vertex_kernel, CURRENT_PROGRAM.active_uniforms + attrib, sizeof(vertex_attrib_t), &_vertex_attrib[attrib]);
+            setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(vertex_attrib_t), &_vertex_attrib[attrib]);
         } else {
-            setKernelArg(vertex_kernel, CURRENT_PROGRAM.active_uniforms + attrib, sizeof(cl_mem), &vertex_array_mem[attrib]);
+            setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(cl_mem), &vertex_array_mem[attrib]);
         }
     }
 
@@ -556,9 +597,9 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     for(int out=0; out < CURRENT_PROGRAM.varying_size; ++out) {
         region.origin = sizeof(float[4])*num_vertices*out;
         cl_mem subbuffer = clCreateSubBuffer(vertex_out_buffer,CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &tmp_err);
-        setKernelArg(vertex_kernel, vertex_out_location++, sizeof(cl_mem), &subbuffer);
+        setKernelArg(vertex_kernel, CURRENT_PROGRAM.varying_data[out].vertex_location, sizeof(cl_mem), &subbuffer);
     }
-    setKernelArg(vertex_kernel,vertex_out_location, sizeof(gl_Positions), &gl_Positions);
+    setKernelArg(vertex_kernel, CURRENT_PROGRAM.gl_position_location, sizeof(gl_Positions), &gl_Positions);
 
     // Perspective Division Kernel Set Up
     setKernelArg(_perspective_division_kernel, 0, sizeof(gl_Positions), &gl_Positions);
@@ -593,11 +634,13 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     // Fragment Kernel Set Up
     fragment_kernel = CURRENT_PROGRAM.fragment_kernel;
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        setKernelArg(fragment_kernel, 
-            CURRENT_PROGRAM.uniforms_data[uniform].location, 
-            sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
-            &CURRENT_PROGRAM.uniforms_mem[uniform]
-        );
+        if (CURRENT_PROGRAM.uniforms_data[uniform].fragment_location != -1) {
+            setKernelArg(fragment_kernel, 
+                CURRENT_PROGRAM.uniforms_data[uniform].fragment_location, 
+                sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
+                &CURRENT_PROGRAM.uniforms_mem[uniform]
+            );
+        }
     }
 
     // Texture vars
@@ -609,13 +652,15 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     for(int in=0; in < CURRENT_PROGRAM.varying_size; ++in) {
         region.origin = sizeof(float[4])*num_fragments*in;
         cl_mem subbuffer = clCreateSubBuffer(fragment_in_buffer,CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &tmp_err);
-        setKernelArg(fragment_kernel, fragment_in_out_location++, sizeof(cl_mem), &subbuffer);
+        setKernelArg(fragment_kernel, CURRENT_PROGRAM.varying_data[in].fragment_location, sizeof(cl_mem), &subbuffer);
     }
     // Required fragment args
-    setKernelArg(fragment_kernel, fragment_in_out_location++, sizeof(gl_FragColor), &gl_FragColor);
+    setKernelArg(fragment_kernel, CURRENT_PROGRAM.gl_fragcolor_location, sizeof(gl_FragColor), &gl_FragColor);
     // Optional fragment args
-    setKernelArg(fragment_kernel, fragment_in_out_location++, sizeof(gl_FragCoord), &gl_FragCoord);
-    setKernelArg(fragment_kernel, fragment_in_out_location++, sizeof(gl_Discard),   &gl_Discard);
+    if (CURRENT_PROGRAM.gl_fragcoord_location) 
+        setKernelArg(fragment_kernel, CURRENT_PROGRAM.gl_fragcoord_location, sizeof(gl_FragCoord), &gl_FragCoord);
+    if (CURRENT_PROGRAM.gl_discard_location) 
+        setKernelArg(fragment_kernel, CURRENT_PROGRAM.gl_discard_location, sizeof(gl_Discard),   &gl_Discard);
     
     // Depth Kernel Set Up
     cl_kernel depth_kernel = NULL;
@@ -651,22 +696,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     }
 }
 
-GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {}
-
-GL_APICALL void GL_APIENTRY glDisable (GLenum cap) {
-    if (cap == GL_SCISSOR_TEST)
-        _scissor_enabled = 0;
-    else if (cap == GL_DEPTH_TEST)
-        _depth_enabled = 0;
-    else if (cap == GL_STENCIL_TEST)
-        _stencil_enabled = 0;
-    else RETURN_ERROR(GL_INVALID_ENUM);
-}
-
-GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) {
-    if (index >= GL_MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
-
-    _vertex_attrib_enable[index] = 0;
+GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+    NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
@@ -687,6 +718,11 @@ GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index) {
 
 GL_APICALL void GL_APIENTRY glFinish (void) {
     finish(getCommandQueue());
+    // TODO: Checkout multiqueuing
+}
+
+GL_APICALL void GL_APIENTRY glFlush (void) {
+    clFlush(getCommandQueue());
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {
@@ -698,6 +734,13 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum att
         _framebuffers[_framebuffer_binding].stencil_attachment=renderbuffer;
 }
 
+GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glFrontFace (GLenum mode) {
+    NOT_IMPLEMENTED;
+}
 
 GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers) {
     GLuint _id = 1; // _id = 0 is reserved for ARRAY_BUFFER
@@ -712,6 +755,10 @@ GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers) {
         }
         _id += 1;
     }
+}
+
+GL_APICALL void GL_APIENTRY glGenerateMipmap (GLenum target) {
+    NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glGenFramebuffers (GLsizei n, GLuint *framebuffers) {
@@ -759,23 +806,104 @@ GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures) {
     }
 }
 
+GL_APICALL GLint GL_APIENTRY glGetAttribLocation (GLuint program, const GLchar *name) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetBooleanv (GLenum pname, GLboolean *data) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetBufferParameteriv (GLenum target, GLenum pname, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
 GL_APICALL GLenum GL_APIENTRY glGetError (void) {
     GLenum error = gl_error;
     gl_error = GL_NO_ERROR;
     return error;
 }
 
-// TODO:
-GL_APICALL GLenum GL_APIENTRY glGetGraphicsResetStatus (void) {
-
-    return GL_NO_ERROR;
+GL_APICALL void GL_APIENTRY glGetFloatv (GLenum pname, GLfloat *data) {
+    NOT_IMPLEMENTED;
 }
 
-#define POCL_BINARY 0x0
+GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv (GLenum target, GLenum attachment, GLenum pname, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
+// TODO:
+GL_APICALL GLenum GL_APIENTRY glGetGraphicsResetStatus (void) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetProgramiv (GLuint program, GLenum pname, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv (GLenum target, GLenum pname, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL const GLubyte *GL_APIENTRY glGetString (GLenum name) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetTexParameterfv (GLenum target, GLenum pname, GLfloat *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetTexParameteriv (GLenum target, GLenum pname, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetnUniformfv (GLuint program, GLint location, GLsizei bufSize, GLfloat *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetnUniformiv (GLuint program, GLint location, GLsizei bufSize, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL GLint GL_APIENTRY glGetUniformLocation (GLuint program, const GLchar *name) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetVertexAttribfv (GLuint index, GLenum pname, GLfloat *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetVertexAttribiv (GLuint index, GLenum pname, GLint *params) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glGetVertexAttribPointerv (GLuint index, GLenum pname, void **pointer) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) {
+    NOT_IMPLEMENTED;
+}
 
 GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length){
     printf("glProgramBinary() program=%d, binaryFormat=%d\n",program,binaryFormat);
-    if(!_kernel_load_status) {
+    if(!_kernel_load_status) { // TODO: maybe on a __constructor__ function??
         void *gl_program;
 
         gl_program = createProgramWithBinary(GLSC2_kernel_depth_pocl, sizeof(GLSC2_kernel_depth_pocl));
@@ -819,31 +947,154 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         _programs[program].fragment_kernel          = createKernel(_programs[program].program, FRAGMENT_SHADER_FNAME);
 
         cl_uint kernel_num_args;
-        clGetKernelInfo(_programs[program].vertex_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_num_args, NULL);
 
+        clGetKernelInfo(_programs[program].vertex_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_num_args, NULL);
+        
         for(cl_uint arg=0; arg < kernel_num_args; ++arg) {
             cl_kernel_arg_address_qualifier addr_qualifier;
             cl_kernel_arg_type_qualifier type_qualifier;
-            char name[128];
+            cl_kernel_arg_access_qualifier access_qualifier;
+            char name[ARG_NAME_SIZE];
+            char type_name[32];
+            uint32_t size, type;
 
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_ADDRESS_QUALIFIER,  sizeof(addr_qualifier), &addr_qualifier,    NULL);
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_TYPE_QUALIFIER,     sizeof(type_qualifier), &type_qualifier,    NULL);
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_NAME,               sizeof(name),           &name,              NULL);
+            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_ADDRESS_QUALIFIER,  sizeof(addr_qualifier),     &addr_qualifier,    NULL);
+            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_TYPE_QUALIFIER,     sizeof(type_qualifier),     &type_qualifier,    NULL);
+            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_ACCESS_QUALIFIER,   sizeof(access_qualifier),   &access_qualifier,  NULL);
+            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_NAME,               sizeof(name),               &name,              NULL);
+            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_TYPE_NAME,          sizeof(type_name),          &type_name,         NULL);
+            size = size_from_name_type(type_name);
+            type = type_from_name_type(type_name);
 
-            if (strncmp("gl_Position", name, sizeof("gl_Position")) == 0) continue;
+            printf("name=%s type=%s size=%d type=%x addr_q=%x type_q=%x\n",name, type_name, size, type, addr_qualifier, type_qualifier);
 
-            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT) { // UNIFORM
+            if (strncmp(GL_POSITION, name, sizeof(GL_POSITION)) == 0) {
+                _programs[program].gl_position_location = arg;
+                continue;
+            };
+
+            arg_data_t *arg_data;
+
+            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT) {
+                arg_data = _programs[program].uniforms_data + _programs[program].active_uniforms;
+                _programs[program].uniforms_mem[_programs[program].active_uniforms] = createBuffer(CL_MEM_READ_ONLY, sizeof_type(type)*size, NULL);
+                _programs[program].uniforms_array_size[_programs[program].active_uniforms] = 1; // TODO: Not supported more than one
                 _programs[program].active_uniforms += 1;
-            } else if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_CONST) { // IN attrib pointer
+            } else if (type == GL_FLOAT && (
+                       addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_CONST
+                    || addr_qualifier == CL_KERNEL_ARG_ADDRESS_PRIVATE)) {
+                arg_data = _programs[program].vertex_attribs_data + _programs[program].active_vertex_attribs;
                 _programs[program].active_vertex_attribs += 1;
-            } else if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_NONE) { // VARYING attrib pointer
+            } else if (type == GL_FLOAT 
+                    && addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL 
+                    && type_qualifier == CL_KERNEL_ARG_TYPE_NONE) {
+                arg_data = _programs[program].varying_data + _programs[program].varying_size;
                 _programs[program].varying_size += 1;
-            } else if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_PRIVATE) { // IN attrib
-                _programs[program].active_vertex_attribs += 1;
+            } else {
+                _programs[program].last_load_attempt = GL_FALSE;
+                strcpy(_programs[program].log, "Failed load attempt");
+                return;
             }
 
+            *arg_data = (arg_data_t) {
+                .vertex_location    = arg,
+                .fragment_location  = -1,
+                .size               = size,
+                .type               = type, 
+            };
+            strcpy(&arg_data->name, &name);
+            printf("names: %s\n", arg_data->name); 
         }
-    }
+
+        clGetKernelInfo(_programs[program].fragment_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_num_args, NULL);
+        printf("kernel args frag: %d", kernel_num_args);
+        for(cl_uint arg=0; arg < kernel_num_args; ++arg) {
+            cl_kernel_arg_address_qualifier addr_qualifier;
+            cl_kernel_arg_type_qualifier type_qualifier;
+            cl_kernel_arg_access_qualifier access_qualifier;
+            char name[ARG_NAME_SIZE];
+            char type_name[32];
+            uint32_t size, type;
+
+            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_ADDRESS_QUALIFIER,  sizeof(addr_qualifier),     &addr_qualifier,    NULL);
+            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_TYPE_QUALIFIER,     sizeof(type_qualifier),     &type_qualifier,    NULL);
+            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_ACCESS_QUALIFIER,   sizeof(access_qualifier),   &access_qualifier,  NULL);
+            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_NAME,               sizeof(name),               &name,              NULL);
+            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_TYPE_NAME,          sizeof(type_name),          &type_name,         NULL);
+            size = size_from_name_type(type_name);
+            type = type_from_name_type(type_name);
+
+            printf("name=%s type=%s size=%d type=%x addr_q=%x type_q=%x\n",name, type_name, size, type, addr_qualifier, type_qualifier);
+
+            if (strcmp(GL_FRAGCOLOR, name) == 0) {
+                _programs[program].gl_fragcolor_location = arg;
+                continue;
+            };
+            if (strcmp(GL_FRAGCOORD, name) == 0) {
+                _programs[program].gl_fragcoord_location = arg;
+                continue;
+            };
+            if (strcmp(GL_DISCARD, name) == 0) {
+                _programs[program].gl_discard_location = arg;
+                continue;
+            };
+
+            arg_data_t *arg_data;
+            int exist = 0;
+            
+            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT) {
+                int find = -1;
+                for(int uniform; _programs[program].active_uniforms; ++uniform) {
+                    if (strcmp(name, _programs[program].uniforms_data[uniform].name) == 0) {
+                        find = uniform;
+                        break;
+                    }
+                }
+                if (find == -1) {
+                    arg_data = _programs[program].uniforms_data + _programs[program].active_uniforms;
+                    _programs[program].uniforms_mem[_programs[program].active_uniforms] = createBuffer(CL_MEM_READ_ONLY, sizeof_type(type)*size, NULL);
+                    _programs[program].uniforms_array_size[_programs[program].active_uniforms] = 1; // TODO: Not supported more than one
+                    _programs[program].active_uniforms += 1;
+                } else {
+                    arg_data = _programs[program].uniforms_data + find; 
+                    exist = 1;                   
+                    // TODO: type checker
+                }
+            } else if (type == GL_FLOAT && addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_CONST) {
+                int find = -1;
+                for(int varying=0; varying <_programs[program].varying_size; ++varying) {
+                    if (strcmp(name, _programs[program].varying_data[varying].name) == 0) {
+                        find = varying;
+                        break;
+                    }
+                }
+                if (find == -1) {
+                    _programs[program].last_load_attempt = GL_FALSE;
+                    strcpy(_programs[program].log, "Failed load attempt");
+                    return;
+                }
+                arg_data = _programs[program].varying_data + find;
+                exist = 1;
+            } else {
+                _programs[program].last_load_attempt = GL_FALSE;
+                strcpy(_programs[program].log, "Failed load attempt");
+                return;
+            }
+
+            if (exist) {
+                arg_data->fragment_location = arg;
+            } else {
+                *arg_data = (arg_data_t) {
+                    .vertex_location    = -1,
+                    .fragment_location  = arg,
+                    .size               = size,
+                    .type               = type, 
+                };
+                strcpy(arg_data->name, name); 
+            }
+        }
+    } else NOT_IMPLEMENTED;
+
 }
 
 GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, void *data) {
@@ -868,6 +1119,27 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
     }
 }
 
+GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
+
+    if (internalformat == GL_RGBA4) {
+        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*2, NULL);
+    } else if (internalformat == GL_DEPTH_COMPONENT16) {
+        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*2, NULL);
+    } else if (internalformat == GL_STENCIL_INDEX8) {
+        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*1, NULL);
+    } else {
+        printf("NOT IMPLEMENTED\n");
+        exit(0);
+    }
+    _renderbuffers[_renderbuffer_binding].internalformat = internalformat;
+    _renderbuffers[_renderbuffer_binding].width = width;
+    _renderbuffers[_renderbuffer_binding].height = height;
+}
+
+GL_APICALL void GL_APIENTRY glSampleCoverage (GLfloat value, GLboolean invert) {
+    NOT_IMPLEMENTED;
+}
+
 GL_APICALL void GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei height) {
     if (width < 0 || height < 0) {
         _err = GL_INVALID_VALUE;
@@ -879,10 +1151,19 @@ GL_APICALL void GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei 
     _scissor_box.height = height;
 }
 
+GL_APICALL void GL_APIENTRY glStencilFunc (GLenum func, GLint ref, GLuint mask) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLint ref, GLuint mask) {
+    NOT_IMPLEMENTED;
+}
+
 GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask) {
     _stencil_mask.front = mask;
     _stencil_mask.back = mask;
 }
+
 GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask) {
     if (GL_FRONT == face) 
         _stencil_mask.front = mask;
@@ -892,6 +1173,14 @@ GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask) {
         _stencil_mask.front = mask;
         _stencil_mask.back = mask;
     }
+}
+
+GL_APICALL void GL_APIENTRY glStencilOp (GLenum fail, GLenum zfail, GLenum zpass) {
+    NOT_IMPLEMENTED;
+}
+
+GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
+    NOT_IMPLEMENTED;
 }
 
 #define max(a, b) (a >= b ? a : b)
@@ -993,24 +1282,19 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
 }
 
 GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) {
-    if (target != GL_TEXTURE_2D) return; // Unknown behaviour
     NOT_IMPLEMENTED;
 }
 GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params) {
-    if (target != GL_TEXTURE_2D) return; // Unknown behaviour
     NOT_IMPLEMENTED;
 }
 GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) {
-    if (target != GL_TEXTURE_2D) return; // Unknown behaviour
     NOT_IMPLEMENTED;
 }
 GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params) {
-    if (target != GL_TEXTURE_2D) return; // Unknown behaviour
     NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) {
-    if (target != GL_TEXTURE_2D) return; // Unknown behaviour
     
     if (level < 0 || level > (int) log2f(max(_textures[_texture_binding].width,_textures[_texture_binding].height)))
         RETURN_ERROR(GL_INVALID_VALUE);
@@ -1042,9 +1326,6 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
     enqueueWriteImage(getCommandQueue(), _textures[_texture_binding].mem, &origin, &region, pixel_size*width, 0, pixels);
     #endif
 }
-
-#define UMAT4 0x0;
-#define GL_BOOL 0x1407 // TODO: Better way to define it 
 
 #define ERROR_CHECKER(_COUNT, _SIZE, _TYPE) ({                                                                          \
     if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);                                                          \
@@ -1136,15 +1417,9 @@ GL_APICALL void GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, G
 }
 
 GL_APICALL void GL_APIENTRY glUseProgram (GLuint program){
-    printf("glUseProgram() program=%d\n", program);
-    if (program) {
-        if (!_programs[program].last_load_attempt){
-            printf("\tERROR last_load_attempt=%d\n", _programs[program].last_load_attempt);
-
-            RETURN_ERROR(GL_INVALID_OPERATION);
-        }
-        // TODO install program
-    }
+    if (program && _programs[program].last_load_attempt == GL_FALSE) 
+        RETURN_ERROR(GL_INVALID_OPERATION); // TODO: Check if this emits the error or draw function has to
+    
     _current_program=program;
 }
 
@@ -1233,5 +1508,33 @@ cl_kernel getColorKernel() {
             return _color_kernel.rgba4;
         // TODO: add all cases
     }
+    NOT_IMPLEMENTED;
+}
+
+unsigned int size_from_name_type(const char* name_type) {
+    #define RETURN_IF_SIZE_FROM(_TYPE)                              \
+        if (strncmp(name_type, _TYPE, sizeof(_TYPE) - 1) == 0) {    \
+            substr_size = name_type + sizeof(_TYPE) - 1;            \
+            if (*substr_size == '\0') return 1;                     \
+            return atoi(substr_size);                               \
+        }
+
+    const char* substr_size;
+    RETURN_IF_SIZE_FROM("float");
+    RETURN_IF_SIZE_FROM("int");
+    RETURN_IF_SIZE_FROM("short");
+    RETURN_IF_SIZE_FROM("char");
+    RETURN_IF_SIZE_FROM("bool");
+    printf("%s\n", name_type);
+    NOT_IMPLEMENTED;
+
+    #undef RETURN_IF_SIZE_FROM
+}
+unsigned int type_from_name_type(const char* name_type) {
+    if (strncmp(name_type, "float",  sizeof("float") -1)  == 0) return GL_FLOAT;
+    if (strncmp(name_type, "int",    sizeof("int")   -1)  == 0) return GL_INT;
+    if (strncmp(name_type, "short",  sizeof("short") -1)  == 0) return GL_SHORT;
+    if (strncmp(name_type, "char",   sizeof("char")  -1)  == 0) return GL_BYTE;
+    if (strncmp(name_type, "bool",   sizeof("bool")  -1)  == 0) return GL_BYTE;
     NOT_IMPLEMENTED;
 }
