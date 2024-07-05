@@ -47,8 +47,9 @@ GLenum gl_error = 0;
 
 // OpenGL required definitions
 #define MAX_VERTEX_ATTRIBS 16
-#define MAX_VERTEX_UNIFORM_VECTORS sizeof(float[4])     // atMost MAX_UNIFORM_VECTORS
-#define MAX_FRAGMENT_UNIFORM_VECTORS sizeof(float[4])   // atMost MAX_UNIFORM_VECTORS
+#define MAX_VERTEX_UNIFORM_VECTORS sizeof(float[4])         // atMost MAX_UNIFORM_VECTORS
+#define MAX_FRAGMENT_UNIFORM_VECTORS sizeof(float[4])       // atMost MAX_UNIFORM_VECTORS
+#define MAX_RENDERBUFFER_SIZE sizeof(uint16_t[1920][1080])  // TODO: Maybe another number
 
 #define GL_POSITION "gl_Position"
 #define GL_FRAGCOLOR "gl_FragColor"
@@ -872,7 +873,13 @@ GL_APICALL void GL_APIENTRY glGetnUniformiv (GLuint program, GLint location, GLs
 }
 
 GL_APICALL GLint GL_APIENTRY glGetUniformLocation (GLuint program, const GLchar *name) {
-    NOT_IMPLEMENTED;
+    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
+    
+    for(size_t uniform=0; uniform<CURRENT_PROGRAM.active_uniforms; ++uniform) {
+        if (strcmp(name, CURRENT_PROGRAM.uniforms_data[uniform].name) == 0) return uniform;
+    }
+
+    return -1;
 }
 
 GL_APICALL void GL_APIENTRY glGetVertexAttribfv (GLuint index, GLenum pname, GLfloat *params) {
@@ -907,34 +914,97 @@ GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) {
     NOT_IMPLEMENTED;
 }
 
+#ifdef HOSTGPU
+#include "common.h"
+
+#define PATH_OF(_FILE) "/home/xavier/repositories/vortex/tests/opengl/lib/GLSC2/" _FILE
+#endif
+
 GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length){
     printf("glProgramBinary() program=%d, binaryFormat=%d\n",program,binaryFormat);
     if(!_kernel_load_status) { // TODO: maybe on a __constructor__ function??
-        void *gl_program;
+        cl_program gl_program;
 
+        #ifdef HOSTGPU
+        file_t file;
+        cl_int error;
+        #endif
+
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.depth.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_depth_pocl, sizeof(GLSC2_kernel_depth_pocl));
+        #endif
         buildProgram(gl_program);
         _depth_kernel.less = createKernel(gl_program, "gl_less");
 
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.color.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_color_pocl, sizeof(GLSC2_kernel_color_pocl));
+        #endif
         buildProgram(gl_program);
         _color_kernel.rgba4 = createKernel(gl_program, "gl_rgba4");
         _color_kernel.rgba8 = createKernel(gl_program, "gl_rgba8");
 
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.rasterization.triangle.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_rasterization_triangle_pocl, sizeof(GLSC2_kernel_rasterization_triangle_pocl));
+        #endif
         buildProgram(gl_program);
         _rasterization_kernels.triangles = createKernel(gl_program, "gl_rasterization_triangle");
+
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.viewport_division.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_viewport_division_pocl, sizeof(GLSC2_kernel_viewport_division_pocl));
+        #endif
         buildProgram(gl_program);
         _viewport_division_kernel = createKernel(gl_program, "gl_viewport_division");
+
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.perspective_division.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_perspective_division_pocl, sizeof(GLSC2_kernel_perspective_division_pocl));
+        #endif
         buildProgram(gl_program);
         _perspective_division_kernel = createKernel(gl_program, "gl_perspective_division");
+
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.readnpixels.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_readnpixels_pocl, sizeof(GLSC2_kernel_readnpixels_pocl));
+        #endif
         buildProgram(gl_program);
         _readnpixels_kernel = createKernel(gl_program, "gl_rgba4_rgba8");
 
+        #ifdef HOSTGPU
+        if (0 != read_file(PATH_OF("kernel.strided_write.cl"), &file))
+            return -1;
+        gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         gl_program = createProgramWithBinary(GLSC2_kernel_strided_write_pocl, sizeof(GLSC2_kernel_strided_write_pocl));
+        #endif
         buildProgram(gl_program);
         _strided_write_kernel = createKernel(gl_program, "gl_strided_write");
 
@@ -944,7 +1014,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
     if (_programs[program].program) RETURN_ERROR(GL_INVALID_OPERATION);
     // TODO: Check binaryFormat
     if (binaryFormat == POCL_BINARY) {
-        _programs[program].program=createProgramWithBinary(binary, length);
+        _programs[program].program=createProgramWithBinary(binary, length); // TODO: NOT HERE, but check to send Host OpenCL programs
         buildProgram(_programs[program].program);
         // TODO: Check this logic
         _programs[program].last_load_attempt        = GL_TRUE;
@@ -1107,6 +1177,11 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
     if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
         if (_framebuffer_binding) {
 
+            if (COLOR_ATTACHMENT0.internalformat == GL_RGBA8) {
+                enqueueReadBuffer(getCommandQueue(), COLOR_ATTACHMENT0.mem, bufSize, data);
+                return;
+            }
+
             if (COLOR_ATTACHMENT0.internalformat != GL_RGBA4) NOT_IMPLEMENTED;
             void *dst_buff = createBuffer(MEM_WRITE_ONLY, bufSize, NULL);
 
@@ -1126,20 +1201,33 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 }
 
 GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
+    if (width > MAX_RENDERBUFFER_SIZE || height > MAX_RENDERBUFFER_SIZE) RETURN_ERROR(GL_INVALID_VALUE);
+    if (_renderbuffers[_renderbuffer_binding].mem != NULL) RETURN_ERROR(GL_INVALID_OPERATION); 
+    if (target != GL_RENDERBUFFER) NOT_IMPLEMENTED; // Check what error throw
 
-    if (internalformat == GL_RGBA4) {
-        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*2, NULL);
-    } else if (internalformat == GL_DEPTH_COMPONENT16) {
-        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*2, NULL);
-    } else if (internalformat == GL_STENCIL_INDEX8) {
-        _renderbuffers[_renderbuffer_binding].mem = createBuffer(MEM_READ_WRITE, width*height*1, NULL);
-    } else {
-        printf("NOT IMPLEMENTED\n");
-        exit(0);
+    size_t size;
+
+    switch (internalformat)
+    {
+    case GL_DEPTH_COMPONENT16:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGB565:
+        size = sizeof(uint16_t[width][height]);
+        break;
+    case GL_STENCIL_INDEX8:
+        size = sizeof(uint8_t[width][height]);
+        break;
+    default:
+        NOT_IMPLEMENTED; // Check what error throw
     }
-    _renderbuffers[_renderbuffer_binding].internalformat = internalformat;
-    _renderbuffers[_renderbuffer_binding].width = width;
-    _renderbuffers[_renderbuffer_binding].height = height;
+
+    // TODO: if (size > remaining_memory) RETURN_ERROR(GL_OUT_OF_MEMORY);
+
+    _renderbuffers[_renderbuffer_binding].mem               = createBuffer(MEM_READ_WRITE, size, NULL);
+    _renderbuffers[_renderbuffer_binding].internalformat    = internalformat;
+    _renderbuffers[_renderbuffer_binding].width             = width;
+    _renderbuffers[_renderbuffer_binding].height            = height;
 }
 
 GL_APICALL void GL_APIENTRY glSampleCoverage (GLfloat value, GLboolean invert) {

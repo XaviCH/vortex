@@ -125,14 +125,29 @@ void finish(void* command_queue) {
     clFinish((cl_command_queue) command_queue);
 }
 
+#ifdef HOSTGPU
+#include "common.h"
+
+#define PATH_OF(_FILE) "/home/xavier/repositories/vortex/tests/opengl/lib/GLSC2/" _FILE
+#else
 #include "kernel.fill.c"
+#endif
 
 cl_kernel _getKernelFill() {
     static cl_program program;
     static cl_kernel kernel;
 
     if (kernel == NULL) {
+        #ifdef HOSTGPU
+        file_t file;
+        cl_int error;
+        if (0 != read_file(PATH_OF("kernel.fill.cl"), &file))
+            return -1;
+        program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
+        free(file.data);
+        #else
         program = createProgramWithBinary(GLSC2_kernel_fill_pocl, sizeof(GLSC2_kernel_fill_pocl));
+        #endif
         buildProgram(program);
         kernel = createKernel(program, "gl_fill");
     }

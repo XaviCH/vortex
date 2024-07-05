@@ -2,19 +2,14 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <math.h>
-#include <GLSC2/glsc2.h>
+
 #include <unistd.h> 
 #include <string.h>
 
-#include "../common.c"
+#include "../common.h"
 
 #define WIDTH 150
 #define HEIGHT 100
-
-typedef struct {
-  uint8_t* bin;
-  size_t size;
-} kernel_data_t;
 
 static float position[] = {
    0.0, 1.0, 0.0,
@@ -33,6 +28,10 @@ int main() {
   GLuint vbo, program, framebuffer, colorbuffer;
   GLint loc_position, loc_color;
 
+  #ifdef HOSTDRIVER
+  EGL_SETUP();
+  #endif
+
   // Set Up Frame Context
   glGenFramebuffers(1, &framebuffer);
   glGenRenderbuffers(1, &colorbuffer);
@@ -46,10 +45,69 @@ int main() {
   glViewport(0, 0, WIDTH, HEIGHT); 
 
   // Set Up Program
-  kernel_data_t kernel_data;
-  read_kernel_file("kernel.pocl", &kernel_data.bin, &kernel_data.size);
   program = glCreateProgram();
-  glProgramBinary(program, 0, kernel_data.bin, kernel_data.size);
+  file_t file;
+  #ifndef HOSTDRIVER
+  read_file("kernel.pocl", &file);
+  glProgramBinary(program, 0, file.data, file.size);
+  #else
+  GLuint vs, fs;
+  GLchar *bin;
+  GLint size;
+  GLint success;
+
+  vs = glCreateShader(GL_VERTEX_SHADER);
+  fs = glCreateShader(GL_FRAGMENT_SHADER);
+
+  read_file("kernel.vs", &file);
+  bin = (char*)file.data;
+  size = file.size;
+
+  glShaderSource(vs, 1, &bin, &size);
+  glCompileShader(vs);
+  free(bin);
+
+  glGetShaderiv(vs, GL_COMPILE_STATUS, &success);  
+  if (success == GL_FALSE) {
+    GLint logSize = 0;
+    glGetShaderiv(vs, GL_INFO_LOG_LENGTH, &logSize);
+
+    GLchar* infoLog = (GLchar*) malloc(logSize);
+    glGetShaderInfoLog(vs, logSize, &logSize, infoLog);
+    printf("Fail compile vs: %s\n", infoLog);
+    exit(-1);
+  }
+  
+  read_file("kernel.fs", &file);
+  bin = (char*)file.data;
+  size = file.size;
+
+  glShaderSource(fs, 1, &bin, &size);
+  glCompileShader(fs);
+
+  glGetShaderiv(fs, GL_COMPILE_STATUS, &success);  
+  if (success == GL_FALSE) {
+    GLint logSize = 0;
+    glGetShaderiv(fs, GL_INFO_LOG_LENGTH, &logSize);
+
+    GLchar* infoLog = (GLchar*) malloc(logSize);
+    glGetShaderInfoLog(fs, logSize, &logSize, infoLog);
+    printf("Fail compile fs: %s\n", infoLog);
+    exit(-1);
+  }
+
+  free(file.data);
+
+  glAttachShader(program, vs);
+  glAttachShader(program, fs);
+
+  glLinkProgram(program);
+
+  glDetachShader(program, vs);
+  glDetachShader(program, fs);
+  glDeleteShader(vs);
+  glDeleteShader(fs);
+  #endif
   glUseProgram(program);
 
   // Set Up Vertex Attributes
@@ -69,9 +127,13 @@ int main() {
   glClear(GL_COLOR_BUFFER_BIT);
   glDrawArrays(GL_TRIANGLES, 0, 3);
   glFinish();
+  
+  #ifdef HOSTDRIVER
+  glReadPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, result);
+  #else
   glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
-
-  printPPM("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
+  #endif
+  print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
 
   return 0; 
 }
