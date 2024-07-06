@@ -1,3 +1,10 @@
+#define GL_CW       0x0900
+#define GL_CCW      0x0901
+
+#define GL_FRONT                          0x0404
+#define GL_BACK                           0x0405
+#define GL_FRONT_AND_BACK                 0x0408
+
 /*
 
 bool stencilTestPassed(float3 barycentricCoords, __global int* stencilBuffer, int index) {
@@ -44,15 +51,17 @@ float3 get_baricentric_coords(float2 p, float4 v0, float4 v1, float4 v2) {
     return barycentricCoords;
 }
 
-__kernel void gl_rasterization_triangle (
+kernel void gl_rasterization_triangle (
     const int gl_Index, // gl_Index 
     const int width, // 
-    const int attributes, // 
+    const int attributes, //
     global const float4 *gl_Positions,
     global float4 *gl_FragCoords,
     global bool *gl_Discard,
     global const float4 *gl_Primitives,
-    global float4 *gl_Rasterization
+    global float4 *gl_Rasterization,
+    const ushort front_face,
+    const ushort culling
 )
 {
     int gid = get_global_id(0);
@@ -63,19 +72,36 @@ __kernel void gl_rasterization_triangle (
     global float4 *fragCoord = gl_FragCoords + gid;
     global float4 *rasterization = gl_Rasterization + gid;
 
-    //frag coords norm
-    float xf = (gid % width);
-    float yf = (gid / width);
+    // base info
+    float xf = (gid % width) + 0.5f; // center of the fragment
+    float yf = (gid / width) + 0.5f; // center of the fragment
 
     float4 v0 = position[0];
     float4 v1 = position[1];
     float4 v2 = position[2];
-    
+
+    // area
+    float area = 0.5f * (v0.x*v1.y - v1.x*v0.y + v1.x*v2.y - v2.x*v1.y + v2.x*v0.y - v0.x*v2.y);
+
+    if (front_face == GL_CCW) area = -area;
+
+    if (area == 0.f || culling == GL_FRONT_AND_BACK || (culling == GL_BACK && area < 0.f) || (culling == GL_FRONT && area > 0.f)) {
+        gl_Discard[gid] = true;
+        return;
+    }
+
+    // barycenter
     float3 abc = get_baricentric_coords((float2) (xf,yf), v0, v1, v2);
+
+    if ((abc.x < 0.0f) || (abc.y < 0.0f) || (abc.z < 0.0f)) {
+        gl_Discard[gid] = true;
+        return;
+    }
+
     fragCoord->x = xf;
     fragCoord->y = yf;
     fragCoord->z = abc.x*v0.z + abc.y*v1.z + abc.z*v2.z;
-    fragCoord->w = abc.x*v0.w + abc.y*v1.w + abc.z*v2.w;
+    // fragCoord->w = abc.x*v0.w + abc.y*v1.w + abc.z*v2.w; // maybe this is not required
 
     for(int attribute = 0 ; attribute < attributes; attribute++) {
         global const float4 *p0 = primitives + gsize*attribute;
@@ -83,16 +109,12 @@ __kernel void gl_rasterization_triangle (
         global const float4 *p2 = p0 + 2;
         
         // HW optimization ?? 
-        rasterization[gsize*attribute].x = abc.x*p0->x + abc.y*p1->x + abc.z*p2->x;
-        rasterization[gsize*attribute].y = abc.x*p0->y + abc.y*p1->y + abc.z*p2->y;
-        rasterization[gsize*attribute].z = abc.x*p0->z + abc.y*p1->z + abc.z*p2->z;
-        rasterization[gsize*attribute].w = abc.x*p0->w + abc.y*p1->w + abc.z*p2->w;
+        rasterization[gsize*attribute].x = (abc.x*p0->x/v0.w + abc.y*p1->x/v1.w + abc.z*p2->x/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
+        rasterization[gsize*attribute].y = (abc.x*p0->y/v0.w + abc.y*p1->y/v1.w + abc.z*p2->y/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
+        rasterization[gsize*attribute].z = (abc.x*p0->z/v0.w + abc.y*p1->z/v1.w + abc.z*p2->z/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
+        rasterization[gsize*attribute].w = (abc.x*p0->w/v0.w + abc.y*p1->w/v1.w + abc.z*p2->w/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
     }
 
     // Instruction optimization ?? gl_Discard[gid] = abc.x*abc.y*abc.z; // maybe if abc wasn't float could go faster
-    if ((abc.x >= 0.0f) && (abc.y >= 0.0f) && (abc.z >= 0.0f)) {
-        gl_Discard[gid] = false;
-    } else {
-        gl_Discard[gid] = true;
-    }
+    gl_Discard[gid] = false;
 }

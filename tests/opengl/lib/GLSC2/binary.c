@@ -4,6 +4,8 @@
 */
 
 #include "kernel.color.c"
+#include "kernel.dithering.c"
+#include "kernel.clear.c"
 #include "kernel.depth.c"
 #include "kernel.perspective_division.c"
 #include "kernel.viewport_division.c"

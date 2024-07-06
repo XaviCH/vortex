@@ -18,7 +18,7 @@ kernel.%.pocl: GLSC2/kernel.%.cl
 kernel.%.c: kernel.%.pocl
 	xxd -i GLSC2/$< > GLSC2/$@
 
-glsc2.c.o: kernel.color.c kernel.perspective_division.c kernel.readnpixels.c kernel.rasterization.triangle.c kernel.viewport_division.c kernel.fill.c kernel.depth.c kernel.strided_write.c GLSC2/glsc2.c
+glsc2.c.o: kernel.color.c kernel.dithering.c kernel.clear.c kernel.perspective_division.c kernel.readnpixels.c kernel.rasterization.triangle.c kernel.viewport_division.c kernel.fill.c kernel.depth.c kernel.strided_write.c GLSC2/glsc2.c
 	$(CC) $(CXXFLAGS) -o GLSC2/glsc2.c.o -c GLSC2/glsc2.c -I./../include -fPIC
 
 glsc2.c.so: glsc2.c.o

@@ -10,11 +10,11 @@ include ../common.mk
 
 ifdef HOSTGPU
 run: clean run-hostgpu
-	feh image.ppm
+	feh -Z -F --force-aliasing -Y image.ppm
 else ifdef HOSTDRIVER
 run: clean run-hostdriver
-	feh image.ppm
+	feh -Z -F --force-aliasing -Y image.ppm
 else
 run: clean run-simx
-	feh image.ppm
+	feh -Z -F --force-aliasing -Y image.ppm
 endif

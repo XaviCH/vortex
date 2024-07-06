@@ -7,10 +7,10 @@
 #define P99_PROTECT(...) __VA_ARGS__
 
 #define NOT_IMPLEMENTED              \
-    ({                               \
+    {                               \
         printf("NOT_IMPLEMENTED: %s:%d\n", __FILE__, __LINE__); \
         exit(0);                     \
-    })
+    }
 
 #define INTERNAL_ERROR               \
     ({                               \
@@ -157,6 +157,64 @@ unsigned int            _current_program;
 program_t               _programs[MAX_PROGRAMS];
 
 typedef struct {
+    cl_kernel never, always, less, lequal, equal, greater, gequal, notequal;
+} depth_kernel_container_t;
+
+typedef struct {
+    cl_kernel points, line_stip, line_loop, lines, triangle_strip, triangle_fan, triangles;
+} rasterization_kernel_container_t;
+
+typedef struct {
+    cl_kernel enabled_rgba4, disabled_rgba4, rgb5_a1, rgb565;
+} dithering_kernel_container_t;
+
+typedef struct {
+    cl_kernel bit16, bit8;
+} clear_kernel_container_t;
+
+typedef struct {
+    dithering_kernel_container_t dithering;
+    depth_kernel_container_t depth;
+    clear_kernel_container_t clear;
+    rasterization_kernel_container_t rasterization;
+    cl_kernel viewport_division, perspective_division, readnpixels, strided_write;
+} kernel_container_t;
+
+kernel_container_t _kernels; 
+
+typedef struct {
+    GLboolean depth, stencil, scissor, pixel_ownership, dithering, bleding, culling
+} enabled_container_t;
+
+enabled_container_t _enableds = {
+    .dithering = GL_TRUE,
+    .culling = GL_FALSE,
+};
+
+typedef struct {
+    GLboolean r,g,b,a;
+} color_mask_t;
+
+typedef struct {
+    GLboolean front, back;
+} stencil_mask_t;
+
+typedef struct {
+    color_mask_t color;
+    GLboolean depth;
+    stencil_mask_t stencil;
+} mask_container_t;
+
+mask_container_t _masks = {
+    .color = { .r=GL_FALSE, .g=GL_FALSE, .b=GL_FALSE, .a=GL_FALSE },
+    .depth = GL_FALSE,
+    .stencil = GL_FALSE
+};
+
+GLenum _front_face = GL_CCW;
+GLenum _cull_face = GL_BACK;
+
+typedef struct {
     void *less;
 } DEPTH_KERNEL;
 
@@ -188,20 +246,11 @@ typedef struct {
     GLboolean used;
     GLenum target;
     void* mem;
-} BUFFER;
+} buffer_t;
 
-typedef struct {
-    GLboolean enable, normalized;
-    GLuint index;
-    GLint size;
-    GLenum type;
-    GLsizei stride;
-    const void *pointer;
-} VERTEX_ATTRIB;
 
-BUFFER _buffers[MAX_BUFFER];
+buffer_t _buffers[MAX_BUFFER];
 GLuint _buffer_binding;
-VERTEX_ATTRIB _vertex_attrib[MAX_VERTEX_ATTRIBS];
 
 /****** FRAMEBUFFER objects ******\
  * 
@@ -211,9 +260,9 @@ VERTEX_ATTRIB _vertex_attrib[MAX_VERTEX_ATTRIBS];
 typedef struct {
     GLuint color_attachment0, depth_attachment, stencil_attachment;
     GLboolean used;
-} FRAMEBUFFER;
+} framebuffer_t;
 
-FRAMEBUFFER _framebuffers[MAX_FRAMEBUFFER];
+framebuffer_t _framebuffers[MAX_FRAMEBUFFER];
 GLuint _framebuffer_binding;
 
 /****** RENDERBUFFER objects ******\
@@ -226,9 +275,9 @@ typedef struct {
     GLenum internalformat;
     GLsizei width, height;
     GLboolean used;
-} RENDERBUFFER;
+} renderbuffer_t;
 
-RENDERBUFFER _renderbuffers[MAX_RENDERBUFFER];
+renderbuffer_t _renderbuffers[MAX_RENDERBUFFER];
 GLuint _renderbuffer_binding;
 
 /****** TEXTURE 2D objects ******\
@@ -292,7 +341,7 @@ unsigned int size_from_name_type(const char*);
 unsigned int type_from_name_type(const char*);
 
 cl_kernel getDepthKernel();
-cl_kernel getColorKernel();
+cl_kernel getDitherKernel();
 
 unsigned int sizeof_type(GLenum type) {
     switch (type)
@@ -314,62 +363,45 @@ unsigned int sizeof_type(GLenum type) {
  * 
  * 
 */
-GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) {
-    NOT_IMPLEMENTED;
-}
+GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) {
-    if (!_buffers[buffer].used) {
-        _err = GL_INVALID_OPERATION;
-        return;
-    }
+    if (!_buffers[buffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
     
-    _buffer_binding = buffer;
-    _buffers[buffer].target = target;
-}
-GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) {
-    if (!_framebuffers[framebuffer].used) {
-        _err = GL_INVALID_OPERATION;
-        return;
-    }
-    if (target == GL_FRAMEBUFFER) {
-        _framebuffer_binding = framebuffer;
-    }
-}
-GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuffer) {
-    if (!_renderbuffers[renderbuffer].used) {
-        _err = GL_INVALID_OPERATION;
-        return;
-    }
-    if (target == GL_RENDERBUFFER) {
-        _renderbuffer_binding = renderbuffer;
-    }
-}
-GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) {
-    if (!_textures[texture].used) {
-        _err = GL_INVALID_OPERATION;
-        return;
-    }
-    if (target == GL_TEXTURE_2D) {
-        _texture_binding = texture;
-    }
+    if (target == GL_ARRAY_BUFFER) {
+        _buffer_binding = buffer;
+    } else NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) {
+    if (!_framebuffers[framebuffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (target == GL_FRAMEBUFFER) {
+        _framebuffer_binding = framebuffer;
+    } else NOT_IMPLEMENTED;
 }
-GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode) {
-    NOT_IMPLEMENTED;
+
+GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuffer) {
+    if (!_renderbuffers[renderbuffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (target == GL_RENDERBUFFER) {
+        _renderbuffer_binding = renderbuffer;
+    } else NOT_IMPLEMENTED;
 }
-GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha) {
-    NOT_IMPLEMENTED;
+
+GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) {
+    if (!_textures[texture].used) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (target == GL_TEXTURE_2D) {
+        _texture_binding = texture;
+    } else NOT_IMPLEMENTED;
 }
-GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) {
-    NOT_IMPLEMENTED;
-}
-GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) {
-    NOT_IMPLEMENTED;
-}
+
+GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
 
@@ -380,98 +412,116 @@ GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const 
         else if (usage == GL_DYNAMIC_DRAW || usage == GL_STREAM_DRAW) {
             _buffers[_buffer_binding].mem = createBuffer(MEM_READ_WRITE | MEM_COPY_HOST_PTR, size, data);
         }
-    }
+    } else NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
-    NOT_IMPLEMENTED;
+    
+    if (target == GL_ARRAY_BUFFER) {
+        cl_command_queue command_queue = getCommandQueue(); 
+        cl_int error = clEnqueueWriteBuffer(command_queue, _buffers[_buffer_binding].mem, CL_TRUE, offset, size, data, 0, NULL, NULL);
+        if (error == CL_INVALID_VALUE) RETURN_ERROR(GL_INVALID_VALUE);
+    } else NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
-    // TODO: Check behaviour on the specs
-    if(mask & GL_COLOR_BUFFER_BIT) glClearColor(0.0,0.0,0.0,1.0);
-    if(mask & GL_DEPTH_BUFFER_BIT) glClearDepthf(1.0);
-    if(mask & GL_STENCIL_BUFFER_BIT) glClearStencil(0);
+    if (_enableds.pixel_ownership || _enableds.scissor) NOT_IMPLEMENTED;
+    if (mask & GL_COLOR_BUFFER_BIT)     glClearColor(0,0,0,0);
+    if (mask & GL_DEPTH_BUFFER_BIT)     glClearDepthf(1);
+    if (mask & GL_STENCIL_BUFFER_BIT)   glClearStencil(0);
+    if (mask & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT) == 0) RETURN_ERROR(GL_INVALID_VALUE);
 }
 
 GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    uint32_t pattern = 0;
-    uint32_t pixel_size = 0;
+    if (_masks.color.r && _masks.color.g && _masks.color.b && _masks.color.a) return; // No paint is done
+
+    uint16_t color16 = 0;
+    uint16_t mask16 = 0;
 
     if (COLOR_ATTACHMENT0.internalformat == GL_RGBA4) {
-        pattern |= (unsigned int) (red   * 0xFu) << 0;
-        pattern |= (unsigned int) (green * 0xFu) << 4;
-        pattern |= (unsigned int) (blue  * 0xFu) << 8;
-        pattern |= (unsigned int) (alpha * 0xFu) << 12;
-        pattern |= pattern << 16;
-        pixel_size = sizeof(uint8_t[2]);
+        color16 |= (unsigned int) (red   * 0xFu) << 0;
+        color16 |= (unsigned int) (green * 0xFu) << 4;
+        color16 |= (unsigned int) (blue  * 0xFu) << 8;
+        color16 |= (unsigned int) (alpha * 0xFu) << 12;
+        if (_masks.color.r) mask16 |= 0x000Fu;
+        if (_masks.color.g) mask16 |= 0x00F0u;
+        if (_masks.color.b) mask16 |= 0x0F00u;
+        if (_masks.color.a) mask16 |= 0xF000u;
     } else if(COLOR_ATTACHMENT0.internalformat == GL_RGBA8) {
-        pattern |= (unsigned int) (red   * 0xFFu) << 0;
-        pattern |= (unsigned int) (green * 0xFFu) << 8;
-        pattern |= (unsigned int) (blue  * 0xFFu) << 16;
-        pattern |= (unsigned int) (alpha * 0xFFu) << 24;
-        pixel_size = sizeof(uint8_t[4]);
+        NOT_IMPLEMENTED;
     } else if(COLOR_ATTACHMENT0.internalformat == GL_RGB8) {
-        NOT_IMPLEMENTED; // TODO: Update enqueueFillBuffer
+        NOT_IMPLEMENTED;
     } else if(COLOR_ATTACHMENT0.internalformat == GL_RG8) {
-        pattern |= (unsigned int) (red   * 0xFFu) << 0;
-        pattern |= (unsigned int) (green * 0xFFu) << 8;
-        pattern |= pattern << 16;
-        pixel_size = sizeof(uint8_t[2]);
+        NOT_IMPLEMENTED;
     } else if(COLOR_ATTACHMENT0.internalformat == GL_R8) {
-        pattern |= (unsigned int) (red   * 0xFFu) << 0;
-        pattern |= pattern << 8;
-        pattern |= pattern << 16;
-        pattern |= pattern << 24;
-        pixel_size = sizeof(uint8_t[1]);
+        NOT_IMPLEMENTED;
     } else if(COLOR_ATTACHMENT0.internalformat == GL_RGB5_A1) {
-        pattern |= (unsigned int) (red   * 0x1Fu) << 0;
-        pattern |= (unsigned int) (green * 0x1Fu) << 5;
-        pattern |= (unsigned int) (blue  * 0x1Fu) << 10;
-        pattern |= (unsigned int) (alpha * 0x1u)   << 15;
-        pattern |= pattern << 16;
-        pixel_size = sizeof(uint8_t[2]);
+        color16 |= (unsigned int) (red   * 0x1Fu) << 0;
+        color16 |= (unsigned int) (green * 0x1Fu) << 5;
+        color16 |= (unsigned int) (blue  * 0x1Fu) << 10;
+        color16 |= (unsigned int) (alpha * 0x1u)   << 15;
+        if (_masks.color.r) mask16 |= 0x1Fu << 0;
+        if (_masks.color.g) mask16 |= 0x1Fu << 5; 
+        if (_masks.color.b) mask16 |= 0x1Fu << 10;
+        if (_masks.color.a) mask16 |= 0x1u  << 15;
     } else if(COLOR_ATTACHMENT0.internalformat == GL_RGB565) {
-        pattern |= (unsigned int) (red   * 0x1Fu) << 0;
-        pattern |= (unsigned int) (green * 0x3Fu) << 5;
-        pattern |= (unsigned int) (blue  * 0x1Fu) << 11;
-        pattern |= pattern << 16;
-        pixel_size = sizeof(uint8_t[2]);
+        color16 |= (unsigned int) (red   * 0x1Fu) << 0;
+        color16 |= (unsigned int) (green * 0x3Fu) << 5;
+        color16 |= (unsigned int) (blue  * 0x1Fu) << 11;
+        if (_masks.color.r) mask16 |= 0x1Fu << 0;
+        if (_masks.color.g) mask16 |= 0x3Fu << 5; 
+        if (_masks.color.b) mask16 |= 0x1Fu << 11;
     } else RETURN_ERROR(GL_INVALID_OPERATION);
-    
-    // TODO: Use the default cl implementation
-    enqueueFillBuffer(getCommandQueue(), COLOR_ATTACHMENT0.mem, &pattern, 4, 0, COLOR_ATTACHMENT0.width*COLOR_ATTACHMENT0.height*pixel_size);
+
+    setKernelArg(_kernels.clear.bit16, 0, sizeof(cl_mem),  &COLOR_ATTACHMENT0.mem);
+    setKernelArg(_kernels.clear.bit16, 1, sizeof(color16), &color16);
+    setKernelArg(_kernels.clear.bit16, 2, sizeof(mask16),  &mask16);
+    enqueueNDRangeKernel(getCommandQueue(), _kernels.clear.bit16, COLOR_ATTACHMENT0.width*COLOR_ATTACHMENT0.height);
+
 }
 
 GL_APICALL void GL_APIENTRY glClearDepthf (GLfloat d) {
-    uint32_t pattern = 0;
+    if (_masks.depth) return; // no paint is done
+    
+    uint16_t depth16 = 0;
+    uint16_t mask16 = 0;
 
     if (DEPTH_ATTACHMENT.internalformat == GL_DEPTH_COMPONENT16) {
-        pattern = d*0xFFFFu;
-        pattern |= pattern << 16;
+        depth16 = d*0xFFFFu;
     } else NOT_IMPLEMENTED;
 
-    enqueueFillBuffer(getCommandQueue(), DEPTH_ATTACHMENT.mem, &pattern, 4, 0, DEPTH_ATTACHMENT.width*DEPTH_ATTACHMENT.height*2);
+    setKernelArg(_kernels.clear.bit16, 0, sizeof(cl_mem),   &DEPTH_ATTACHMENT.mem);
+    setKernelArg(_kernels.clear.bit16, 1, sizeof(depth16),  depth16);
+    setKernelArg(_kernels.clear.bit16, 2, sizeof(mask16),   mask16);
+    enqueueNDRangeKernel(getCommandQueue(), _kernels.clear.bit16, DEPTH_ATTACHMENT.width*DEPTH_ATTACHMENT.height);
+
 }
 
 GL_APICALL void GL_APIENTRY glClearStencil (GLint s) {
-    uint32_t pattern = 0;
+    NOT_IMPLEMENTED;
+    if (_masks.stencil.front && _masks.stencil.back) return; // no paint is done
+    
+    uint8_t stencil8 = 0;
+    uint8_t mask8 = 0;
 
     if (STENCIL_ATTACHMENT.internalformat == GL_STENCIL_INDEX8) {
-        pattern = s*0xFFu;
-        pattern |= pattern << 8;
-        pattern |= pattern << 16;
-        pattern |= pattern << 24;
+        stencil8 = s*0xFFu;
     } else NOT_IMPLEMENTED;
 
-    enqueueFillBuffer(getCommandQueue(), STENCIL_ATTACHMENT.mem, &pattern, 4, 0, STENCIL_ATTACHMENT.width*STENCIL_ATTACHMENT.height*1);
+    setKernelArg(_kernels.clear.bit8, 0, sizeof(cl_mem),    &STENCIL_ATTACHMENT.mem);
+    setKernelArg(_kernels.clear.bit8, 1, sizeof(stencil8),  stencil8);
+    setKernelArg(_kernels.clear.bit8, 2, sizeof(mask8),     mask8);
+    enqueueNDRangeKernel(getCommandQueue(), _kernels.clear.bit8, STENCIL_ATTACHMENT.width*STENCIL_ATTACHMENT.height);
+
 }
 
 GL_APICALL void GL_APIENTRY glColorMask (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) {
-    _color_mask.red = red;
-    _color_mask.green = green;
-    _color_mask.blue = blue;
-    _color_mask.alpha = alpha;
+    _masks.color = (color_mask_t) {
+        .r = red,
+        .g = green,
+        .b = blue,
+        .a = alpha,
+    };
 }
 
 GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data) {
@@ -489,7 +539,16 @@ GL_APICALL GLuint GL_APIENTRY glCreateProgram (void){
 }
 
 GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) {
-    NOT_IMPLEMENTED;
+    switch (mode)
+    {
+    case GL_FRONT:
+    case GL_BACK:
+    case GL_FRONT_AND_BACK:
+        _cull_face = mode;
+        return;
+    default:
+        NOT_IMPLEMENTED;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) {
@@ -497,7 +556,7 @@ GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) {
 }
 
 GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) {
-    _depth_mask = flag;
+    _masks.depth = flag;
 }
 
 GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) {
@@ -506,12 +565,16 @@ GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) {
 
 GL_APICALL void GL_APIENTRY glDisable (GLenum cap) {
     if (cap == GL_SCISSOR_TEST)
-        _scissor_enabled = 0;
+        _enableds.scissor = GL_FALSE;
     else if (cap == GL_DEPTH_TEST)
-        _depth_enabled = 0;
+        _enableds.depth = GL_FALSE;
     else if (cap == GL_STENCIL_TEST)
-        _stencil_enabled = 0;
-    else RETURN_ERROR(GL_INVALID_ENUM);
+        _enableds.stencil = GL_FALSE;
+    else if (cap == GL_CULL_FACE)
+        _enableds.culling = GL_FALSE;
+    else if (cap == GL_DITHER)
+        _enableds.dithering = GL_TRUE;
+    else NOT_IMPLEMENTED; // RETURN_ERROR(GL_INVALID_ENUM);
 }
 
 GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) {
@@ -585,7 +648,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     }
     for(int attrib = 0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
         if (_vertex_attrib_state[attrib] == VEC4) {
-            setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(vertex_attrib_t), &_vertex_attrib[attrib]);
+            setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(vertex_attrib_t), &_vertex_attribs[attrib]);
         } else {
             setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(cl_mem), &vertex_array_mem[attrib]);
         }
@@ -621,6 +684,9 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     /* ---- Set Up Per-Fragment Kernels ---- */
     cl_kernel fragment_kernel;
     // Rasterization Kernel Set Up
+    uint16_t cull_face = 0;
+    if (_enableds.culling) cull_face = _cull_face;
+
     if (mode==GL_TRIANGLES) {
         // arg 0 is reserved for the primitive index
         setKernelArg(_rasterization_kernels.triangles, 1, sizeof(int),      &COLOR_ATTACHMENT0.width);
@@ -630,6 +696,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         setKernelArg(_rasterization_kernels.triangles, 5, sizeof(cl_mem),   &gl_Discard);
         setKernelArg(_rasterization_kernels.triangles, 6, sizeof(cl_mem),   &vertex_out_buffer);
         setKernelArg(_rasterization_kernels.triangles, 7, sizeof(cl_mem),   &fragment_in_buffer);
+        setKernelArg(_rasterization_kernels.triangles, 8, sizeof(uint16_t), &_front_face);
+        setKernelArg(_rasterization_kernels.triangles, 9, sizeof(uint16_t), &cull_face);
     } else NOT_IMPLEMENTED;
 
     // Fragment Kernel Set Up
@@ -665,7 +733,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     
     // Depth Kernel Set Up
     cl_kernel depth_kernel = NULL;
-    if (_depth_enabled) {
+    if (_enableds.depth) {
         depth_kernel = getDepthKernel();
         setKernelArg(depth_kernel, 0, sizeof(DEPTH_ATTACHMENT.mem), &DEPTH_ATTACHMENT.mem);
         setKernelArg(depth_kernel, 1, sizeof(gl_Discard),           &gl_Discard);
@@ -673,10 +741,12 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     }
 
     // Color Kernel Set Up
-    cl_kernel color_kernel = getColorKernel();
-    setKernelArg(color_kernel, 0, sizeof(COLOR_ATTACHMENT0.mem),    &COLOR_ATTACHMENT0.mem);
-    setKernelArg(color_kernel, 1, sizeof(gl_Discard),               &gl_Discard);
-    setKernelArg(color_kernel, 2, sizeof(gl_FragColor),             &gl_FragColor);
+    cl_kernel dither_kenel = getDitherKernel();
+    setKernelArg(dither_kenel, 0, sizeof(COLOR_ATTACHMENT0.mem),    &COLOR_ATTACHMENT0.mem);
+    setKernelArg(dither_kenel, 1, sizeof(gl_FragColor),             &gl_FragColor);
+    setKernelArg(dither_kenel, 2, sizeof(gl_Discard),               &gl_Discard);
+    if (_enableds.dithering)
+        setKernelArg(dither_kenel, 3, sizeof(gl_FragCoord),         &gl_FragCoord);
 
     /* ---- Enqueue Kernels ---- */
     cl_command_queue command_queue = getCommandQueue();
@@ -693,22 +763,24 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
         if (depth_kernel) enqueueNDRangeKernel(command_queue, depth_kernel, num_fragments);
 
-        enqueueNDRangeKernel(command_queue, color_kernel,                       num_fragments);
+        enqueueNDRangeKernel(command_queue, dither_kenel, num_fragments);
     }
 }
 
-GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
-    NOT_IMPLEMENTED;
-}
+GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
     if (cap == GL_SCISSOR_TEST)
-        _scissor_enabled = 1;
+        _enableds.scissor = GL_TRUE;
     else if (cap == GL_DEPTH_TEST)
-        _depth_enabled = 1;
+        _enableds.depth = GL_TRUE;
     else if (cap == GL_STENCIL_TEST)
-        _stencil_enabled = 1;
-    else RETURN_ERROR(GL_INVALID_ENUM);
+        _enableds.stencil = GL_TRUE;
+    else if (cap == GL_CULL_FACE)
+        _enableds.culling = GL_TRUE;
+    else if (cap == GL_DITHER)
+        _enableds.dithering = GL_TRUE;
+    else NOT_IMPLEMENTED; // RETURN_ERROR(GL_INVALID_ENUM);
 }
 
 GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index) {
@@ -724,6 +796,7 @@ GL_APICALL void GL_APIENTRY glFinish (void) {
 
 GL_APICALL void GL_APIENTRY glFlush (void) {
     clFlush(getCommandQueue());
+    // TODO: Checkout multiqueuing
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {
@@ -733,6 +806,7 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum att
         _framebuffers[_framebuffer_binding].depth_attachment=renderbuffer;
     else if (attachment == GL_STENCIL_ATTACHMENT)
         _framebuffers[_framebuffer_binding].stencil_attachment=renderbuffer;
+    else NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) {
@@ -740,7 +814,15 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attach
 }
 
 GL_APICALL void GL_APIENTRY glFrontFace (GLenum mode) {
-    NOT_IMPLEMENTED;
+    switch (mode)
+    {
+    case GL_CCW:
+    case GL_CW:
+        _front_face = mode;
+        return;
+    default:
+        NOT_IMPLEMENTED;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers) {
@@ -939,7 +1021,14 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = createProgramWithBinary(GLSC2_kernel_depth_pocl, sizeof(GLSC2_kernel_depth_pocl));
         #endif
         buildProgram(gl_program);
-        _depth_kernel.less = createKernel(gl_program, "gl_less");
+        _kernels.depth.always   = createKernel(gl_program, "gl_always");
+        _kernels.depth.never    = createKernel(gl_program, "gl_never");
+        _kernels.depth.less     = createKernel(gl_program, "gl_less");
+        _kernels.depth.lequal   = createKernel(gl_program, "gl_lequal");
+        _kernels.depth.equal    = createKernel(gl_program, "gl_equal");
+        _kernels.depth.greater  = createKernel(gl_program, "gl_greater");
+        _kernels.depth.gequal   = createKernel(gl_program, "gl_gequal");
+        _kernels.depth.notequal = createKernel(gl_program, "gl_notequal");
 
         #ifdef HOSTGPU
         if (0 != read_file(PATH_OF("kernel.color.cl"), &file))
@@ -947,11 +1036,11 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
         free(file.data);
         #else
-        gl_program = createProgramWithBinary(GLSC2_kernel_color_pocl, sizeof(GLSC2_kernel_color_pocl));
+        gl_program = createProgramWithBinary(GLSC2_kernel_dithering_pocl, sizeof(GLSC2_kernel_dithering_pocl));
         #endif
         buildProgram(gl_program);
-        _color_kernel.rgba4 = createKernel(gl_program, "gl_rgba4");
-        _color_kernel.rgba8 = createKernel(gl_program, "gl_rgba8");
+        _kernels.dithering.enabled_rgba4  = createKernel(gl_program, "enabled_rgba4");
+        _kernels.dithering.disabled_rgba4 = createKernel(gl_program, "disabled_rgba4");
 
         #ifdef HOSTGPU
         if (0 != read_file(PATH_OF("kernel.rasterization.triangle.cl"), &file))
@@ -1007,6 +1096,11 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         #endif
         buildProgram(gl_program);
         _strided_write_kernel = createKernel(gl_program, "gl_strided_write");
+
+        gl_program = createProgramWithBinary(GLSC2_kernel_clear_pocl, sizeof(GLSC2_kernel_clear_pocl));
+        buildProgram(gl_program);
+        _kernels.clear.bit16 = createKernel(gl_program, "bit16");
+        _kernels.clear.bit8  = createKernel(gl_program, "bit8");
 
         _kernel_load_status = 1;
     }
@@ -1254,18 +1348,28 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
 }
 
 GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask) {
-    _stencil_mask.front = mask;
-    _stencil_mask.back = mask;
+    _masks.stencil = (stencil_mask_t) {
+        .front  = mask,
+        .back   = mask,
+    };
 }
 
 GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask) {
-    if (GL_FRONT == face) 
-        _stencil_mask.front = mask;
-    else if (GL_BACK == face) 
-        _stencil_mask.back = mask;
-    else if (GL_FRONT_AND_BACK == face) {
-        _stencil_mask.front = mask;
-        _stencil_mask.back = mask;
+    switch (face) {
+    case GL_FRONT:
+        _masks.stencil.front = mask;
+        break;
+    case GL_BACK:
+        _masks.stencil.back = mask;
+        break;
+    case GL_FRONT_AND_BACK:
+        _masks.stencil = (stencil_mask_t) {
+            .front  = mask,
+            .back   = mask,
+        };
+        break;
+    default:
+        NOT_IMPLEMENTED;
     }
 }
 
@@ -1375,18 +1479,10 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     #endif
 }
 
-GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) {
-    NOT_IMPLEMENTED;
-}
-GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params) {
-    NOT_IMPLEMENTED;
-}
-GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) {
-    NOT_IMPLEMENTED;
-}
-GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params) {
-    NOT_IMPLEMENTED;
-}
+GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) {
     
@@ -1587,22 +1683,35 @@ void* getCommandQueue() {
 
 cl_kernel getDepthKernel() {
     switch (_depth_func) {
+        case GL_ALWAYS:
+            return _kernels.depth.always;
+        case GL_NEVER:
+            return _kernels.depth.never;
         case GL_LESS:
-            return _depth_kernel.less;
+            return _kernels.depth.less;
+        case GL_LEQUAL:
+            return _kernels.depth.lequal;
+        case GL_EQUAL:
+            return _kernels.depth.equal;
+        case GL_GREATER:
+            return _kernels.depth.greater;
+        case GL_GEQUAL:
+            return _kernels.depth.gequal;
+        case GL_NOTEQUAL:
+            return _kernels.depth.notequal;
+        
         // TODO add all cases
     }
     NOT_IMPLEMENTED;
 }
 
-cl_kernel getColorKernel() {
+cl_kernel getDitherKernel() {
     switch (COLOR_ATTACHMENT0.internalformat) {
-        case GL_RGBA8:
-            return _color_kernel.rgba8;
         case GL_RGBA4:
-            return _color_kernel.rgba4;
-        // TODO: add all cases
+            return _enableds.dithering ? _kernels.dithering.enabled_rgba4 : _kernels.dithering.disabled_rgba4;
+        default:
+            NOT_IMPLEMENTED;
     }
-    NOT_IMPLEMENTED;
 }
 
 unsigned int size_from_name_type(const char* name_type) {
