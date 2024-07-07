@@ -18,12 +18,14 @@
         exit(0);                     \
     })
 
-GLenum gl_error = 0;
+GLenum gl_error = GL_NO_ERROR;
 
 #define RETURN_ERROR(error)                 \
     ({                                      \
-        if(gl_error == GL_NO_ERROR)         \
+        if(gl_error == GL_NO_ERROR) {       \
             gl_error = error;               \
+            exit(error);                    \
+        }                                   \
         return;                             \
     })
 
@@ -477,7 +479,6 @@ GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat bl
     setKernelArg(_kernels.clear.bit16, 1, sizeof(color16), &color16);
     setKernelArg(_kernels.clear.bit16, 2, sizeof(mask16),  &mask16);
     enqueueNDRangeKernel(getCommandQueue(), _kernels.clear.bit16, COLOR_ATTACHMENT0.width*COLOR_ATTACHMENT0.height);
-
 }
 
 GL_APICALL void GL_APIENTRY glClearDepthf (GLfloat d) {
@@ -491,8 +492,8 @@ GL_APICALL void GL_APIENTRY glClearDepthf (GLfloat d) {
     } else NOT_IMPLEMENTED;
 
     setKernelArg(_kernels.clear.bit16, 0, sizeof(cl_mem),   &DEPTH_ATTACHMENT.mem);
-    setKernelArg(_kernels.clear.bit16, 1, sizeof(depth16),  depth16);
-    setKernelArg(_kernels.clear.bit16, 2, sizeof(mask16),   mask16);
+    setKernelArg(_kernels.clear.bit16, 1, sizeof(depth16),  &depth16);
+    setKernelArg(_kernels.clear.bit16, 2, sizeof(mask16),   &mask16);
     enqueueNDRangeKernel(getCommandQueue(), _kernels.clear.bit16, DEPTH_ATTACHMENT.width*DEPTH_ATTACHMENT.height);
 
 }
@@ -1593,17 +1594,17 @@ GL_APICALL void GL_APIENTRY glUniform4iv (GLint location, GLsizei count, const G
 GL_APICALL void GL_APIENTRY glUniformMatrix2fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
 
-    GENERIC_UNIFORM_V(2,GL_FLOAT,GLfloat[2]);
+    GENERIC_UNIFORM_V(8,GL_FLOAT,GLfloat);
 }
 GL_APICALL void GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
 
-    GENERIC_UNIFORM_V(3,GL_FLOAT,GLfloat[3]);
+    GENERIC_UNIFORM_V(16,GL_FLOAT,GLfloat);
 }
 GL_APICALL void GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
 
-    GENERIC_UNIFORM_V(4,GL_FLOAT,GLfloat[4]);
+    GENERIC_UNIFORM_V(16,GL_FLOAT,GLfloat);
 }
 
 GL_APICALL void GL_APIENTRY glUseProgram (GLuint program){

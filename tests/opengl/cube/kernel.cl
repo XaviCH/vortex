@@ -1,4 +1,3 @@
-
 float4 mul(float16 mat, float4 vec) {
   float4 result = 0;
 
@@ -13,49 +12,27 @@ float4 mul(float16 mat, float4 vec) {
   return result;
 }
 
-__kernel void gl_main_vs (
-  // my imp
-  __global const float* positions,
-  __global const float* color,
-  const float16 perspective,
-  const float16 view,
-  const float16 model,
-  // implementation values
-  __global float4 *gl_Positions,
-  __global float4 *gl_Primitives
+kernel void main_vs (
+  constant float16 *perspective,
+  constant float16 *view,
+  constant float16 *model,
+  global const float4 *position,
+  global const float4 *in_color,
+  global float4 *out_color,
+  global float4 *gl_Position
 ) {
   int gid = get_global_id(0);
-  // in out vars
-  float x = positions[gid*3];
-  float y = positions[gid*3+1];
-  float z = positions[gid*3+2];
 
-  float r = color[gid*3];
-  float g = color[gid*3+1];
-  float b = color[gid*3+2];
-
-  // vertex operations
-  gl_Positions[gid] =  mul(view,mul(model,(float4) (x, y, z, 1.0f)));
- 
-  gl_Primitives[gid*2] = (float4) (r,g,b,1.0f);
-  // gl_Primitives[gid*2+1] = (float4) (1.f,1.f,1.f,1.0f);
+  gl_Position[gid] = mul(*perspective,mul(*view, mul(*model,position[gid])));
+  out_color[gid] = in_color[gid];
 }
 
-__kernel void gl_main_fs (
-  // user values
-  const float16 perspective,
-  const float16 view,
-  const float16 model,
-  // implementation values 
-  __global float4 *gl_FragCoord, // position of the fragment in the window space, z is depth value
-  __global const float4 *gl_Rasterization,
-  __global bool *gl_Discard, // if discarded
-  __global float4 *gl_FragColor // out color of the fragment || It is deprecated in OpenGL 3.0 
+kernel void main_fs (
+  global const float4 *out_color,
+  global float4 *gl_FragColor
 )
 {
   int gid = get_global_id(0);
-  // in out vars
-
-  // fragment operations
-  gl_FragColor[gid] = gl_Rasterization[gid*2];
+  
+  gl_FragColor[gid] = out_color[gid];
 }
