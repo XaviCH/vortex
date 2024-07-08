@@ -217,10 +217,9 @@ int main() {
   GLint loc_perspective, loc_view, loc_model;
   glm::mat4 perspective(1), view(1), model(1);
   //glDepthRangef(0, 10);
-  // perspective = glm::perspective((float)M_PI / 4, (float)WIDTH/HEIGHT, 0.1f, 100.f);
-  // view = glm::lookAt(glm::vec3{-1,-1,-1}, glm::vec3{0,0,0},glm::vec3{0,1,0});
-  // model = glm::mat4(1);
-  //model = glm::rotate(model, M_PIf/8, glm::vec3{1,1,1});
+  perspective = glm::perspective((float)M_PI / 4, (float)WIDTH/HEIGHT, 0.1f, 100.f);
+  view = glm::lookAt(glm::vec3{-1,-1,-1}, glm::vec3{0,0,0},glm::vec3{0,1,0});
+  model = glm::rotate(model, M_PIf/8, glm::vec3{1,1,1});
 
   loc_perspective = glGetUniformLocation(program, "perspective");
   loc_view = glGetUniformLocation(program, "view");
@@ -232,7 +231,7 @@ int main() {
   glUniformMatrix4fv(loc_view, 1, GL_FALSE, &view[0][0]);
   glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
 
-  // glEnable(GL_DEPTH_TEST);
+  glEnable(GL_DEPTH_TEST);
   // Draw
   printf("Color\n");
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

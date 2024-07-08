@@ -359,6 +359,7 @@ unsigned int sizeof_type(GLenum type) {
     case GL_FLOAT:
         return 4;
     }
+    NOT_IMPLEMENTED;
 } 
 
 /****** OpenGL Interface Implementations ******\
@@ -491,11 +492,12 @@ GL_APICALL void GL_APIENTRY glClearDepthf (GLfloat d) {
         depth16 = d*0xFFFFu;
     } else NOT_IMPLEMENTED;
 
+    printf("Depth value: %i, mask value: %i \n\n", depth16, mask16);
+
     setKernelArg(_kernels.clear.bit16, 0, sizeof(cl_mem),   &DEPTH_ATTACHMENT.mem);
     setKernelArg(_kernels.clear.bit16, 1, sizeof(depth16),  &depth16);
     setKernelArg(_kernels.clear.bit16, 2, sizeof(mask16),   &mask16);
     enqueueNDRangeKernel(getCommandQueue(), _kernels.clear.bit16, DEPTH_ATTACHMENT.width*DEPTH_ATTACHMENT.height);
-
 }
 
 GL_APICALL void GL_APIENTRY glClearStencil (GLint s) {
@@ -1533,13 +1535,13 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
     ERROR_CHECKER(1, _SIZE, _TYPE);                                                                             \
     if (CURRENT_PROGRAM.uniforms_data[location].type == GL_BYTE) NOT_IMPLEMENTED;                               \
     _ARRAY_TYPE value[] = _ARRAY;                                                                               \
-    enqueueWriteBuffer(getCommandQueue(), CURRENT_PROGRAM.uniforms_mem, GL_TRUE, 0, sizeof(value), value);      \
+    enqueueWriteBuffer(getCommandQueue(), CURRENT_PROGRAM.uniforms_mem[location], GL_TRUE, 0, sizeof(value), value);      \
     })
 
 #define GENERIC_UNIFORM_V(_SIZE, _TYPE, _ARRAY_TYPE) ({                                                                         \
     ERROR_CHECKER(count, _SIZE, _TYPE);                                                                                         \
     if (CURRENT_PROGRAM.uniforms_data[location].type == GL_BYTE) NOT_IMPLEMENTED;                                               \
-    enqueueWriteBuffer(getCommandQueue(), CURRENT_PROGRAM.uniforms_mem, GL_TRUE, 0, sizeof(_ARRAY_TYPE[count][_SIZE]), value);  \
+    enqueueWriteBuffer(getCommandQueue(), CURRENT_PROGRAM.uniforms_mem[location], GL_TRUE, 0, sizeof(_ARRAY_TYPE[count][_SIZE]), value);  \
     })
 
 
@@ -1700,10 +1702,7 @@ cl_kernel getDepthKernel() {
             return _kernels.depth.gequal;
         case GL_NOTEQUAL:
             return _kernels.depth.notequal;
-        
-        // TODO add all cases
     }
-    NOT_IMPLEMENTED;
 }
 
 cl_kernel getDitherKernel() {
@@ -1740,5 +1739,6 @@ unsigned int type_from_name_type(const char* name_type) {
     if (strncmp(name_type, "short",  sizeof("short") -1)  == 0) return GL_SHORT;
     if (strncmp(name_type, "char",   sizeof("char")  -1)  == 0) return GL_BYTE;
     if (strncmp(name_type, "bool",   sizeof("bool")  -1)  == 0) return GL_BYTE;
+    printf("%s\n", name_type);
     NOT_IMPLEMENTED;
 }

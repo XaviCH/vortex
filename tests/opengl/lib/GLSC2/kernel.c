@@ -105,13 +105,15 @@ void enqueueNDRangeKernel(void* commandQueue, void* kernel, const size_t global_
 
 void enqueueReadBuffer(void* command_queue, void* buffer, size_t bufSize, void* data) {
 
-    clEnqueueReadBuffer(command_queue, (cl_mem) buffer, CL_TRUE, 0, bufSize, data, 0, NULL, NULL);
+    cl_int err = clEnqueueReadBuffer(command_queue, (cl_mem) buffer, CL_TRUE, 0, bufSize, data, 0, NULL, NULL);
+    printf("error: %i\n", err);
 }
 
 
-#define enqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr) (                       \
-    _err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr, 0, NULL, NULL)      \
-    )
+#define enqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr) ({                       \
+    _err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr, 0, NULL, NULL);      \
+    if (_err) printf("error: %i\n", _err); \
+    })
 
 // void enqueueWriteBuffer(void* command_queue, void* buffer, size_t size, const void* ptr) {
 // 

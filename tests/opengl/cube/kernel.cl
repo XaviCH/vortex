@@ -1,12 +1,8 @@
 float4 mul(float16 mat, float4 vec) {
   float4 result = 0;
 
-  for(int i=0; i<4;++i) {
-    float value = 0;
-    for(int j=0; j<4; j+=1) {
-      value += mat[i*4+j]*vec[j];
-    }
-    result[i] = value;
+  for(int i=0; i<16; ++i) {
+    result[i%4] += mat[i]*vec[i/4]; 
   }
 
   return result;

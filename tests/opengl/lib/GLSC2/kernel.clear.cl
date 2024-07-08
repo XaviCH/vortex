@@ -5,7 +5,7 @@ kernel void bit16 (
 ) {
     int gid = get_global_id(0);
 
-    buffer[gid] = 0; // (buffer[gid] & mask) | (color & ~mask);
+    buffer[gid] = (buffer[gid] & mask) | (color & ~mask);
 }
 
 kernel void bit8 (
