@@ -4,6 +4,10 @@
 #include "kernel.c" // TODO: may be interesting to extract it to an interface so could be re implementated with CUDA
 #include "binary.c" // TODO: maybe with extern
 
+#include "config.h"
+#include "types.h"
+
+
 #define P99_PROTECT(...) __VA_ARGS__
 
 #define NOT_IMPLEMENTED              \
@@ -29,191 +33,20 @@ GLenum gl_error = GL_NO_ERROR;
         return;                             \
     })
 
-// Our definitions
-#define MAX_BUFFER 256
-#define MAX_FRAMEBUFFER 256
-#define MAX_RENDERBUFFER 256
-#define MAX_TEXTURE 256
-#define MAX_PROGRAMS 256
-#define MAX_UNIFORM_VECTORS 16
-#define MAX_NAME_SIZE 64
-#define MAX_INFO_SIZE 256
-#define MAX_UNIFORM_SIZE sizeof(float[4][4]) // Limited to a matf4x4
-
-#define VERTEX_SHADER_FNAME "main_vs"
-#define PERSPECTIVE_DIVISION_SHADER_FNAME "gl_perspective_division"
-#define VIEWPORT_DIVISION_SHADER_FNAME "gl_viewport_division"
-#define FRAGMENT_SHADER_FNAME "main_fs"
-
-#define POCL_BINARY 0x0
-#define SAMPLER2D_T GL_FLOAT  +1
-#define IMAGE_T SAMPLER2D_T +1
-
-// OpenGL required definitions
-#define MAX_VERTEX_ATTRIBS 16
-#define MAX_VERTEX_UNIFORM_VECTORS sizeof(float[4])         // atMost MAX_UNIFORM_VECTORS
-#define MAX_FRAGMENT_UNIFORM_VECTORS sizeof(float[4])       // atMost MAX_UNIFORM_VECTORS
-#define MAX_RENDERBUFFER_SIZE sizeof(uint16_t[1920][1080])  // TODO: Maybe another number
-#define MAX_COMBINED_TEXTURE_IMAGE_UNITS 16
-
-#define GL_POSITION "gl_Position"
-#define GL_FRAGCOLOR "gl_FragColor"
-#define GL_FRAGCOORD "gl_FragCoord"
-#define GL_DISCARD "gl_Discard"
-
-/****** DTO objects ******\
- * TODO: externalize to could be imported from kernel cl programs
-*/
-
-/****** GENERIC objects ******\
- * 
- * 
-*/
-typedef struct {
-    GLint x;
-    GLint y;
-    GLsizei width;
-    GLsizei height;
-} BOX;
-
-typedef struct {
-    unsigned char info[MAX_INFO_SIZE];
-    int length;
-} LOG;
-
-BOX _viewport;
-
-/****** PROGRAM objects ******\
- * 
+/************ CONTEXT ************\
+ * TODO: Create context using a context manager instead of the library 
  * 
 */
 
-typedef struct {
-    float values[4]; // default: {0.0, 0.0, 0.0, 1.0} 
-} vertex_attrib_t;
+/****** CONFIGURATION INITIAL STATE ******/
 
-typedef struct {
-    GLint size;
-    GLenum type;
-    GLboolean normalized;
-    GLsizei stride;
-    void *pointer;
-    GLuint binding;
-} vertex_attrib_pointer_t;
-
-typedef union {
-    vertex_attrib_t vec4;
-    vertex_attrib_pointer_t pointer;
-} vertex_attrib_u;
-
-// States of attributes
-#define VEC4 0
-#define POINTER 1
-#define BUFFEROBJECT 2
-
-unsigned char     _vertex_attrib_enable[MAX_VERTEX_ATTRIBS]; // TODO: use it as checker for state
-unsigned char     _vertex_attrib_state[MAX_VERTEX_ATTRIBS];
-vertex_attrib_u   _vertex_attribs[MAX_VERTEX_ATTRIBS];
-
-
-#define PROGRAM_LOG_SIZE 256
-#define ARG_NAME_SIZE 128
-#define MAX_VARYING 16
-
-typedef struct {
-    unsigned int vertex_location, fragment_location, size, type;
-    unsigned char name[ARG_NAME_SIZE]; 
-} arg_data_t;
-
-typedef struct { 
-    GLboolean last_load_attempt, last_validation_attempt;
-    unsigned char log[PROGRAM_LOG_SIZE];
-} program_data_t;
-
-typedef struct {
-    // Program data
-    GLboolean               last_load_attempt; 
-    GLboolean               last_validation_attempt;
-    unsigned char           log[PROGRAM_LOG_SIZE];
-    unsigned int            log_length;
-    cl_program              program;
-    // Kernel data
-    cl_kernel               vertex_kernel;
-    cl_kernel               fragment_kernel;
-    // Uniform data
-    unsigned int            active_uniforms;
-    arg_data_t              uniforms_data[MAX_UNIFORM_SIZE];
-    unsigned int            uniforms_array_size[MAX_UNIFORM_SIZE];
-    cl_mem                  uniforms_mem[MAX_UNIFORM_SIZE];
-    // Vertex data
-    unsigned int            active_vertex_attribs;
-    arg_data_t              vertex_attribs_data[MAX_VERTEX_ATTRIBS];
-    unsigned int            gl_position_location;
-    // Varying data
-    unsigned int            varying_size;
-    arg_data_t              varying_data[16];
-    // Texture data
-    unsigned int            texture_unit_size;
-    uint32_t                sampler_value[MAX_COMBINED_TEXTURE_IMAGE_UNITS]; // points to an active texture unit
-    arg_data_t              sampler_data[MAX_COMBINED_TEXTURE_IMAGE_UNITS];
-    arg_data_t              image_data[MAX_COMBINED_TEXTURE_IMAGE_UNITS];
-    // Fragment data
-    unsigned int            gl_fragcolor_location;
-    int                     gl_fragcoord_location;
-    int                     gl_discard_location;
-} program_t;
-
-unsigned int            _current_program;
-program_t               _programs[MAX_PROGRAMS];
-
-typedef struct {
-    cl_kernel never, always, less, lequal, equal, greater, gequal, notequal;
-} depth_kernel_container_t;
-
-typedef struct {
-    cl_kernel points, line_stip, line_loop, lines, triangle_strip, triangle_fan, triangles;
-} rasterization_kernel_container_t;
-
-typedef struct {
-    cl_kernel enabled_rgba4, disabled_rgba4, rgb5_a1, rgb565;
-} dithering_kernel_container_t;
-
-typedef struct {
-    cl_kernel bit16, bit8;
-} clear_kernel_container_t;
-
-typedef struct {
-    dithering_kernel_container_t dithering;
-    depth_kernel_container_t depth;
-    clear_kernel_container_t clear;
-    rasterization_kernel_container_t rasterization;
-    cl_kernel viewport_division, perspective_division, readnpixels, strided_write;
-} kernel_container_t;
-
-kernel_container_t _kernels; 
-
-typedef struct {
-    GLboolean depth, stencil, scissor, pixel_ownership, dithering, bleding, culling
-} enabled_container_t;
+kernel_container_t  _kernels; // Filled using constructor attribute
+box_t               _viewport; // TODO: Checkout the default initial value
 
 enabled_container_t _enableds = {
     .dithering = GL_TRUE,
     .culling = GL_FALSE,
 };
-
-typedef struct {
-    GLboolean r,g,b,a;
-} color_mask_t;
-
-typedef struct {
-    GLboolean front, back;
-} stencil_mask_t;
-
-typedef struct {
-    color_mask_t color;
-    GLboolean depth;
-    stencil_mask_t stencil;
-} mask_container_t;
 
 mask_container_t _masks = {
     .color = { .r=GL_FALSE, .g=GL_FALSE, .b=GL_FALSE, .a=GL_FALSE },
@@ -224,149 +57,38 @@ mask_container_t _masks = {
 GLenum _front_face = GL_CCW;
 GLenum _cull_face = GL_BACK;
 
-typedef struct
-{
-    uint8_t unpack_aligment;
-} pixel_store_t;
+pixel_store_t _pixel_store = { .unpack_aligment = 4 };
 
-pixel_store_t _pixel_store = {
-    .unpack_aligment = 4,
-};
+unsigned char     _vertex_attrib_enable[MAX_VERTEX_ATTRIBS]; // TODO: use it as checker for state
+unsigned char     _vertex_attrib_state[MAX_VERTEX_ATTRIBS];
+vertex_attrib_u   _vertex_attribs[MAX_VERTEX_ATTRIBS];
+uint32_t _current_active_texture = 0;
+active_texture_t _active_textures[MAX_COMBINED_TEXTURE_IMAGE_UNITS]; // defines what textures are active
 
-typedef struct {
-    uint32_t s, t, min_filter, mag_filter;
-} texture_wraps_t;
-
-typedef struct
-{
-    texture_wraps_t wraps;
-    uint32_t width, height;
-    GLenum internalformat;
-    cl_mem mem;
-} texture_unit_t;
-
-typedef struct
-{
-    uint32_t binding;
-} active_texture_t;
-
-
-texture_unit_t _texture_units[16];
-
-active_texture_t _active_textures[MAX_COMBINED_TEXTURE_IMAGE_UNITS];
-uint32_t _current_active_texture=0;
-
-
-typedef struct {
-    void *less;
-} DEPTH_KERNEL;
-
-typedef struct {
-    void *rgba4, *rgba8;
-} COLOR_KERNEL;
-
-typedef struct {
-    cl_kernel triangles
-} rasterization_kernels_t;
+/****** MEMORY HANDLERS ******/
+// TODO: 
 
 GLboolean _kernel_load_status;
-DEPTH_KERNEL _depth_kernel;
-COLOR_KERNEL _color_kernel;
-rasterization_kernels_t _rasterization_kernels;
-void *_viewport_division_kernel;
-void *_perspective_division_kernel;
-void *_readnpixels_kernel;
-void *_strided_write_kernel;
 
-/******s BUFFER objects ******\
- * TODOs: Re think this, I think it is actually more tricky than the first though. 
- * Seams that the program object holds also the vertex attributes, and the VAO is on 
- * server side.
- * 
-*/
+GLuint _buffer_binding          = 0;
+GLuint _framebuffer_binding     = 0;
+GLuint _renderbuffer_binding    = 0;
+GLuint _texture_binding         = 0;
+GLuint _current_program         = 0;
 
-typedef struct {
-    GLboolean used;
-    GLenum target;
-    void* mem;
-} buffer_t;
+buffer_t        _buffers        [MAX_BUFFER];
+framebuffer_t   _framebuffers   [MAX_FRAMEBUFFER];
+program_t       _programs       [MAX_PROGRAMS];
+renderbuffer_t  _renderbuffers  [MAX_RENDERBUFFER];
+texture_unit_t  _texture_units  [MAX_TEXTURE];
 
-
-buffer_t _buffers[MAX_BUFFER];
-GLuint _buffer_binding;
-
-/****** FRAMEBUFFER objects ******\
- * 
- * 
-*/
-
-typedef struct {
-    GLuint color_attachment0, depth_attachment, stencil_attachment;
-    GLboolean used;
-} framebuffer_t;
-
-framebuffer_t _framebuffers[MAX_FRAMEBUFFER];
-GLuint _framebuffer_binding;
-
-/****** RENDERBUFFER objects ******\
- * 
- * 
-*/
-
-typedef struct {
-    cl_mem mem;
-    GLenum internalformat;
-    GLsizei width, height;
-    GLboolean used;
-} renderbuffer_t;
-
-renderbuffer_t _renderbuffers[MAX_RENDERBUFFER];
-GLuint _renderbuffer_binding;
-
-/****** TEXTURE 2D objects ******\
- * 
- * 
-*/
-
-typedef struct {
-    cl_mem mem;
-    GLenum internalformat;
-    GLsizei width, height;
-    GLboolean used;
-    #ifdef IMAGE_SUPPORT
-    cl_sampler sampler;
-    #endif
-} TEXTURE_2D;
-
-TEXTURE_2D _textures[MAX_TEXTURE];
-GLuint _texture_binding;
-
-/****** PER-FRAGMENT objects ******\
- * 
- * 
-*/
-
-// Color
-typedef struct { GLboolean red, green, blue, alpha; } COLOR_MASK;
-
-COLOR_MASK _color_mask = {1, 1, 1, 1};
 // Depth
-typedef struct { GLfloat n, f; } DEPTH_RANGE; // z-near & z-far
-
-GLboolean   _depth_enabled = 0;
-GLboolean   _depth_mask = 1;
 GLenum      _depth_func = GL_LESS;
-DEPTH_RANGE _depth_range = {0.0, 1.0};
+depth_range_t _depth_range = { .n=0.0, .f=1.0};
 // Scissor
 
-GLuint _scissor_enabled = 0;
-BOX _scissor_box;
-// Stencil
-typedef struct { GLboolean front, back; } STENCIL_MASK;
+box_t _scissor_box;
 
-GLuint _stencil_enabled = 0;
-STENCIL_MASK _stencil_mask = {1, 1};
-// TODO blending & dithering
 
 /****** SHORCUTS MACROS ******/
 #define COLOR_ATTACHMENT0 _renderbuffers[_framebuffers[_framebuffer_binding].color_attachment0]
@@ -410,7 +132,7 @@ unsigned int sizeof_type(GLenum type) {
     NOT_IMPLEMENTED;
 } 
 
-/****** OpenGL Interface Implementations ******\
+/************ OpenGL Interface Implementations ************\
  * 
  * 
 */
@@ -448,7 +170,7 @@ GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuff
 }
 
 GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) {
-    if (!_textures[texture].used) RETURN_ERROR(GL_INVALID_OPERATION);
+    if (!_texture_units[texture].used) RETURN_ERROR(GL_INVALID_OPERATION);
 
     if (target == GL_TEXTURE_2D) {
         _active_textures[_current_active_texture].binding = texture;
@@ -619,7 +341,7 @@ GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) {
 }
 
 GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) {
-    _depth_range = (DEPTH_RANGE) {.n=n, .f=f};
+    _depth_range = (depth_range_t) {.n=n, .f=f};
 }
 
 GL_APICALL void GL_APIENTRY glDisable (GLenum cap) {
@@ -680,14 +402,14 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
             }
             vertex_array_mem[attrib] = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_vertices, NULL);
 
-            setKernelArg(_strided_write_kernel, 0, sizeof(pointer->size),       &pointer->size);
-            setKernelArg(_strided_write_kernel, 1, sizeof(pointer->type),       &pointer->type);
-            setKernelArg(_strided_write_kernel, 2, sizeof(pointer->normalized), &pointer->normalized);
-            setKernelArg(_strided_write_kernel, 3, sizeof(pointer->stride),     &pointer->stride);
-            setKernelArg(_strided_write_kernel, 4, sizeof(cl_mem),              &temp_mem[attrib]);
-            setKernelArg(_strided_write_kernel, 5, sizeof(cl_mem),              &vertex_array_mem[attrib]);
+            setKernelArg(_kernels.strided_write, 0, sizeof(pointer->size),       &pointer->size);
+            setKernelArg(_kernels.strided_write, 1, sizeof(pointer->type),       &pointer->type);
+            setKernelArg(_kernels.strided_write, 2, sizeof(pointer->normalized), &pointer->normalized);
+            setKernelArg(_kernels.strided_write, 3, sizeof(pointer->stride),     &pointer->stride);
+            setKernelArg(_kernels.strided_write, 4, sizeof(cl_mem),              &temp_mem[attrib]);
+            setKernelArg(_kernels.strided_write, 5, sizeof(cl_mem),              &vertex_array_mem[attrib]);
             
-            enqueueNDRangeKernel(command_queue, _strided_write_kernel, num_vertices);
+            enqueueNDRangeKernel(command_queue, _kernels.strided_write, num_vertices);
         }
     }
     
@@ -726,12 +448,12 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(vertex_kernel, CURRENT_PROGRAM.gl_position_location, sizeof(gl_Positions), &gl_Positions);
 
     // Perspective Division Kernel Set Up
-    setKernelArg(_perspective_division_kernel, 0, sizeof(gl_Positions), &gl_Positions);
+    setKernelArg(_kernels.perspective_division, 0, sizeof(gl_Positions), &gl_Positions);
 
     // Viewport Division Kernel Set Up
-    setKernelArg(_viewport_division_kernel, 0, sizeof(gl_Positions), &gl_Positions);
-    setKernelArg(_viewport_division_kernel, 1, sizeof(_viewport),    &_viewport);
-    setKernelArg(_viewport_division_kernel, 2, sizeof(_depth_range), &_depth_range);
+    setKernelArg(_kernels.viewport_division, 0, sizeof(gl_Positions), &gl_Positions);
+    setKernelArg(_kernels.viewport_division, 1, sizeof(_viewport),    &_viewport);
+    setKernelArg(_kernels.viewport_division, 2, sizeof(_depth_range), &_depth_range);
 
     /* ---- Set Up Per-Fragment Buffers ---- */
     cl_mem fragment_in_buffer, gl_FragCoord, gl_Discard, gl_FragColor;
@@ -749,15 +471,15 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     if (mode==GL_TRIANGLES) {
         // arg 0 is reserved for the primitive index
-        setKernelArg(_rasterization_kernels.triangles, 1, sizeof(int),      &COLOR_ATTACHMENT0.width);
-        setKernelArg(_rasterization_kernels.triangles, 2, sizeof(int),      &CURRENT_PROGRAM.varying_size);
-        setKernelArg(_rasterization_kernels.triangles, 3, sizeof(cl_mem),   &gl_Positions);
-        setKernelArg(_rasterization_kernels.triangles, 4, sizeof(cl_mem),   &gl_FragCoord);
-        setKernelArg(_rasterization_kernels.triangles, 5, sizeof(cl_mem),   &gl_Discard);
-        setKernelArg(_rasterization_kernels.triangles, 6, sizeof(cl_mem),   &vertex_out_buffer);
-        setKernelArg(_rasterization_kernels.triangles, 7, sizeof(cl_mem),   &fragment_in_buffer);
-        setKernelArg(_rasterization_kernels.triangles, 8, sizeof(uint16_t), &_front_face);
-        setKernelArg(_rasterization_kernels.triangles, 9, sizeof(uint16_t), &cull_face);
+        setKernelArg(_kernels.rasterization.triangles, 1, sizeof(int),      &COLOR_ATTACHMENT0.width);
+        setKernelArg(_kernels.rasterization.triangles, 2, sizeof(int),      &CURRENT_PROGRAM.varying_size);
+        setKernelArg(_kernels.rasterization.triangles, 3, sizeof(cl_mem),   &gl_Positions);
+        setKernelArg(_kernels.rasterization.triangles, 4, sizeof(cl_mem),   &gl_FragCoord);
+        setKernelArg(_kernels.rasterization.triangles, 5, sizeof(cl_mem),   &gl_Discard);
+        setKernelArg(_kernels.rasterization.triangles, 6, sizeof(cl_mem),   &vertex_out_buffer);
+        setKernelArg(_kernels.rasterization.triangles, 7, sizeof(cl_mem),   &fragment_in_buffer);
+        setKernelArg(_kernels.rasterization.triangles, 8, sizeof(uint16_t), &_front_face);
+        setKernelArg(_kernels.rasterization.triangles, 9, sizeof(uint16_t), &cull_face);
     } else NOT_IMPLEMENTED;
 
     // Fragment Kernel Set Up
@@ -836,13 +558,13 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     cl_command_queue command_queue = getCommandQueue();
 
     enqueueNDRangeKernel(command_queue, vertex_kernel,                  num_vertices);
-    enqueueNDRangeKernel(command_queue, _perspective_division_kernel,   num_vertices);
-    enqueueNDRangeKernel(command_queue, _viewport_division_kernel,      num_vertices);
+    enqueueNDRangeKernel(command_queue, _kernels.perspective_division,   num_vertices);
+    enqueueNDRangeKernel(command_queue, _kernels.viewport_division,      num_vertices);
 
     for(GLsizei primitive=0; primitive < num_primitives; ++primitive) {
-        setKernelArg(_rasterization_kernels.triangles, 0, sizeof(primitive), &primitive);
+        setKernelArg(_kernels.rasterization.triangles, 0, sizeof(primitive), &primitive);
 
-        enqueueNDRangeKernel(command_queue, _rasterization_kernels.triangles,   num_fragments);   
+        enqueueNDRangeKernel(command_queue, _kernels.rasterization.triangles,   num_fragments);   
         enqueueNDRangeKernel(command_queue, fragment_kernel,                    num_fragments);
 
         // Pixel Ownership
@@ -967,8 +689,8 @@ GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures) {
     GLuint id = 1;
 
     while(n > 0 && id < MAX_TEXTURE) {
-        if (!_textures[id].used) {
-            _textures[id].used = GL_TRUE;
+        if (!_texture_units[id].used) {
+            _texture_units[id].used = GL_TRUE;
             *textures = id;
 
             textures += 1; 
@@ -1146,7 +868,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = createProgramWithBinary(GLSC2_kernel_rasterization_triangle_pocl, sizeof(GLSC2_kernel_rasterization_triangle_pocl));
         #endif
         buildProgram(gl_program);
-        _rasterization_kernels.triangles = createKernel(gl_program, "gl_rasterization_triangle");
+        _kernels.rasterization.triangles = createKernel(gl_program, "gl_rasterization_triangle");
 
         #ifdef HOSTGPU
         if (0 != read_file(PATH_OF("kernel.viewport_division.cl"), &file))
@@ -1157,7 +879,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = createProgramWithBinary(GLSC2_kernel_viewport_division_pocl, sizeof(GLSC2_kernel_viewport_division_pocl));
         #endif
         buildProgram(gl_program);
-        _viewport_division_kernel = createKernel(gl_program, "gl_viewport_division");
+        _kernels.viewport_division = createKernel(gl_program, "gl_viewport_division");
 
         #ifdef HOSTGPU
         if (0 != read_file(PATH_OF("kernel.perspective_division.cl"), &file))
@@ -1168,7 +890,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = createProgramWithBinary(GLSC2_kernel_perspective_division_pocl, sizeof(GLSC2_kernel_perspective_division_pocl));
         #endif
         buildProgram(gl_program);
-        _perspective_division_kernel = createKernel(gl_program, "gl_perspective_division");
+        _kernels.perspective_division = createKernel(gl_program, "gl_perspective_division");
 
         #ifdef HOSTGPU
         if (0 != read_file(PATH_OF("kernel.readnpixels.cl"), &file))
@@ -1179,7 +901,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = createProgramWithBinary(GLSC2_kernel_readnpixels_pocl, sizeof(GLSC2_kernel_readnpixels_pocl));
         #endif
         buildProgram(gl_program);
-        _readnpixels_kernel = createKernel(gl_program, "gl_rgba4_rgba8");
+        _kernels.readnpixels = createKernel(gl_program, "gl_rgba4_rgba8");
 
         #ifdef HOSTGPU
         if (0 != read_file(PATH_OF("kernel.strided_write.cl"), &file))
@@ -1190,7 +912,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         gl_program = createProgramWithBinary(GLSC2_kernel_strided_write_pocl, sizeof(GLSC2_kernel_strided_write_pocl));
         #endif
         buildProgram(gl_program);
-        _strided_write_kernel = createKernel(gl_program, "gl_strided_write");
+        _kernels.strided_write = createKernel(gl_program, "gl_strided_write");
 
         gl_program = createProgramWithBinary(GLSC2_kernel_clear_pocl, sizeof(GLSC2_kernel_clear_pocl));
         buildProgram(gl_program);
@@ -1388,16 +1110,16 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
             if (COLOR_ATTACHMENT0.internalformat != GL_RGBA4) NOT_IMPLEMENTED;
             void *dst_buff = createBuffer(MEM_WRITE_ONLY, bufSize, NULL);
 
-            setKernelArg(_readnpixels_kernel, 0, sizeof(COLOR_ATTACHMENT0.mem), &COLOR_ATTACHMENT0.mem);
-            setKernelArg(_readnpixels_kernel, 1, sizeof(void*), &dst_buff);
-            setKernelArg(_readnpixels_kernel, 2, sizeof(int), &x);
-            setKernelArg(_readnpixels_kernel, 3, sizeof(int), &y);
-            setKernelArg(_readnpixels_kernel, 4, sizeof(int), &width);
-            setKernelArg(_readnpixels_kernel, 5, sizeof(int), &height);
+            setKernelArg(_kernels.readnpixels, 0, sizeof(COLOR_ATTACHMENT0.mem), &COLOR_ATTACHMENT0.mem);
+            setKernelArg(_kernels.readnpixels, 1, sizeof(void*), &dst_buff);
+            setKernelArg(_kernels.readnpixels, 2, sizeof(int), &x);
+            setKernelArg(_kernels.readnpixels, 3, sizeof(int), &y);
+            setKernelArg(_kernels.readnpixels, 4, sizeof(int), &width);
+            setKernelArg(_kernels.readnpixels, 5, sizeof(int), &height);
 
             void *command_queue = getCommandQueue();
             size_t global_work_size = bufSize/4; // 4 bytes x color
-            enqueueNDRangeKernel(command_queue, _readnpixels_kernel, global_work_size);
+            enqueueNDRangeKernel(command_queue, _kernels.readnpixels, global_work_size);
             enqueueReadBuffer(command_queue, dst_buff, bufSize, data);
         }
     }
@@ -1504,7 +1226,7 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
         RETURN_ERROR(GL_INVALID_OPERATION);
     if (levels != 1 && (IS_POWER_OF_2(width) || IS_POWER_OF_2(height)))
         RETURN_ERROR(GL_INVALID_OPERATION);
-    if (_textures[_texture_binding].width || _textures[_texture_binding].height)
+    if (_texture_units[_texture_binding].width || _texture_units[_texture_binding].height)
         RETURN_ERROR(GL_INVALID_OPERATION);
     
     #ifndef HOSTGPU
@@ -1586,7 +1308,7 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     desc.image_type = CL_MEM_OBJECT_IMAGE2D;
     desc.num_mip_levels = levels - 1;
 
-    _textures[_texture_binding].mem = createImage(MEM_READ_ONLY, &format, &desc, NULL);
+    //[_texture_binding].mem = createImage(MEM_READ_ONLY, &format, &desc, NULL);
     #endif
 }
 
@@ -1658,7 +1380,7 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
     else if (format == GL_RED && type == GL_UNSIGNED_BYTE) pixel_size = sizeof(uint8_t[1]);
     else RETURN_ERROR(GL_INVALID_ENUM);
 
-    enqueueWriteImage(getCommandQueue(), _textures[_texture_binding].mem, &origin, &region, pixel_size*width, 0, pixels);
+    //enqueueWriteImage(getCommandQueue(), _textures[_texture_binding].mem, &origin, &region, pixel_size*width, 0, pixels);
     #endif
 }
 
