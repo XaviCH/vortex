@@ -8,13 +8,13 @@
 
 #define NOT_IMPLEMENTED              \
     {                               \
-        printf("NOT_IMPLEMENTED: %s:%d\n", __FILE__, __LINE__); \
+        printf("Funtion %s at %s:%d is not implemented.\n", __func__, __FILE__, __LINE__); \
         exit(0);                     \
     }
 
 #define INTERNAL_ERROR               \
     ({                               \
-        printf("INTERNAL_ERROR\n");  \
+        printf("Unexpected reached point in %s at %s:%d.\n");  \
         exit(0);                     \
     })
 
@@ -46,12 +46,15 @@ GLenum gl_error = GL_NO_ERROR;
 #define FRAGMENT_SHADER_FNAME "main_fs"
 
 #define POCL_BINARY 0x0
+#define SAMPLER2D_T GL_FLOAT  +1
+#define IMAGE_T SAMPLER2D_T +1
 
 // OpenGL required definitions
 #define MAX_VERTEX_ATTRIBS 16
 #define MAX_VERTEX_UNIFORM_VECTORS sizeof(float[4])         // atMost MAX_UNIFORM_VECTORS
 #define MAX_FRAGMENT_UNIFORM_VECTORS sizeof(float[4])       // atMost MAX_UNIFORM_VECTORS
 #define MAX_RENDERBUFFER_SIZE sizeof(uint16_t[1920][1080])  // TODO: Maybe another number
+#define MAX_COMBINED_TEXTURE_IMAGE_UNITS 16
 
 #define GL_POSITION "gl_Position"
 #define GL_FRAGCOLOR "gl_FragColor"
@@ -149,6 +152,11 @@ typedef struct {
     // Varying data
     unsigned int            varying_size;
     arg_data_t              varying_data[16];
+    // Texture data
+    unsigned int            texture_unit_size;
+    uint32_t                sampler_value[MAX_COMBINED_TEXTURE_IMAGE_UNITS]; // points to an active texture unit
+    arg_data_t              sampler_data[MAX_COMBINED_TEXTURE_IMAGE_UNITS];
+    arg_data_t              image_data[MAX_COMBINED_TEXTURE_IMAGE_UNITS];
     // Fragment data
     unsigned int            gl_fragcolor_location;
     int                     gl_fragcoord_location;
@@ -215,6 +223,39 @@ mask_container_t _masks = {
 
 GLenum _front_face = GL_CCW;
 GLenum _cull_face = GL_BACK;
+
+typedef struct
+{
+    uint8_t unpack_aligment;
+} pixel_store_t;
+
+pixel_store_t _pixel_store = {
+    .unpack_aligment = 4,
+};
+
+typedef struct {
+    uint32_t s, t, min_filter, mag_filter;
+} texture_wraps_t;
+
+typedef struct
+{
+    texture_wraps_t wraps;
+    uint32_t width, height;
+    GLenum internalformat;
+    cl_mem mem;
+} texture_unit_t;
+
+typedef struct
+{
+    uint32_t binding;
+} active_texture_t;
+
+
+texture_unit_t _texture_units[16];
+
+active_texture_t _active_textures[MAX_COMBINED_TEXTURE_IMAGE_UNITS];
+uint32_t _current_active_texture=0;
+
 
 typedef struct {
     void *less;
@@ -358,6 +399,13 @@ unsigned int sizeof_type(GLenum type) {
     case GL_UNSIGNED_INT:
     case GL_FLOAT:
         return 4;
+    case SAMPLER2D_T:
+        return sizeof(cl_sampler);
+    case IMAGE_T:
+        #ifdef HOSTGPU
+        #else
+        return sizeof(cl_mem);
+        #endif
     }
     NOT_IMPLEMENTED;
 } 
@@ -366,7 +414,14 @@ unsigned int sizeof_type(GLenum type) {
  * 
  * 
 */
-GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) {
+    if (texture < GL_TEXTURE0) RETURN_ERROR(GL_INVALID_ENUM);
+    
+    uint32_t id = texture - GL_TEXTURE0; 
+    if (id >= MAX_COMBINED_TEXTURE_IMAGE_UNITS) RETURN_ERROR(GL_INVALID_OPERATION);
+    
+    _current_active_texture = id;
+}
 
 GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) {
     if (!_buffers[buffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
@@ -396,6 +451,7 @@ GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) {
     if (!_textures[texture].used) RETURN_ERROR(GL_INVALID_OPERATION);
 
     if (target == GL_TEXTURE_2D) {
+        _active_textures[_current_active_texture].binding = texture;
         _texture_binding = texture;
     } else NOT_IMPLEMENTED;
 }
@@ -590,6 +646,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
     if (first <0) RETURN_ERROR(GL_INVALID_VALUE);
     if (first != 0) NOT_IMPLEMENTED;
+    if (mode == GL_TRIANGLE_FAN || mode == GL_TRIANGLE_STRIP) NOT_IMPLEMENTED;
     /* ---- General vars ---- */
     cl_int tmp_err; 
     cl_buffer_region region;
@@ -714,12 +771,36 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
             );
         }
     }
+    for(int sampler = 0; sampler < CURRENT_PROGRAM.texture_unit_size; ++sampler) {
+        typedef struct __attribute__((packed)) {
+            unsigned int width, height;
+            unsigned int internalformat;
+            unsigned int flags;
+        } sampler2D_t;
+
+        texture_unit_t *texture_unit = _texture_units + _active_textures[CURRENT_PROGRAM.sampler_value[sampler]].binding;
+
+        sampler2D_t sampler2D = {
+            .width = texture_unit->width,
+            .height = texture_unit->height,
+            .internalformat = texture_unit->internalformat,
+            .flags = 0x0
+        };
+
+        setKernelArg(fragment_kernel,
+            CURRENT_PROGRAM.sampler_data[sampler].fragment_location,
+            sizeof(sampler2D_t),
+            &sampler2D
+        );
+
+        setKernelArg(fragment_kernel,
+            CURRENT_PROGRAM.image_data[sampler].fragment_location,
+            sizeof(texture_unit->mem),
+            &texture_unit->mem
+        );
+    }
 
     // Texture vars
-    // TODO: Texture support, this is 
-    int active_textures = _texture_binding != 0;
-    // In fragment args
-    int fragment_in_out_location = CURRENT_PROGRAM.active_uniforms + active_textures*2; // sample_t + image_t 
     region.size = num_fragments*sizeof(float[4]);
     for(int in=0; in < CURRENT_PROGRAM.varying_size; ++in) {
         region.origin = sizeof(float[4])*num_fragments*in;
@@ -764,9 +845,14 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         enqueueNDRangeKernel(command_queue, _rasterization_kernels.triangles,   num_fragments);   
         enqueueNDRangeKernel(command_queue, fragment_kernel,                    num_fragments);
 
+        // Pixel Ownership
+        // Scissor Test
+        // Multisample frag operations
+        // Stencil test
         if (depth_kernel) enqueueNDRangeKernel(command_queue, depth_kernel, num_fragments);
-
+        // Blending
         enqueueNDRangeKernel(command_queue, dither_kenel, num_fragments);
+        // Draw on buffers
     }
 }
 
@@ -964,6 +1050,11 @@ GL_APICALL GLint GL_APIENTRY glGetUniformLocation (GLuint program, const GLchar 
         if (strcmp(name, CURRENT_PROGRAM.uniforms_data[uniform].name) == 0) return uniform;
     }
 
+    for(size_t sampler=0; sampler<CURRENT_PROGRAM.texture_unit_size; ++sampler) {
+        printf("name: %s, %s\n",CURRENT_PROGRAM.sampler_data[sampler].name, name);
+        if (strcmp(name, CURRENT_PROGRAM.sampler_data[sampler].name) == 0) return CURRENT_PROGRAM.active_uniforms+sampler;
+    }
+
     return -1;
 }
 
@@ -983,21 +1074,22 @@ GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode) {
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap) {
-    NOT_IMPLEMENTED;
-}
+GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap) NOT_IMPLEMENTED;
 
-GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) {
-    NOT_IMPLEMENTED;
-}
+GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) {
+    switch (pname)
+    {
+    case GL_UNPACK_ALIGNMENT:
+        if (param != 1 && param != 2 && param != 4 && param != 8) RETURN_ERROR(GL_INVALID_VALUE);
+        _pixel_store.unpack_aligment = param;
+        return;
+    }
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) {
-    NOT_IMPLEMENTED;
-}
+GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) NOT_IMPLEMENTED;
 
 #ifdef HOSTGPU
 #include "common.h"
@@ -1181,6 +1273,8 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
         clGetKernelInfo(_programs[program].fragment_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_num_args, NULL);
         printf("kernel args frag: %d", kernel_num_args);
+        uint32_t n_images = 0, n_samplers = 0;
+
         for(cl_uint arg=0; arg < kernel_num_args; ++arg) {
             cl_kernel_arg_address_qualifier addr_qualifier;
             cl_kernel_arg_type_qualifier type_qualifier;
@@ -1214,8 +1308,8 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
             arg_data_t *arg_data;
             int exist = 0;
-            
-            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT) {
+
+            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT && type != IMAGE_T) {
                 int find = -1;
                 for(int uniform; _programs[program].active_uniforms; ++uniform) {
                     if (strcmp(name, _programs[program].uniforms_data[uniform].name) == 0) {
@@ -1248,6 +1342,13 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
                 }
                 arg_data = _programs[program].varying_data + find;
                 exist = 1;
+            } else if (type == SAMPLER2D_T) {
+                arg_data = _programs[program].sampler_data + n_samplers;
+                ++n_samplers;
+                ++_programs[program].texture_unit_size;
+            } else if (type == IMAGE_T) {
+                arg_data = _programs[program].image_data + n_images;
+                ++n_images;
             } else {
                 _programs[program].last_load_attempt = GL_FALSE;
                 strcpy(_programs[program].log, "Failed load attempt");
@@ -1265,6 +1366,11 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
                 };
                 strcpy(arg_data->name, name); 
             }
+        }
+        if (n_images != n_samplers) {
+            _programs[program].last_load_attempt = GL_FALSE;
+            strcpy(_programs[program].log, "Failed load attempt");
+            return;
         }
     } else NOT_IMPLEMENTED;
 
@@ -1401,7 +1507,7 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     if (_textures[_texture_binding].width || _textures[_texture_binding].height)
         RETURN_ERROR(GL_INVALID_OPERATION);
     
-    #ifndef IMAGE_SUPPORT
+    #ifndef HOSTGPU
     uint32_t pixel_size;
 
     switch (internalformat) {
@@ -1426,9 +1532,11 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
         RETURN_ERROR(GL_INVALID_ENUM);
     }
 
-    _textures[_texture_binding].width = width;
-    _textures[_texture_binding].height = height;
-    _textures[_texture_binding].internalformat = internalformat;
+    texture_unit_t *texture_unit = _texture_units + _active_textures[_current_active_texture].binding;
+
+    texture_unit->width = width;
+    texture_unit->height = height;
+    texture_unit->internalformat = internalformat;
 
     GLsizei level = 0;
     size_t total_pixels = 0;
@@ -1437,7 +1545,7 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
         width /= 2;
         height /= 2;
     }
-    _textures[_texture_binding].mem = createBuffer(MEM_READ_ONLY, total_pixels*pixel_size, NULL);
+    texture_unit->mem = createBuffer(MEM_READ_ONLY, total_pixels*pixel_size, NULL);
     #else 
     // https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_API.html#_mapping_to_external_image_formats
     cl_image_format format; 
@@ -1484,21 +1592,55 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
 
 GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) NOT_IMPLEMENTED;
 GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params) NOT_IMPLEMENTED;
-GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) {
+    // Chekc if value is correct
+    switch (pname)
+    {
+    case GL_TEXTURE_WRAP_S:
+    case GL_TEXTURE_WRAP_T:
+        if (param != GL_CLAMP_TO_EDGE && param != GL_REPEAT && param != GL_MIRRORED_REPEAT) NOT_IMPLEMENTED;
+        break;
+    case GL_TEXTURE_MAG_FILTER:
+        if (param != GL_NEAREST && param != GL_LINEAR) NOT_IMPLEMENTED;
+        break;
+    case GL_TEXTURE_MIN_FILTER:
+        if (param != GL_NEAREST                && param != GL_LINEAR && 
+            param != GL_NEAREST_MIPMAP_NEAREST && param != GL_NEAREST_MIPMAP_LINEAR && 
+            param != GL_LINEAR_MIPMAP_NEAREST  && param != GL_LINEAR_MIPMAP_LINEAR
+            ) NOT_IMPLEMENTED;
+        break;
+    default:
+        NOT_IMPLEMENTED;
+    }
+    // Set value
+    switch (pname)
+    {
+    case GL_TEXTURE_WRAP_S:
+        _texture_units[_active_textures[_current_active_texture].binding].wraps.s          = param; return;        
+    case GL_TEXTURE_WRAP_T:
+        _texture_units[_active_textures[_current_active_texture].binding].wraps.t          = param; return;
+    case GL_TEXTURE_MIN_FILTER:
+        _texture_units[_active_textures[_current_active_texture].binding].wraps.min_filter = param; return;
+    case GL_TEXTURE_MAG_FILTER:
+        _texture_units[_active_textures[_current_active_texture].binding].wraps.mag_filter = param; return;
+    }
+};
 GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) {
     
-    if (level < 0 || level > (int) log2f(max(_textures[_texture_binding].width,_textures[_texture_binding].height)))
+    texture_unit_t *texture_unit = _texture_units + _active_textures[_current_active_texture].binding;
+    
+    if (level < 0 || level > (int) log2f(max(texture_unit->width,texture_unit->height)))
         RETURN_ERROR(GL_INVALID_VALUE);
 
-    if (xoffset < 0 || yoffset < 0 || xoffset + width > _textures[_texture_binding].width || yoffset + height > _textures[_texture_binding].height)
+    if (xoffset < 0 || yoffset < 0 || xoffset + width > texture_unit->width || yoffset + height > texture_unit->height)
         RETURN_ERROR(GL_INVALID_VALUE);
 
     // TODO subImage2d kernel
-    #ifndef IMAGE_SUPPORT
-    if (_textures[_texture_binding].internalformat == GL_RGBA8 && format == GL_RGBA && type == GL_UNSIGNED_BYTE && xoffset == 0 && yoffset == 0) {
-        enqueueWriteBuffer(getCommandQueue(),_textures[_texture_binding].mem, CL_TRUE, 0, width*height*sizeof(uint8_t[4]), pixels);
+    #ifndef HOSTGPU
+    if (texture_unit->internalformat == GL_RGBA8 && format == GL_RGBA && type == GL_UNSIGNED_BYTE && xoffset == 0 && yoffset == 0) {
+        enqueueWriteBuffer(getCommandQueue(),texture_unit->mem, CL_TRUE, 0, width*height*sizeof(uint8_t[4]), pixels);
     } else NOT_IMPLEMENTED;
     #else
     size_t origin[2], region[2], pixel_size;
@@ -1551,8 +1693,12 @@ GL_APICALL void GL_APIENTRY glUniform1f (GLint location, GLfloat v0) {
 GL_APICALL void GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const GLfloat *value) {
     GENERIC_UNIFORM_V(1, GL_FLOAT, GLfloat);
 }
-GL_APICALL void GL_APIENTRY glUniform1i (GLint location, GLint v0) {
-    GENERIC_UNIFORM(1, GL_INT, GLint, P99_PROTECT({v0}));
+GL_APICALL void GL_APIENTRY glUniform1i (GLint location, GLint v0) { // TODO: refactor uniforms with samplers
+    GLuint sampler_loc = location - CURRENT_PROGRAM.active_uniforms;
+    if (sampler_loc < CURRENT_PROGRAM.texture_unit_size)
+        CURRENT_PROGRAM.sampler_value[sampler_loc] = v0;
+    else
+        GENERIC_UNIFORM(1, GL_INT, GLint, P99_PROTECT({v0}));
 }
 GL_APICALL void GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const GLint *value) {
     GENERIC_UNIFORM_V(1, GL_INT, GLint);
@@ -1728,10 +1874,18 @@ unsigned int size_from_name_type(const char* name_type) {
     RETURN_IF_SIZE_FROM("short");
     RETURN_IF_SIZE_FROM("char");
     RETURN_IF_SIZE_FROM("bool");
+    #undef RETURN_IF_SIZE_FROM
+
+    // OpenGL - OpenCL special types
+    if (strcmp(name_type, "sampler2D_t") == 0) return 1;
+    #ifdef HOSTGPU
+    if (strcmp(name_type, "image_t") == 0) return 1;
+    #else
+    if (strncmp(name_type, "uchar", sizeof("uchar") -1) == 0) return 1;
+    #endif
     printf("%s\n", name_type);
     NOT_IMPLEMENTED;
 
-    #undef RETURN_IF_SIZE_FROM
 }
 unsigned int type_from_name_type(const char* name_type) {
     if (strncmp(name_type, "float",  sizeof("float") -1)  == 0) return GL_FLOAT;
@@ -1739,6 +1893,16 @@ unsigned int type_from_name_type(const char* name_type) {
     if (strncmp(name_type, "short",  sizeof("short") -1)  == 0) return GL_SHORT;
     if (strncmp(name_type, "char",   sizeof("char")  -1)  == 0) return GL_BYTE;
     if (strncmp(name_type, "bool",   sizeof("bool")  -1)  == 0) return GL_BYTE;
+    
+    // OpenGL - OpenCL special types
+    if (strcmp(name_type, "sampler2D_t") == 0) return SAMPLER2D_T;
+    #ifdef HOSTGPU
+    if (strcmp(name_type, "image_t")  == 0) return IMAGE_T;
+    #else 
+    if (strncmp(name_type, "uchar*", sizeof("uchar*")-1)  == 0) return IMAGE_T;
+    #endif
+
+    // 
     printf("%s\n", name_type);
     NOT_IMPLEMENTED;
 }

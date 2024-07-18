@@ -1,55 +1,43 @@
+#ifndef HOSTGPU
+typedef constant unsigned char* image_t;
+typedef struct __attribute__((packed)) {
+  unsigned int width, height;
+  unsigned int internalformat;
+  unsigned int flags;
+} sampler2D_t;
 
-__kernel void gl_main_vs (
-  // my imp
-  __global const float* positions,
-  __global const float2* texCoord,
-  // implementation values
-  __global float4 *gl_Positions,
-  __global float4 *gl_Primitives
+float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t sampler, float4 coord) {
+
+  int w = (int) (sampler.width * coord.x) % sampler.width;
+  int h = (int) (sampler.height * coord.y) % sampler.height;
+  image_t color = image + (h*sampler.width + w)*4;
+  
+  return (float4) ((float)*color / 256, (float)*(color+1) / 256, (float)*(color+2) / 256, (float)*(color+3) / 256);
+}
+#else
+typedef image2d_t image_t;
+typedef sampler_t sampler2D_t;
+#endif
+
+kernel void main_vs (
+  global const float4 *position,
+  global const float4 *in_texCoord,
+  global float4 *out_texCoord,
+  global float4 *gl_Position
 ) {
   int gid = get_global_id(0);
-  // in out vars
-  float x = positions[gid*3];
-  float y = positions[gid*3+1];
-  float z = positions[gid*3+2];
 
-  // vertex operations
-  gl_Positions[gid] = (float4) (x, y, z, 1.0f);
-  gl_Primitives[gid*2] = (float4) (texCoord[gid].x, texCoord[gid].y, 1.0f, 1.0f);
+  gl_Position[gid] = position[gid];
+  out_texCoord[gid] = in_texCoord[gid];
 }
 
-
-float4 texture2d(int2 size, __global const unsigned char* texture, float2 texCoord) {
-  int w = (int) (size.x * texCoord.x) % size.x;
-  int h = size.y - ((int) (size.y * texCoord.y) % size.y) - 1;
-  __global const unsigned char* color = texture + (h*size.x + w)*4;
-  
-  return (float4) ((float)*color / 255, (float)*(color+1) / 255, (float)*(color+2) / 255, (float)*(color+3) / 255);
-}
-
-__kernel void gl_main_fs (
-  // user values
-  #ifndef IMAGE_SUPPORT
-  const int2 size,
-  __global const unsigned char *image,
-  #else
-  sampler_t sampler,
-  read_only image2d_t image,
-  #endif
-  // implementation values 
-  __global float4 *gl_FragCoord, // position of the fragment in the window space, z is depth value
-  __global const float4 *gl_Rasterization,
-  __global bool *gl_Discard, // if discarded
-  __global float4 *gl_FragColor // out color of the fragment || It is deprecated in OpenGL 3.0 
+kernel void main_fs (
+  global const float4 *out_texCoord,
+  global float4 *gl_FragColor,
+  sampler2D_t ourTexture,
+  image_t image
 )
 {
   int gid = get_global_id(0);
-  // in out vars
-  float4 texCoord = gl_Rasterization[gid*2];
-  // fragment operations
-  #ifndef IMAGE_SUPPORT
-  gl_FragColor[gid] = texture2d(size, image, (float2) (texCoord.x, texCoord.y));
-  #else
-  gl_FragColor[gid] = read_imagef(image, sampler, (float2) (texCoord.x, texCoord.y));
-  #endif
+  gl_FragColor[gid] = read_imagef(image, ourTexture, out_texCoord[gid]);
 }

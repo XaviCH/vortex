@@ -73,7 +73,7 @@ kernel void gl_rasterization_triangle (
     global float4 *rasterization = gl_Rasterization + gid;
 
     // base info
-    float xf = (gid % width) + 0.5f; // center of the fragment
+    float xf = (gid % width) + 0.0f; // center of the fragment
     float yf = (gid / width) + 0.5f; // center of the fragment
 
     float4 v0 = position[0];
@@ -92,8 +92,10 @@ kernel void gl_rasterization_triangle (
 
     // barycenter
     float3 abc = get_baricentric_coords((float2) (xf,yf), v0, v1, v2);
-
-    if ((abc.x < 0.0f) || (abc.y < 0.0f) || (abc.z < 0.0f)) {
+    
+    if ((abc.x < 0.0f) || (abc.y < 0.0f) || (abc.z < 0.0f) ||
+        (abc.x > 1.0f) || (abc.y > 1.0f) || (abc.z > 1.0f) ||
+        abc.x+abc.y+abc.z > 1) {
         gl_Discard[gid] = true;
         return;
     }
