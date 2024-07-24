@@ -4,6 +4,23 @@
 #include <CL/opencl.h>
 #include <GLSC2/glsc2.h>
 
+// Extern compiled kernels
+#include "kernels/kernel.color.c"
+#include "kernels/kernel.scissor_test.c"
+#include "kernels/kernel.blending.c"
+#include "kernels/kernel.dither.c"
+#include "kernels/kernel.clear.c"
+#include "kernels/kernel.depth.c"
+#include "kernels/kernel.stencil_test.c"
+#include "kernels/kernel.perspective_division.c"
+#include "kernels/kernel.viewport_division.c"
+#include "kernels/kernel.rasterization.c"
+#include "kernels/kernel.rasterization.triangle_fan.c"
+#include "kernels/kernel.rasterization.triangle_strip.c"
+#include "kernels/kernel.readnpixels.c"
+#include "kernels/kernel.strided_write.c"
+
+
 // Our definitions
 #define MAX_BUFFER 256
 #define MAX_FRAMEBUFFER 256

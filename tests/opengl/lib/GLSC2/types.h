@@ -72,31 +72,16 @@ typedef struct {
 } program_t;
 
 typedef struct {
-    cl_kernel never, always, less, lequal, equal, greater, gequal, notequal;
-} depth_kernel_container_t;
-
-typedef struct {
     cl_kernel points, line_stip, line_loop, lines, triangle_strip, triangle_fan, triangles;
 } rasterization_kernel_container_t;
 
 typedef struct {
-    cl_kernel enabled_rgba4, disabled_rgba4, rgb5_a1, rgb565;
-} dithering_kernel_container_t;
-
-typedef struct {
-    cl_kernel bit16, bit8;
-} clear_kernel_container_t;
-
-typedef struct {
-    dithering_kernel_container_t dithering;
-    depth_kernel_container_t depth;
-    clear_kernel_container_t clear;
     rasterization_kernel_container_t rasterization;
-    cl_kernel viewport_division, perspective_division, readnpixels, strided_write;
+    cl_kernel viewport_division, perspective_division, readnpixels, strided_write, depth_test, stencil_test, scissor_test, blending, clear, dithering;
 } kernel_container_t;
 
 typedef struct {
-    GLboolean depth, stencil, scissor, pixel_ownership, dithering, bleding, culling;
+    GLboolean depth_test, stencil_test, scissor_test, pixel_ownership, dither, blend, cull_face;
 } enabled_container_t;
 
 typedef struct {
@@ -129,7 +114,7 @@ typedef struct
     GLenum internalformat;
     cl_mem mem;
     GLboolean used;
-} texture_unit_t;
+} texture_t;
 
 typedef struct
 {
@@ -143,7 +128,12 @@ typedef struct {
 } buffer_t;
 
 typedef struct {
-    GLuint color_attachment0, depth_attachment, stencil_attachment;
+    GLenum target;
+    uint32_t position;
+} attachment_t;
+
+typedef struct {
+    attachment_t color_attachment0, depth_attachment, stencil_attachment;
     GLboolean used;
 } framebuffer_t;
 
@@ -156,5 +146,56 @@ typedef struct {
 
 typedef struct { GLfloat n, f; } depth_range_t;
 
+typedef struct { 
+    GLenum func; 
+    GLint ref; 
+    GLuint mask; 
+} stencil_function_t;
+
+typedef struct { 
+    GLenum sfail,  dpfail,  dppasss; 
+} stencil_operation_t;
+
+typedef struct { 
+    stencil_function_t function; 
+    stencil_operation_t operation;
+} stencil_face_data_t;
+
+typedef struct { 
+    stencil_face_data_t front, back; 
+} stencil_data_t;
+
+typedef struct {
+    GLint left, bottom;
+    GLsizei width, height; 
+} scissor_data_t;
+
+typedef struct {
+    GLenum modeRGB, modeAlpha;
+} blend_equation_t;
+
+typedef struct {
+    GLenum srcRGB, dstRGB, srcAlpha, dstAlpha;
+} blend_func_t;
+
+typedef struct {
+    GLfloat red, green, blue, alpha;
+} blend_color_t;
+
+typedef struct {
+    blend_equation_t equation;
+    blend_func_t func;
+    blend_color_t color;
+} blend_data_t;
+
+typedef struct {
+    GLfloat red, green, blue, alpha;
+} clear_color_t;
+
+typedef struct {
+    clear_color_t color;
+    GLfloat depth; 
+    GLint stencil;
+} clear_data_t;
 
 #endif

@@ -132,7 +132,7 @@ void finish(void* command_queue) {
 
 #define PATH_OF(_FILE) "/home/xavier/repositories/vortex/tests/opengl/lib/GLSC2/" _FILE
 #else
-#include "kernel.fill.c"
+//#include "kernel.fill.c"
 #endif
 
 cl_kernel _getKernelFill() {
@@ -148,7 +148,7 @@ cl_kernel _getKernelFill() {
         program = clCreateProgramWithSource(_getContext(), 1, (const char**)&file.data, &file.size, &error);
         free(file.data);
         #else
-        program = createProgramWithBinary(GLSC2_kernel_fill_pocl, sizeof(GLSC2_kernel_fill_pocl));
+        //program = createProgramWithBinary(GLSC2_kernel_fill_pocl, sizeof(GLSC2_kernel_fill_pocl));
         #endif
         buildProgram(program);
         kernel = createKernel(program, "gl_fill");
@@ -157,18 +157,7 @@ cl_kernel _getKernelFill() {
     return kernel;
 }
 
-void enqueueFillBuffer(void* command_queue, void* buffer, const void* pattern, size_t pattern_size, size_t offset, size_t size) {
-    printf("enqueueFillBuffer() offset=%ld, size=%ld\n", offset, size);
-    // just valid for pattern size == 4
-    cl_kernel kernel = _getKernelFill();
-    uint32_t value = *((uint32_t*) pattern);
-    size_t global_work_size = size / 4;
-    clSetKernelArg(kernel, 0, 4, &value);
-    clSetKernelArg(kernel, 1, sizeof(buffer), &buffer);
-    clEnqueueNDRangeKernel((cl_command_queue) command_queue, kernel, 1, NULL, &global_work_size, NULL, 0, NULL, NULL);
-    // TODO: It brokes 
-    // clEnqueueFillBuffer((cl_command_queue)command_queue, (cl_mem) buffer, pattern, pattern_size, offset, size, 0, NULL, NULL);
-}
+
 
 void* createImage2D(uint64_t flags, const cl_image_format *image_format, size_t image_width, size_t image_height, size_t image_row_pitch, void *host_ptr) {
     

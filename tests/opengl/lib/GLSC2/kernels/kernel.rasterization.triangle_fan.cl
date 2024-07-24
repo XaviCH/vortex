@@ -5,33 +5,6 @@
 #define GL_BACK                           0x0405
 #define GL_FRONT_AND_BACK                 0x0408
 
-/*
-
-bool stencilTestPassed(float3 barycentricCoords, __global int* stencilBuffer, int index) {
-
-    int referenceMask = 0xFFFFFFFF;
-
-    int triangleMask = 0xFF; // Supongamos que solo necesitamos 8 bits de stencil
-
-    int maskedStencilValue = stencilBuffer[index] & referenceMask;
-
-    if ((maskedStencilValue & triangleMask) != 0) {
-        return true;
-    } else {
-        return false;
-    }
-}
-
-
-void blendFragmentColor(__global float4* framebufferColor, float4 fragmentColor) {
-    // Ejemplo de alpha blending
-    float alpha = fragmentColor.w;
-
-    framebufferColor->xyz = (1.0f - alpha) * framebufferColor->xyz + alpha * fragmentColor.xyz;
-}
-
-
-*/
 
 inline float cross2d(float2 a, float2 b) {
     return a.x * b.y - a.y * b.x;
@@ -51,15 +24,16 @@ float3 get_baricentric_coords(float2 p, float4 v0, float4 v1, float4 v2) {
     return barycentricCoords;
 }
 
-kernel void gl_rasterization_triangle (
-    const int gl_Index, // gl_Index 
+kernel void gl_rasterization_triangle_fan (
+    const int index, // gl_Index 
     const int width, // 
     const int attributes, //
-    global const float4 *gl_Positions,
+    constant float4 *gl_Positions,
     global float4 *gl_FragCoords,
     global bool *gl_Discard,
-    global const float4 *gl_Primitives,
+    constant float4 *gl_Primitives,
     global float4 *gl_Rasterization,
+    global bool* facing, // 0: front, 1: back
     const ushort front_face,
     const ushort culling
 )
@@ -67,23 +41,28 @@ kernel void gl_rasterization_triangle (
     int gid = get_global_id(0);
     int gsize = get_global_size(0); // number of fragments
     // input values
-    global const float4 *position = gl_Positions + gl_Index*3;
-    global const float4 *primitives = gl_Primitives + gl_Index*3;
+    constant float4 *position = gl_Positions + index + 1;
+    constant float4 *primitives = gl_Primitives + index + 1;
     global float4 *fragCoord = gl_FragCoords + gid;
     global float4 *rasterization = gl_Rasterization + gid;
 
+    // TODO: Checkout order.
     // base info
     float xf = (gid % width) + 0.0f; // center of the fragment
     float yf = (gid / width) + 0.5f; // center of the fragment
 
-    float4 v0 = position[0];
-    float4 v1 = position[1];
-    float4 v2 = position[2];
+    float4 v0, v1, v2;
 
+    v0 = *gl_Positions;
+    v1 = position[0];
+    v2 = position[1];
+    
     // area
     float area = 0.5f * (v0.x*v1.y - v1.x*v0.y + v1.x*v2.y - v2.x*v1.y + v2.x*v0.y - v0.x*v2.y);
 
     if (front_face == GL_CCW) area = -area;
+
+    facing[gid] = area < 0.f ? 1 : 0;
 
     if (area == 0.f || culling == GL_FRONT_AND_BACK || (culling == GL_BACK && area < 0.f) || (culling == GL_FRONT && area > 0.f)) {
         gl_Discard[gid] = true;
@@ -105,10 +84,11 @@ kernel void gl_rasterization_triangle (
     fragCoord->z = abc.x*v0.z + abc.y*v1.z + abc.z*v2.z;
     // fragCoord->w = abc.x*v0.w + abc.y*v1.w + abc.z*v2.w; // maybe this is not required
 
+    constant float4 *p0, *p1, *p2;
     for(int attribute = 0 ; attribute < attributes; attribute++) {
-        global const float4 *p0 = primitives + gsize*attribute;
-        global const float4 *p1 = p0 + 1;
-        global const float4 *p2 = p0 + 2;
+        p0 = gl_Primitives + gsize*attribute;
+        p1 = primitives + gsize*attribute;
+        p2 = p1 + 1;
         
         // HW optimization ?? 
         rasterization[gsize*attribute].x = (abc.x*p0->x/v0.w + abc.y*p1->x/v1.w + abc.z*p2->x/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
