@@ -55,15 +55,15 @@ kernel void gl_clear(
                 }
                 if (color_green_mask) {
                     ushort bit_mask = 0x00F0u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.y*0xFu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.y*0xFu) << 4) & bit_mask);
                 }
                 if (color_blue_mask) {
                     ushort bit_mask = 0x0F00u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.z*0xFu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.z*0xFu) << 8) & bit_mask);
                 }
                 if (color_alpha_mask) {
                     ushort bit_mask = 0xF000u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.w*0xFu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.w*0xFu) << 12) & bit_mask);
                 }
                 ((global ushort*) colorbuffer)[gid] = color;
             }
@@ -77,15 +77,15 @@ kernel void gl_clear(
                 }
                 if (color_green_mask) {
                     ushort bit_mask = 0x03E0u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.y*0x1Fu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.y*0x1Fu) << 5) & bit_mask);
                 }
                 if (color_blue_mask) {
                     ushort bit_mask = 0x7C00u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.z*0x1Fu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.z*0x1Fu) << 10) & bit_mask);
                 }
                 if (color_alpha_mask) {
                     ushort bit_mask = 0x8000u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.w*0x1u) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.w*0x1u) << 15) & bit_mask);
                 }
                 ((global ushort*) colorbuffer)[gid] = color;
             }
@@ -99,11 +99,11 @@ kernel void gl_clear(
                 }
                 if (color_green_mask) {
                     ushort bit_mask = 0x07E0u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.y*0x3Fu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.y*0x3Fu) << 5) & bit_mask);
                 }
                 if (color_blue_mask) {
                     ushort bit_mask = 0xF800u;
-                    color = (color & ~bit_mask) | (((ushort)(color_value.z*0x1Fu) << 0) & bit_mask);
+                    color = (color & ~bit_mask) | (((ushort)(color_value.z*0x1Fu) << 11) & bit_mask);
                 }
                 ((global ushort*) colorbuffer)[gid] = color;
             }

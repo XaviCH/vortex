@@ -10,4 +10,4 @@ all: kernel.stencil_test.c kernel.blending.c kernel.scissor_test.c kernel.color.
 	xxd -i $< > $@
 
 clean:
-	rm *.pocl
+	rm *.pocl *.dump

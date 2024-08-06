@@ -76,8 +76,13 @@ typedef struct {
 } rasterization_kernel_container_t;
 
 typedef struct {
+    cl_kernel rgba4, rgba8;
+} readnpixels_kernel_container_t;
+
+typedef struct {
     rasterization_kernel_container_t rasterization;
-    cl_kernel viewport_division, perspective_division, readnpixels, strided_write, depth_test, stencil_test, scissor_test, blending, clear, dithering;
+    readnpixels_kernel_container_t readnpixels;
+    cl_kernel viewport_division, perspective_division, strided_write, depth_test, stencil_test, scissor_test, blending, clear, dithering;
 } kernel_container_t;
 
 typedef struct {
@@ -89,7 +94,7 @@ typedef struct {
 } color_mask_t;
 
 typedef struct {
-    GLboolean front, back;
+    GLuint front, back;
 } stencil_mask_t;
 
 typedef struct {

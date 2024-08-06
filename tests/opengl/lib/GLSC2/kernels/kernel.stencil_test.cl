@@ -43,27 +43,26 @@ void stencil_operation(uint operation, int ref, uint mask, global uchar* stencil
     case GL_KEEP:
       return;
     case GL_ZERO:
-      *stencil_buffer = 0;
+      *stencil_buffer = (*stencil_buffer & ~mask) | (0 & mask);
       return;
     case GL_REPLACE:
-      *stencil_buffer = mask & ref;
+      *stencil_buffer = (*stencil_buffer & ~mask) | (ref & mask);
       return;
     case GL_INCR:
-      if (*stencil_buffer < 0xFFu) *stencil_buffer = mask & (*stencil_buffer + 1);
-      else *stencil_buffer = mask & (*stencil_buffer);
+      if (*stencil_buffer < 0xFFu) *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer + 1) & mask);
       return;
     case GL_DECR:
-      if (*stencil_buffer > 0x00u) *stencil_buffer = mask & (*stencil_buffer - 1);
+      if (*stencil_buffer > 0x00u) *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer - 1) & mask);
       else *stencil_buffer = mask & (*stencil_buffer);
       return;
     case GL_INVERT:
-      *stencil_buffer = mask & ~(*stencil_buffer);
+      *stencil_buffer = (*stencil_buffer & ~mask) | (~(*stencil_buffer) & mask);
       return;
     case GL_INCR_WRAP:
-      *stencil_buffer = mask & (*stencil_buffer + 1);
+      *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer + 1) & mask);
       return;
     case GL_DECR_WRAP:
-      *stencil_buffer = mask & (*stencil_buffer - 1);
+      *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer - 1) & mask);
       return;
   }
 }

@@ -166,7 +166,8 @@ void __context_constructor__() {
 
     _kernels.viewport_division = createKernel(viewport_division_program, "gl_viewport_division");
     _kernels.perspective_division = createKernel(perspective_division_program, "gl_perspective_division");
-    _kernels.readnpixels = createKernel(readnpixels_program, "gl_rgba4_rgba8");
+    _kernels.readnpixels.rgba4 = createKernel(readnpixels_program, "gl_readnpixels_rgba4");
+    _kernels.readnpixels.rgba8 = createKernel(readnpixels_program, "gl_readnpixels_rgba8");
     _kernels.strided_write = createKernel(strided_write_program, "gl_strided_write");
 
     _kernels.clear  = createKernel(clear_program, "gl_clear");
@@ -541,10 +542,7 @@ GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) {
 GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) {
     if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    printf("hey");
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
-
-    printf("hey");
 
     if (first <0) RETURN_ERROR(GL_INVALID_VALUE);
 
@@ -843,7 +841,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(depth_kernel, 2, sizeof(cl_mem), &gl_Discard);
     setKernelArg(depth_kernel, 3, sizeof(cl_mem), _enableds.depth_test ? &framebuffer.depth.mem : NULL);
     setKernelArg(depth_kernel, 4, sizeof(cl_mem), _enableds.stencil_test ? &framebuffer.stencil.mem : NULL);
-    setKernelArg(depth_kernel, 5, sizeof(cl_uint), &_masks.depth);
+    setKernelArg(depth_kernel, 5, sizeof(cl_uchar), &_masks.depth);
     setKernelArg(depth_kernel, 6, sizeof(cl_uint), &_masks.stencil.front);
     setKernelArg(depth_kernel, 7, sizeof(cl_uint), &_masks.stencil.back);
     setKernelArg(depth_kernel, 8, sizeof(cl_uint), &_depth_func);
@@ -870,13 +868,13 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     // Color Kernel Set Up
     cl_kernel dithering_kernel = _kernels.dithering;
-    setKernelArg(dithering_kernel, 0, sizeof(cl_mem),       &gl_FragColor);
-    setKernelArg(dithering_kernel, 1, sizeof(cl_mem),       &gl_FragCoord);
-    setKernelArg(dithering_kernel, 2, sizeof(cl_mem),       &gl_Discard);
-    setKernelArg(dithering_kernel, 3, sizeof(cl_mem),       &framebuffer.color.mem);
-    setKernelArg(dithering_kernel, 4, sizeof(cl_uint),       &framebuffer.color.internalformat);
-    setKernelArg(dithering_kernel, 5, sizeof(cl_uchar4),    &_masks.color);
-    setKernelArg(dithering_kernel, 6, sizeof(cl_uchar),     &_enableds.dither);
+    setKernelArg(dithering_kernel, 0, sizeof(cl_mem),    &gl_FragColor);
+    setKernelArg(dithering_kernel, 1, sizeof(cl_mem),    &gl_FragCoord);
+    setKernelArg(dithering_kernel, 2, sizeof(cl_mem),    &gl_Discard);
+    setKernelArg(dithering_kernel, 3, sizeof(cl_mem),    &framebuffer.color.mem);
+    setKernelArg(dithering_kernel, 4, sizeof(cl_uint),   &framebuffer.color.internalformat);
+    setKernelArg(dithering_kernel, 5, sizeof(cl_uchar4), &_masks.color);
+    setKernelArg(dithering_kernel, 6, sizeof(cl_uchar),  &_enableds.dither);
 
     /* ---- Enqueue Kernels ---- */
     cl_command_queue command_queue = getCommandQueue();
@@ -1390,31 +1388,70 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
 GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, void *data) {
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
+    if (!_framebuffer_binding) NOT_IMPLEMENTED;
+
+    cl_kernel readnpixels_kernel;
+    size_t num_pixels;
 
     if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
-        if (_framebuffer_binding) {
+        num_pixels = bufSize / sizeof(uint32_t);
+        readnpixels_kernel = _kernels.readnpixels.rgba8;
+    } else if (format == GL_RGBA && type == GL_UNSIGNED_SHORT_4_4_4_4) {
+        num_pixels = bufSize / sizeof(uint16_t);
+        readnpixels_kernel = _kernels.readnpixels.rgba4;
+    } else RETURN_ERROR(GL_INVALID_OPERATION);
 
-            if (COLOR_ATTACHMENT0.internalformat == GL_RGBA8) {
-                enqueueReadBuffer(getCommandQueue(), COLOR_ATTACHMENT0.mem, bufSize, data);
-                return;
-            }
+    if (!FRAMEBUFFER.color_attachment0.position) NOT_IMPLEMENTED;
 
-            if (COLOR_ATTACHMENT0.internalformat != GL_RGBA4) NOT_IMPLEMENTED;
-            void *dst_buff = createBuffer(MEM_WRITE_ONLY, bufSize, NULL);
+    typedef struct {
+        cl_mem mem;
+        uint32_t width, internalformat;
+    } buffer_info_t; 
 
-            setKernelArg(_kernels.readnpixels, 0, sizeof(COLOR_ATTACHMENT0.mem), &COLOR_ATTACHMENT0.mem);
-            setKernelArg(_kernels.readnpixels, 1, sizeof(void*), &dst_buff);
-            setKernelArg(_kernels.readnpixels, 2, sizeof(int), &x);
-            setKernelArg(_kernels.readnpixels, 3, sizeof(int), &y);
-            setKernelArg(_kernels.readnpixels, 4, sizeof(int), &width);
-            setKernelArg(_kernels.readnpixels, 5, sizeof(int), &height);
+    buffer_info_t buffer_info;
 
-            void *command_queue = getCommandQueue();
-            size_t global_work_size = bufSize/4; // 4 bytes x color
-            enqueueNDRangeKernel(command_queue, _kernels.readnpixels, global_work_size);
-            enqueueReadBuffer(command_queue, dst_buff, bufSize, data);
-        }
+    if (FRAMEBUFFER.color_attachment0.target == GL_RENDERBUFFER) {
+
+        renderbuffer_t* colorbuffer = &_renderbuffers[FRAMEBUFFER.color_attachment0.position];
+        
+        if (x+width > colorbuffer->width || y+height > colorbuffer->height) NOT_IMPLEMENTED;
+
+        buffer_info = (buffer_info_t) {
+            .mem = colorbuffer->mem,
+            .width = colorbuffer->width,
+            .internalformat = colorbuffer->internalformat,
+        };
+    } else {
+        texture_t* texture = &_textures[FRAMEBUFFER.color_attachment0.position];
+        
+        if (x+width > texture->width || y+height > texture->height) NOT_IMPLEMENTED;
+
+        buffer_info = (buffer_info_t) {
+            .mem = texture->mem,
+            .width = texture->width,
+            .internalformat = texture->internalformat,
+        };
     }
+
+    if (num_pixels != width * height) NOT_IMPLEMENTED;
+
+    void *dst_buff = createBuffer(MEM_WRITE_ONLY, bufSize, NULL);
+
+    printf("mem: %x\n", buffer_info.mem);
+
+    setKernelArg(readnpixels_kernel, 0, sizeof(cl_mem), &dst_buff);
+    setKernelArg(readnpixels_kernel, 1, sizeof(cl_mem), &buffer_info.mem);
+    setKernelArg(readnpixels_kernel, 2, sizeof(cl_uint), &buffer_info.internalformat);
+    setKernelArg(readnpixels_kernel, 3, sizeof(cl_uint), &buffer_info.width);
+    setKernelArg(readnpixels_kernel, 4, sizeof(int), &x);
+    setKernelArg(readnpixels_kernel, 5, sizeof(int), &y);
+    setKernelArg(readnpixels_kernel, 6, sizeof(int), &width);
+    setKernelArg(readnpixels_kernel, 7, sizeof(int), &height);
+
+    void *command_queue = getCommandQueue();
+    size_t global_work_size = num_pixels;
+    enqueueNDRangeKernel(command_queue, readnpixels_kernel, global_work_size);
+    enqueueReadBuffer(command_queue, dst_buff, bufSize, data);
 }
 
 GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {

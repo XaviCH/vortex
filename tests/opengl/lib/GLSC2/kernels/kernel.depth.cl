@@ -21,32 +21,31 @@ void stencil_operation(uint operation, int ref, uint mask, global uchar* stencil
     case GL_KEEP:
       return;
     case GL_ZERO:
-      *stencil_buffer = 0;
+      *stencil_buffer = (*stencil_buffer & ~mask) | (0 & mask);
       return;
     case GL_REPLACE:
-      *stencil_buffer = mask & ref;
+      *stencil_buffer = (*stencil_buffer & ~mask) | (ref & mask);
       return;
     case GL_INCR:
-      if (*stencil_buffer < 0xFFu) *stencil_buffer = mask & (*stencil_buffer + 1);
-      else *stencil_buffer = mask & (*stencil_buffer);
+      if (*stencil_buffer < 0xFFu) *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer + 1) & mask);
       return;
     case GL_DECR:
-      if (*stencil_buffer > 0x00u) *stencil_buffer = mask & (*stencil_buffer - 1);
+      if (*stencil_buffer > 0x00u) *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer - 1) & mask);
       else *stencil_buffer = mask & (*stencil_buffer);
       return;
     case GL_INVERT:
-      *stencil_buffer = mask & ~(*stencil_buffer);
+      *stencil_buffer = (*stencil_buffer & ~mask) | (~(*stencil_buffer) & mask);
       return;
     case GL_INCR_WRAP:
-      *stencil_buffer = mask & (*stencil_buffer + 1);
+      *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer + 1) & mask);
       return;
     case GL_DECR_WRAP:
-      *stencil_buffer = mask & (*stencil_buffer - 1);
+      *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer - 1) & mask);
       return;
   }
 }
 
-bool depth_test(uint func, float z, uint mask, global ushort* depth_buffer) {
+bool depth_test(uint func, float z, uchar mask, global ushort* depth_buffer) {
   ushort value = z * 0xFFFFu;
 
   switch(func) {
@@ -54,7 +53,7 @@ bool depth_test(uint func, float z, uint mask, global ushort* depth_buffer) {
       return false;
     case GL_LESS:
       if (value < *depth_buffer) {
-        *depth_buffer = value;
+        if (mask) *depth_buffer = value;
         return true;
       } else return false;
     case GL_EQUAL:
@@ -62,26 +61,26 @@ bool depth_test(uint func, float z, uint mask, global ushort* depth_buffer) {
       else return false;
     case GL_LEQUAL:
       if (value <= *depth_buffer) {
-        *depth_buffer = value;
+        if (mask) *depth_buffer = value;
         return true;
       } else return false;
     case GL_GREATER:
       if (value > *depth_buffer) {
-        *depth_buffer = value;
+        if (mask) *depth_buffer = value;
         return true;
       } else return false;
     case GL_NOTEQUAL:
       if (value != *depth_buffer) {
-        *depth_buffer = value;
+        if (mask) *depth_buffer = value;
         return true;
       } else return false;
     case GL_GEQUAL:
       if (value >= *depth_buffer) {
-        *depth_buffer = value;
+        if (mask) *depth_buffer = value;
         return true;
       } else return false;
     case GL_ALWAYS:
-      *depth_buffer = mask & value;
+      if (mask) *depth_buffer = value;
       return true;
   }
 }
@@ -94,7 +93,7 @@ kernel void gl_depth_test(
   // framebuffer data
   global ushort* depth_buffer,
   global uchar* stencil_buffer,
-  const uint depth_mask,
+  const uchar depth_mask,
   const uint stencil_front_mask,
   const uint stencil_back_mask,
   // depth data

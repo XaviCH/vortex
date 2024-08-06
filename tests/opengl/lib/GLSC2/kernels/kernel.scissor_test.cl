@@ -14,5 +14,5 @@ kernel void gl_scissor_test (
   int x = gl_FragCood[gid].x;
   int y = gl_FragCood[gid].y;
 
-  discard[gid] = left <= x && x < left + width && bottom <= y && y < bottom + height;  
+  discard[gid] = left > x || x >= left + width || bottom > y || y >= bottom + height;  
 }

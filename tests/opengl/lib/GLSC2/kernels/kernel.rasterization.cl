@@ -9,7 +9,6 @@
 #define GL_TRIANGLE_STRIP                 0x0005
 #define GL_TRIANGLE_FAN                   0x0006
 
-
 inline float cross2d(float2 a, float2 b) {
     return a.x * b.y - a.y * b.x;
 }
@@ -51,16 +50,18 @@ kernel void gl_rasterization_triangle (
     global float4 *rasterization = gl_Rasterization + gid;
 
     // base info
-    float xf = (gid % width) + 0.0f; // center of the fragment
-    float yf = (gid / width) + 0.5f; // center of the fragment
+    float yf = (float) (gid / width) + 0.5f; // center of the fragment
+    float xf = (float) (gid % width) + 0.5f; // center of the fragment
 
     float4 v0 = position[0];
     float4 v1 = position[1];
     float4 v2 = position[2];
 
     // area
+
     float area = 0.5f * (v0.x*v1.y - v1.x*v0.y + v1.x*v2.y - v2.x*v1.y + v2.x*v0.y - v0.x*v2.y);
 
+    
     if (front_face == GL_CCW) area = -area;
 
     facing[gid] = area < 0.f ? 1 : 0;
@@ -69,13 +70,12 @@ kernel void gl_rasterization_triangle (
         gl_Discard[gid] = true;
         return;
     }
+    
 
     // barycenter
     float3 abc = get_baricentric_coords((float2) (xf,yf), v0, v1, v2);
     
-    if ((abc.x < 0.0f) || (abc.y < 0.0f) || (abc.z < 0.0f) ||
-        (abc.x > 1.0f) || (abc.y > 1.0f) || (abc.z > 1.0f) ||
-        abc.x+abc.y+abc.z > 1) {
+    if ((abc.x < -0.00001f) || (abc.y < -0.00001f) || (abc.z < -0.00001f)) {
         gl_Discard[gid] = true;
         return;
     }
