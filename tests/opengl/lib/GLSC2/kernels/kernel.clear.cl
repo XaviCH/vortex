@@ -2,6 +2,11 @@
 #define GL_STENCIL_BUFFER_BIT             0x00000400
 #define GL_COLOR_BUFFER_BIT               0x00004000
 
+#define GL_R8                             0x8229
+#define GL_RG8                            0x822B
+#define GL_RGB8                           0x8051
+#define GL_RGBA8                          0x8058
+
 #define GL_RGBA4                          0x8056
 #define GL_RGB5_A1                        0x8057
 #define GL_RGB565                         0x8D62
@@ -46,6 +51,33 @@ kernel void gl_clear(
         stencilbuffer[gid] = (stencilbuffer[gid] & ~stencil_mask) | (stencil_value & stencil_mask);
     if (mask & GL_COLOR_BUFFER_BIT) {
         switch (colorbuffer_type) {
+        case GL_R8:
+            if (color_red_mask) ((global char*) colorbuffer)[gid] = color_value.x*0xFFu;
+            break;
+        case GL_RG8:
+            {
+                global char* color_ptr = (global char*)colorbuffer + gid*2;
+                if (color_red_mask) color_ptr[0] = color_value.x*0xFFu;
+                if (color_green_mask) color_ptr[1] = color_value.y*0xFFu;
+            }
+            break;
+        case GL_RGB8:
+            {
+                global char* color_ptr = (global char*)colorbuffer + gid*3;
+                if (color_red_mask) color_ptr[0] = color_value.x*0xFFu;
+                if (color_green_mask) color_ptr[1] = color_value.y*0xFFu;
+                if (color_blue_mask) color_ptr[2] = color_value.z*0xFFu;
+            }
+            break;
+        case GL_RGBA8:
+            {
+                global char* color_ptr = (global char*)colorbuffer + gid*4;
+                if (color_red_mask) color_ptr[0] = color_value.x*0xFFu;
+                if (color_green_mask) color_ptr[1] = color_value.y*0xFFu;
+                if (color_blue_mask) color_ptr[2] = color_value.z*0xFFu;
+                if (color_alpha_mask) color_ptr[3] = color_value.w*0xFFu;
+            }
+            break;
         case GL_RGBA4:
             {
                 ushort color = ((global ushort*) colorbuffer)[gid];

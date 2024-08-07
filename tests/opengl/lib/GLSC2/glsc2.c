@@ -419,11 +419,37 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) {
 GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
     if (_enableds.pixel_ownership) NOT_IMPLEMENTED;
 
-    setKernelArg(_kernels.clear, 0, sizeof(cl_mem), &COLOR_ATTACHMENT0.mem);
+    typedef struct {
+        cl_mem mem;
+        uint32_t width, internalformat;
+    } buffer_info_t; 
+
+    buffer_info_t buffer_info;
+
+    if (FRAMEBUFFER.color_attachment0.target == GL_RENDERBUFFER) {
+
+        renderbuffer_t* colorbuffer = &_renderbuffers[FRAMEBUFFER.color_attachment0.position];
+        
+        buffer_info = (buffer_info_t) {
+            .mem = colorbuffer->mem,
+            .width = colorbuffer->width,
+            .internalformat = colorbuffer->internalformat,
+        };
+    } else {
+        texture_t* texture = &_textures[FRAMEBUFFER.color_attachment0.position];
+        
+        buffer_info = (buffer_info_t) {
+            .mem = texture->mem,
+            .width = texture->width,
+            .internalformat = texture->internalformat,
+        };
+    }
+
+    setKernelArg(_kernels.clear, 0, sizeof(cl_mem), &buffer_info.mem);
     setKernelArg(_kernels.clear, 1, sizeof(cl_mem), &DEPTH_ATTACHMENT.mem);
     setKernelArg(_kernels.clear, 2, sizeof(cl_mem), &STENCIL_ATTACHMENT.mem);
-    setKernelArg(_kernels.clear, 3, sizeof(cl_uint), &COLOR_ATTACHMENT0.internalformat);
-    setKernelArg(_kernels.clear, 4, sizeof(cl_uint), &COLOR_ATTACHMENT0.width);
+    setKernelArg(_kernels.clear, 3, sizeof(cl_uint), &buffer_info.internalformat);
+    setKernelArg(_kernels.clear, 4, sizeof(cl_uint), &buffer_info.width);
     setKernelArg(_kernels.clear, 5, sizeof(cl_uint), &mask);
     setKernelArg(_kernels.clear, 6, sizeof(cl_float4), &_clear_data.color);
     setKernelArg(_kernels.clear, 7, sizeof(cl_float), &_clear_data.depth);
