@@ -570,7 +570,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
 
-    if (first <0) RETURN_ERROR(GL_INVALID_VALUE);
+    if (first < 0) RETURN_ERROR(GL_INVALID_VALUE);
 
     if (first != 0) NOT_IMPLEMENTED;
     if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
@@ -1154,7 +1154,14 @@ GL_APICALL GLenum GL_APIENTRY glGetGraphicsResetStatus (void) {
 }
 
 GL_APICALL void GL_APIENTRY glGetProgramiv (GLuint program, GLenum pname, GLint *params) {
-    NOT_IMPLEMENTED;
+    switch (pname)
+    {
+    case GL_LINK_STATUS:
+        *params = _programs[program].last_load_attempt;
+        break;
+    default:
+        NOT_IMPLEMENTED;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetRenderbufferParameteriv (GLenum target, GLenum pname, GLint *params) {
