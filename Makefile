@@ -4,6 +4,8 @@ all:
 	$(MAKE) -C sim
 	$(MAKE) -C kernel
 	$(MAKE) -C runtime
+	$(MAKE) -C openglsc
+	$(MAKE) -C egl
 	$(MAKE) -C tests
 
 clean:

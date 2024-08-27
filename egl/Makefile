@@ -2,10 +2,11 @@
 
 .PHONEY: all egl
 
-./lib/egl.so: src/EGL/egl.c
-	gcc -o lib/EGL/egl.so src/EGL/egl.c -shared -I./include
+./lib/egl.so: src/egl.c
+	gcc -o lib/egl.so src/egl.c -shared -I./include
 
 all: egl
 
 egl:
-	make 
+	mkdir -p lib
+	make ./lib/egl.so

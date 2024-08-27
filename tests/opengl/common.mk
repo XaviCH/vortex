@@ -27,6 +27,8 @@ OPENGLSC_PATH ?= $(realpath ..)
 
 VORTEX_RT_PATH ?= $(realpath ../../../runtime)
 VORTEX_KN_PATH ?= $(realpath ../../../kernel)
+VORTEX_OPENGLSC_PATH ?= $(realpath ../../../openglsc)
+VORTEX_EGL_PATH ?= $(realpath ../../../egl)
 
 FPGA_BIN_DIR ?= $(VORTEX_RT_PATH)/opae
 
@@ -42,7 +44,8 @@ CXXFLAGS += -std=c++11 -Wall -Wextra -Wfatal-errors
 CXXFLAGS += -Wno-deprecated-declarations -Wno-unused-parameter -Wno-narrowing
 CXXFLAGS += -pthread
 CXXFLAGS += -I$(POCL_RT_PATH)/include
-CXXFLAGS += -I$(OPENGLSC_PATH)/include
+CXXFLAGS += -I$(VORTEX_EGL_PATH)/include
+CXXFLAGS += -I$(VORTEX_OPENGLSC_PATH)/include
 
 ifdef HOSTDRIVER
 	CXXFLAGS += -DHOSTDRIVER
@@ -50,7 +53,7 @@ ifdef HOSTDRIVER
 else ifdef HOSTGPU 
 	LDFLAGS += -lOpenCL ../lib/GLSC2/glsc2-gpu.c.so
 else
-	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so ../lib/GLSC2/glsc2.c.so
+	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_OPENGLSC_PATH)/lib/glsc2.c.so $(VORTEX_EGL_PATH)/lib/egl.so
 endif
 
 # Debugigng

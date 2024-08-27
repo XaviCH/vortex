@@ -219,7 +219,7 @@ int main() {
   //glDepthRangef(0, 10);
   perspective = glm::perspective((float)M_PI / 4, (float)WIDTH/HEIGHT, 0.1f, 100.f);
   view = glm::lookAt(glm::vec3{-1,-1,-1}, glm::vec3{0,0,0},glm::vec3{0,1,0});
-  model = glm::rotate(model, M_PIf/8, glm::vec3{1,1,1});
+  model = glm::rotate(model, (float)M_PI/8, glm::vec3{1,1,1});
 
   loc_perspective = glGetUniformLocation(program, "perspective");
   loc_view = glGetUniformLocation(program, "view");

@@ -3,7 +3,7 @@ TOOLDIR ?= /opt
 
 TARGET ?= opaesim
 
-XRT_SYN_DIR  ?= ../../../hw/syn/xilinx/xrt
+XRT_SYN_DIR ?= $(VORTEX_PATH)/hw/syn/xilinx/xrt
 XRT_DEVICE_INDEX ?= 0
 
 ifeq ($(XLEN),64)
@@ -18,14 +18,12 @@ K_CFLAGS += -march=rv32imaf -mabi=ilp32f
 STARTUP_ADDR ?= 0x80000000
 endif
 
-VORTEX_PATH = $(shell realpath ~/vortex)
-
 RISCV_PREFIX ?= riscv$(XLEN)-unknown-elf
 RISCV_SYSROOT ?= $(RISCV_TOOLCHAIN_PATH)/$(RISCV_PREFIX)
 
 POCL_CC_PATH ?= $(TOOLDIR)/pocl/compiler
 POCL_RT_PATH ?= $(TOOLDIR)/pocl/runtime
-OPENGLSC_PATH ?= $(realpath ../..)
+VORTEX_OPENGLSC_PATH ?= $(VORTEX_PATH)/openglsc
 
 VORTEX_RT_PATH ?= $(VORTEX_PATH)/runtime
 VORTEX_KN_PATH ?= $(VORTEX_PATH)/kernel
@@ -52,7 +50,7 @@ ifdef HOSTDRIVER
 else ifdef HOSTGPU 
 	LDFLAGS += -lOpenCL ../lib/GLSC2/glsc2-gpu.c.so
 else
-	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so ../lib/GLSC2/glsc2.c.so
+	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_OPENGLSC_PATH)/lib/GLSC2/glsc2.c.so
 endif
 
 # Debugigng
@@ -74,9 +72,4 @@ endif
 endif
 endif
 
-.depend: $(SRCS)
-	$(CXX) $(CXXFLAGS) -MM $^ > .depend;
-
-ifneq ($(MAKECMDGOALS),clean)
-    -include .depend
-endif
+OBJS := $(addsuffix .o, $(notdir $(SRCS)))
