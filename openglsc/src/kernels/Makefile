@@ -1,6 +1,11 @@
+VORTEX_PATH = ../../..
+
 include ../common.mk
 
-all: kernel.stencil_test.c kernel.blending.c kernel.scissor_test.c kernel.color.c kernel.dither.c kernel.clear.c kernel.perspective_division.c kernel.readnpixels.c kernel.rasterization.c kernel.rasterization.triangle_strip.c kernel.rasterization.triangle_fan.c kernel.viewport_division.c kernel.depth.c kernel.strided_write.c
+KERNELS_CL = $(wildcard *.cl)
+KERNELS_C = $(KERNELS_CL:.cl=.c)
+
+all: $(KERNELS_C)
 
 %.pocl: %.cl
 	echo $(VORTEX_PATH)

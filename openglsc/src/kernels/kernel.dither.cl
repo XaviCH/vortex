@@ -87,8 +87,9 @@ kernel void gl_dithering(
   const uchar enabled
 ) {
   int gid = get_global_id(0);
+
   if (gl_Discard[gid]) return;
-  
+
   float4 color;
 
   if (enabled) {

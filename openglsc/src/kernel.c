@@ -95,7 +95,7 @@ void setKernelArg(void* kernel, unsigned int location, size_t size, const void* 
 
 // I decide to make it simple, but maybe it will need to be extendend in future.
 void enqueueNDRangeKernel(void* commandQueue, void* kernel, const size_t global_work_size) {
-    printf("enqueueND() work=%ld\n", global_work_size);
+    printf("clEnqueueNDRangeKernel() kernel=%x, work=%ld\n", kernel, global_work_size);
 	int err = clEnqueueNDRangeKernel(
         (cl_command_queue) commandQueue, (cl_kernel) kernel,
         1, NULL, &global_work_size, NULL, 0, NULL, NULL);

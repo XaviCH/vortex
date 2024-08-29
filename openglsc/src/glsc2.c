@@ -707,6 +707,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     cl_mem gl_Positions         = createBuffer(MEM_READ_WRITE,      sizeof(float[4])*num_vertices,                              NULL);
 
     /* ---- Set Up Per-Vertex Kernels ---- */
+    printf("Vertex Kernel Set Up.");
     cl_kernel vertex_kernel = CURRENT_PROGRAM.vertex_kernel;
 
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
@@ -769,7 +770,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     default: NOT_IMPLEMENTED;
     }
     // arg 0 is reserved for the primitive index
-    setKernelArg(_kernels.rasterization.triangles, 1, sizeof(int),      &COLOR_ATTACHMENT0.width);
+    setKernelArg(_kernels.rasterization.triangles, 1, sizeof(int),      &framebuffer.width);
     setKernelArg(_kernels.rasterization.triangles, 2, sizeof(int),      &CURRENT_PROGRAM.varying_size);
     setKernelArg(_kernels.rasterization.triangles, 3, sizeof(cl_mem),   &gl_Positions);
     setKernelArg(_kernels.rasterization.triangles, 4, sizeof(cl_mem),   &gl_FragCoord);
@@ -893,6 +894,9 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(blending_kernel, 10, sizeof(cl_float4), &_blend_data.color);
 
     // Color Kernel Set Up
+    cl_int err_code;
+    cl_mem temp_mem__ = clCreateBuffer(_getContext(),CL_MEM_READ_WRITE, 4*num_fragments, NULL, &err_code);
+    cl_uint internalformat = GL_RGBA8;
     cl_kernel dithering_kernel = _kernels.dithering;
     setKernelArg(dithering_kernel, 0, sizeof(cl_mem),    &gl_FragColor);
     setKernelArg(dithering_kernel, 1, sizeof(cl_mem),    &gl_FragCoord);
@@ -905,14 +909,53 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     /* ---- Enqueue Kernels ---- */
     cl_command_queue command_queue = getCommandQueue();
 
+    printf("Hey 1\n");
+    printf("Attrib0.\n");
+    float pos_0[num_vertices][4];
+    cl_int error_check0;
+    error_check0 = clEnqueueReadBuffer(command_queue, vertex_array_mem[0], CL_TRUE, 0, sizeof(pos_0), pos_0, 0, NULL, NULL);
+    if (error_check0) printf("Error: %i\n", error_check0);
+    else for(int i=0; i< num_vertices && i<256; ++i) {
+        printf("(%f,%f,%f,%f)\t", pos_0[i][0], pos_0[i][1], pos_0[i][2], pos_0[i][3]);
+    }
+    
     enqueueNDRangeKernel(command_queue, vertex_kernel,                  num_vertices);
+    printf("Hey 1\n");
     enqueueNDRangeKernel(command_queue, _kernels.perspective_division,   num_vertices);
+    printf("Hey 1\n");
     enqueueNDRangeKernel(command_queue, _kernels.viewport_division,      num_vertices);
+    printf("Hey 1\n");
+
+    printf("Gl_Position.\n");
+    float position[num_vertices][4];
+    cl_int error_check0__;
+    error_check0__ = clEnqueueReadBuffer(command_queue, gl_Positions, CL_TRUE, 0, sizeof(position), position, 0, NULL, NULL);
+    if (error_check0__) printf("Error: %i\n", error_check0__);
+    else for(int i=0; i< num_vertices && i<256; ++i) {
+        printf("(%f,%f,%f,%f)\t", position[i][0], position[i][1], position[i][2], position[i][3]);
+    }
 
     for(GLsizei primitive=0; primitive < num_primitives; ++primitive) {
         setKernelArg(_kernels.rasterization.triangles, 0, sizeof(primitive), &primitive);
 
-        enqueueNDRangeKernel(command_queue, _kernels.rasterization.triangles,   num_fragments);   
+        printf("Discard.\n");
+        uint8_t discard_[num_fragments];
+        cl_int error_check;
+        error_check = clEnqueueReadBuffer(command_queue, gl_Discard, CL_TRUE, 0, sizeof(discard_), discard_, 0, NULL, NULL);
+        if (error_check) printf("Error: %i\n", error_check);
+        else for(int i=0; i< num_fragments && i<256; ++i) {
+            printf("%d\t", discard_[i]);
+        }
+
+        enqueueNDRangeKernel(command_queue, _kernels.rasterization.triangles,   num_fragments);
+
+        printf("Discard.\n");
+        error_check = clEnqueueReadBuffer(command_queue, gl_Discard, CL_TRUE, 0, sizeof(discard_), discard_, 0, NULL, NULL);
+        if (error_check) printf("Error: %i\n", error_check);
+        else for(int i=0; i< num_fragments && i<256; ++i) {
+            printf("%d\t", discard_[i]);
+        }
+
         enqueueNDRangeKernel(command_queue, fragment_kernel,                    num_fragments);
 
         // TODO: Pixel Ownership, is controled by the context provider
@@ -931,6 +974,24 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
         // TODO: Write on buffers (now is handled using other kernels )
     }
+
+    printf("Framebuffer data.\n\n");
+
+    printf("FragColor.\n");
+    float fragColor[num_fragments];
+    cl_int error_check;
+    error_check = clEnqueueReadBuffer(command_queue, gl_FragColor, CL_TRUE, 0, sizeof(fragColor), fragColor, 0, NULL, NULL);
+    if (error_check) printf("Error: %i\n", error_check);
+    else for(int i=0; i< num_fragments && i<256; ++i) {
+        printf("%f\t", fragColor[i]);
+    }  
+    printf("\nColorbuffer.\n");
+    uint8_t color[num_fragments][4];
+    error_check = clEnqueueReadBuffer(command_queue, framebuffer.color.mem, CL_TRUE, 0, sizeof(color), color, 0, NULL, NULL);
+    if (error_check) printf("Error: %i\n", error_check);
+    else for(int i=0; i< num_fragments && i<256; ++i) {
+        printf("(%d,%d,%d,%d)\t", color[i][0], color[i][1], color[i][2], color[i][3]);
+    }   
 }
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) NOT_IMPLEMENTED;

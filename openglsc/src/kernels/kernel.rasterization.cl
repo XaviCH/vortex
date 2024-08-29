@@ -33,7 +33,7 @@ kernel void gl_rasterization_triangle (
     const int attributes, //
     global const float4 *gl_Positions,
     global float4 *gl_FragCoords,
-    global bool *gl_Discard,
+    global uchar *gl_Discard,
     global const float4 *gl_Primitives,
     global float4 *gl_Rasterization,
     global bool* facing, // 0: front, 1: back
@@ -67,16 +67,15 @@ kernel void gl_rasterization_triangle (
     facing[gid] = area < 0.f ? 1 : 0;
 
     if (area == 0.f || culling == GL_FRONT_AND_BACK || (culling == GL_BACK && area < 0.f) || (culling == GL_FRONT && area > 0.f)) {
-        gl_Discard[gid] = true;
+        gl_Discard[gid] = 3;
         return;
     }
     
-
     // barycenter
     float3 abc = get_baricentric_coords((float2) (xf,yf), v0, v1, v2);
     
     if ((abc.x < -0.00001f) || (abc.y < -0.00001f) || (abc.z < -0.00001f)) {
-        gl_Discard[gid] = true;
+        gl_Discard[gid] = 2;
         return;
     }
 
