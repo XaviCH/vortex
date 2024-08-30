@@ -3,6 +3,7 @@
 #include <GLSC2/glsc2.h>
 #include "kernel.c" // TODO: may be interesting to extract it to an interface so could be re implementated with CUDA
 
+#include "debug.h"
 #include "config.h"
 #include "types.h"
 
@@ -909,51 +910,22 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     /* ---- Enqueue Kernels ---- */
     cl_command_queue command_queue = getCommandQueue();
 
-    printf("Attrib0.\n");
-    float pos_0[num_vertices][4];
-    cl_int error_check0;
-    error_check0 = clEnqueueReadBuffer(command_queue, vertex_array_mem[0], CL_TRUE, 0, sizeof(pos_0), pos_0, 0, NULL, NULL);
-    if (error_check0) printf("Error: %i\n", error_check0);
-    else for(int i=0; i< num_vertices && i<256; ++i) {
-        printf("(%f,%f,%f,%f)\t", pos_0[i][0], pos_0[i][1], pos_0[i][2], pos_0[i][3]);
-    }
+    PRINT_BUFFER_F(vertex_array_mem[0], num_vertices, float, 4);
     
     enqueueNDRangeKernel(command_queue, vertex_kernel,                  num_vertices);
-    printf("Hey 1\n");
     enqueueNDRangeKernel(command_queue, _kernels.perspective_division,   num_vertices);
-    printf("Hey 1\n");
     enqueueNDRangeKernel(command_queue, _kernels.viewport_division,      num_vertices);
-    printf("Hey 1\n");
 
-    printf("Gl_Position.\n");
-    float position[num_vertices][4];
-    cl_int error_check0__;
-    error_check0__ = clEnqueueReadBuffer(command_queue, gl_Positions, CL_TRUE, 0, sizeof(position), position, 0, NULL, NULL);
-    if (error_check0__) printf("Error: %i\n", error_check0__);
-    else for(int i=0; i< num_vertices && i<256; ++i) {
-        printf("(%f,%f,%f,%f)\t", position[i][0], position[i][1], position[i][2], position[i][3]);
-    }
+    PRINT_BUFFER_F(gl_Positions, num_vertices, float, 4);
 
     for(GLsizei primitive=0; primitive < num_primitives; ++primitive) {
         setKernelArg(_kernels.rasterization.triangles, 0, sizeof(primitive), &primitive);
 
-        printf("Discard.\n");
-        uint8_t discard_[num_fragments];
-        cl_int error_check;
-        error_check = clEnqueueReadBuffer(command_queue, gl_Discard, CL_TRUE, 0, sizeof(discard_), discard_, 0, NULL, NULL);
-        if (error_check) printf("Error: %i\n", error_check);
-        else for(int i=0; i< num_fragments && i<256; ++i) {
-            printf("%d\t", discard_[i]);
-        }
+        PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
 
         enqueueNDRangeKernel(command_queue, _kernels.rasterization.triangles,   num_fragments);
 
-        printf("Discard.\n");
-        error_check = clEnqueueReadBuffer(command_queue, gl_Discard, CL_TRUE, 0, sizeof(discard_), discard_, 0, NULL, NULL);
-        if (error_check) printf("Error: %i\n", error_check);
-        else for(int i=0; i< num_fragments && i<256; ++i) {
-            printf("%d\t", discard_[i]);
-        }
+        PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
 
         enqueueNDRangeKernel(command_queue, fragment_kernel,                    num_fragments);
 
@@ -974,23 +946,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         // TODO: Write on buffers (now is handled using other kernels )
     }
 
-    printf("Framebuffer data.\n\n");
-
-    printf("FragColor.\n");
-    float fragColor[num_fragments];
-    cl_int error_check;
-    error_check = clEnqueueReadBuffer(command_queue, gl_FragColor, CL_TRUE, 0, sizeof(fragColor), fragColor, 0, NULL, NULL);
-    if (error_check) printf("Error: %i\n", error_check);
-    else for(int i=0; i< num_fragments && i<256; ++i) {
-        printf("%f\t", fragColor[i]);
-    }  
-    printf("\nColorbuffer.\n");
-    uint8_t color[num_fragments][4];
-    error_check = clEnqueueReadBuffer(command_queue, framebuffer.color.mem, CL_TRUE, 0, sizeof(color), color, 0, NULL, NULL);
-    if (error_check) printf("Error: %i\n", error_check);
-    else for(int i=0; i< num_fragments && i<256; ++i) {
-        printf("(%d,%d,%d,%d)\t", color[i][0], color[i][1], color[i][2], color[i][3]);
-    }   
+    PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
+    PRINT_BUFFER_I(framebuffer.color.mem, num_fragments, uint8_t, 4);  
 }
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) NOT_IMPLEMENTED;

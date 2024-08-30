@@ -15,7 +15,7 @@ all: kernels glsc2.c.so
 kernels: $(KERNELS_CL)
 	make -C kernels
 
-glsc2.c.o: glsc2.c config.h kernel.c $(KERNELS_C)
+glsc2.c.o: glsc2.c config.h debug.h types.h kernel.c $(KERNELS_C)
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC
 
 glsc2.c.so: glsc2.c.o
