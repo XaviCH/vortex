@@ -793,19 +793,22 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         }
     }
     for(int sampler = 0; sampler < CURRENT_PROGRAM.texture_unit_size; ++sampler) {
+        
         typedef struct __attribute__((packed)) {
             unsigned int width, height;
             unsigned int internalformat;
-            unsigned int flags;
+            texture_wraps_t wraps;
         } sampler2D_t;
 
         texture_t *texture_unit = _textures + _active_textures[CURRENT_PROGRAM.sampler_value[sampler]].binding;
+
+        texture_unit->wraps.s;
 
         sampler2D_t sampler2D = {
             .width = texture_unit->width,
             .height = texture_unit->height,
             .internalformat = texture_unit->internalformat,
-            .flags = 0x0
+            .wraps = texture_unit->wraps,
         };
 
         setKernelArg(fragment_kernel,
@@ -894,9 +897,6 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(blending_kernel, 10, sizeof(cl_float4), &_blend_data.color);
 
     // Color Kernel Set Up
-    cl_int err_code;
-    cl_mem temp_mem__ = clCreateBuffer(_getContext(),CL_MEM_READ_WRITE, 4*num_fragments, NULL, &err_code);
-    cl_uint internalformat = GL_RGBA8;
     cl_kernel dithering_kernel = _kernels.dithering;
     setKernelArg(dithering_kernel, 0, sizeof(cl_mem),    &gl_FragColor);
     setKernelArg(dithering_kernel, 1, sizeof(cl_mem),    &gl_FragCoord);
@@ -909,7 +909,6 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     /* ---- Enqueue Kernels ---- */
     cl_command_queue command_queue = getCommandQueue();
 
-    printf("Hey 1\n");
     printf("Attrib0.\n");
     float pos_0[num_vertices][4];
     cl_int error_check0;
@@ -1167,9 +1166,17 @@ GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures) {
 
     while(n > 0 && id < MAX_TEXTURE) {
         if (!_textures[id].used) {
-            _textures[id].used = GL_TRUE;
-            *textures = id;
+            _textures[id] = (texture_t) {
+                .used = GL_TRUE,
+                .wraps = {
+                    .s = GL_REPEAT,
+                    .t = GL_REPEAT,
+                    .min_filter = GL_NEAREST, // TODO: Check if is default
+                    .mag_filter = GL_NEAREST, // TODO: Check if is default
+                },
+            };
 
+            *textures = id;
             textures += 1; 
             n -= 1;
         }

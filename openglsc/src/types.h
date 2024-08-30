@@ -109,7 +109,7 @@ typedef struct
 } pixel_store_t;
 
 typedef struct {
-    uint32_t s, t, min_filter, mag_filter;
+    uint16_t s, t, min_filter, mag_filter;
 } texture_wraps_t;
 
 typedef struct
