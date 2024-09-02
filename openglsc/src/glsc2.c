@@ -388,7 +388,7 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) {
         && framebuffer->depth_attachment.position == 0 
         && framebuffer->stencil_attachment.position == 0
         ) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
-    printf("width\n");
+
     GLsizei width = 0, height = 0;
     if (framebuffer->color_attachment0.position) {
         if (width == 0) width = COLOR_ATTACHMENT0.width;
@@ -410,7 +410,6 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) {
         if (height == 0) height = STENCIL_ATTACHMENT.height;
         else if (height != STENCIL_ATTACHMENT.height) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
     }
-    printf("width\n");
 
     // TODO: Checkout internal formats
 
@@ -446,6 +445,15 @@ GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
         };
     }
 
+    cl_uint scissor_enabled, mask_color_r, mask_color_g, mask_color_b, mask_color_a, mask_depth;
+
+    scissor_enabled = _enableds.scissor_test;
+    mask_color_r = _masks.color.r;
+    mask_color_g = _masks.color.g;
+    mask_color_b = _masks.color.b;
+    mask_color_a = _masks.color.a;
+    mask_depth = _masks.depth;
+
     setKernelArg(_kernels.clear, 0, sizeof(cl_mem), &buffer_info.mem);
     setKernelArg(_kernels.clear, 1, sizeof(cl_mem), &DEPTH_ATTACHMENT.mem);
     setKernelArg(_kernels.clear, 2, sizeof(cl_mem), &STENCIL_ATTACHMENT.mem);
@@ -455,16 +463,16 @@ GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
     setKernelArg(_kernels.clear, 6, sizeof(cl_float4), &_clear_data.color);
     setKernelArg(_kernels.clear, 7, sizeof(cl_float), &_clear_data.depth);
     setKernelArg(_kernels.clear, 8, sizeof(cl_int), &_clear_data.stencil);
-    setKernelArg(_kernels.clear, 9, sizeof(cl_uchar), &_enableds.scissor_test);
+    setKernelArg(_kernels.clear, 9, sizeof(cl_uint), &scissor_enabled);
     setKernelArg(_kernels.clear,10, sizeof(cl_int), &_scissor_data.left);
     setKernelArg(_kernels.clear,11, sizeof(cl_int), &_scissor_data.bottom);
     setKernelArg(_kernels.clear,12, sizeof(cl_uint), &_scissor_data.width);
     setKernelArg(_kernels.clear,13, sizeof(cl_uint), &_scissor_data.height);
-    setKernelArg(_kernels.clear,14, sizeof(cl_uchar), &_masks.color.r);
-    setKernelArg(_kernels.clear,15, sizeof(cl_uchar), &_masks.color.g);
-    setKernelArg(_kernels.clear,16, sizeof(cl_uchar), &_masks.color.b);
-    setKernelArg(_kernels.clear,17, sizeof(cl_uchar), &_masks.color.a);
-    setKernelArg(_kernels.clear,18, sizeof(cl_uchar), &_masks.depth);
+    setKernelArg(_kernels.clear,14, sizeof(cl_uint), &mask_color_r);
+    setKernelArg(_kernels.clear,15, sizeof(cl_uint), &mask_color_g);
+    setKernelArg(_kernels.clear,16, sizeof(cl_uint), &mask_color_b);
+    setKernelArg(_kernels.clear,17, sizeof(cl_uint), &mask_color_a);
+    setKernelArg(_kernels.clear,18, sizeof(cl_uint), &mask_depth);
     setKernelArg(_kernels.clear,19, sizeof(cl_uint), &_masks.stencil);
     enqueueNDRangeKernel(getCommandQueue(), _kernels.clear, COLOR_ATTACHMENT0.height * COLOR_ATTACHMENT0.width);
 }
@@ -693,9 +701,11 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
             }
             vertex_array_mem[attrib] = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_vertices, NULL);
 
+            cl_uint normalized = pointer->normalized;
+
             setKernelArg(_kernels.strided_write, 0, sizeof(pointer->size),       &pointer->size);
             setKernelArg(_kernels.strided_write, 1, sizeof(pointer->type),       &pointer->type);
-            setKernelArg(_kernels.strided_write, 2, sizeof(pointer->normalized), &pointer->normalized);
+            setKernelArg(_kernels.strided_write, 2, sizeof(cl_uint),           &normalized);
             setKernelArg(_kernels.strided_write, 3, sizeof(pointer->stride),     &pointer->stride);
             setKernelArg(_kernels.strided_write, 4, sizeof(cl_mem),              &temp_mem[attrib]);
             setKernelArg(_kernels.strided_write, 5, sizeof(cl_mem),              &vertex_array_mem[attrib]);
@@ -947,7 +957,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     }
 
     PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
-    PRINT_BUFFER_I(framebuffer.color.mem, num_fragments, uint8_t, 4);  
+    //PRINT_BUFFER_I(framebuffer.color.mem, num_fragments, uint8_t, 2);  
 }
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) NOT_IMPLEMENTED;
@@ -1182,6 +1192,20 @@ GL_APICALL GLenum GL_APIENTRY glGetGraphicsResetStatus (void) {
     NOT_IMPLEMENTED;
 }
 
+GL_APICALL void GL_APIENTRY glGetIntegerv (GLenum pname, GLint *data) {
+    switch (pname)
+    {
+    case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
+        *data = GL_RGBA;
+        break;
+    case GL_IMPLEMENTATION_COLOR_READ_TYPE:
+        *data = GL_UNSIGNED_SHORT_4_4_4_4;
+        break;
+    default:
+        NOT_IMPLEMENTED;
+    }
+}
+
 GL_APICALL void GL_APIENTRY glGetProgramiv (GLuint program, GLenum pname, GLint *params) {
     switch (pname)
     {
@@ -1258,17 +1282,12 @@ GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) {
         if (param != 1 && param != 2 && param != 4 && param != 8) RETURN_ERROR(GL_INVALID_VALUE);
         _pixel_store.unpack_aligment = param;
         return;
+    default:
+        RETURN_ERROR(GL_INVALID_ENUM);
     }
-    NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) NOT_IMPLEMENTED;
-
-#ifdef HOSTGPU
-#include "common.h"
-
-#define PATH_OF(_FILE) "/home/xavier/repositories/vortex/tests/opengl/lib/GLSC2/" _FILE
-#endif
 
 GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length){
 
@@ -1449,10 +1468,12 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 }
 
 GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, void *data) {
+    // TODO: Check behaviour for non 4 component internal formats
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
-    if (!_framebuffer_binding) NOT_IMPLEMENTED;
+    if (!_framebuffer_binding) NOT_IMPLEMENTED; // Context related
 
     cl_kernel readnpixels_kernel;
+    cl_int cl_error;
     size_t num_pixels;
 
     if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
@@ -1463,7 +1484,7 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
         readnpixels_kernel = _kernels.readnpixels.rgba4;
     } else RETURN_ERROR(GL_INVALID_OPERATION);
 
-    if (!FRAMEBUFFER.color_attachment0.position) NOT_IMPLEMENTED;
+    if (!FRAMEBUFFER.color_attachment0.position) NOT_IMPLEMENTED; // No texture or texture buffer attached, maybe throw GL_INVALID_OPERATION?
 
     typedef struct {
         cl_mem mem;
@@ -1476,7 +1497,7 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 
         renderbuffer_t* colorbuffer = &_renderbuffers[FRAMEBUFFER.color_attachment0.position];
         
-        if (x+width > colorbuffer->width || y+height > colorbuffer->height) NOT_IMPLEMENTED;
+        if (x+width > colorbuffer->width || y+height > colorbuffer->height) UNDEFINED_BEHAVIOUR;
 
         buffer_info = (buffer_info_t) {
             .mem = colorbuffer->mem,
@@ -1486,7 +1507,7 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
     } else {
         texture_t* texture = &_textures[FRAMEBUFFER.color_attachment0.position];
         
-        if (x+width > texture->width || y+height > texture->height) NOT_IMPLEMENTED;
+        if (x+width > texture->width || y+height > texture->height) UNDEFINED_BEHAVIOUR;
 
         buffer_info = (buffer_info_t) {
             .mem = texture->mem,
@@ -1495,11 +1516,9 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
         };
     }
 
-    if (num_pixels != width * height) NOT_IMPLEMENTED;
-
-    void *dst_buff = createBuffer(MEM_WRITE_ONLY, bufSize, NULL);
-
-    printf("mem: %x\n", buffer_info.mem);
+    cl_mem dst_buff = clCreateBuffer(_getContext(), CL_MEM_WRITE_ONLY, bufSize, NULL, &cl_error);
+    // cl_mem dst_buff = clCreateBuffer(_getContext(), CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR, bufSize, data, &cl_error); DO NOT SUPPORTED ON VORTEX
+    CHECK_CL(cl_error);
 
     setKernelArg(readnpixels_kernel, 0, sizeof(cl_mem), &dst_buff);
     setKernelArg(readnpixels_kernel, 1, sizeof(cl_mem), &buffer_info.mem);
@@ -1511,9 +1530,15 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
     setKernelArg(readnpixels_kernel, 7, sizeof(int), &height);
 
     void *command_queue = getCommandQueue();
-    size_t global_work_size = num_pixels;
-    enqueueNDRangeKernel(command_queue, readnpixels_kernel, global_work_size);
-    enqueueReadBuffer(command_queue, dst_buff, bufSize, data);
+    size_t global_work_size[1] = { num_pixels };
+    enqueueNDRangeKernel(command_queue, readnpixels_kernel, global_work_size[0]);
+    // clEnqueueNDRangeKernel(command_queue, readnpixels_kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL);
+
+    // TODO: Check out how to make the device access to host ptr.
+    cl_error = clEnqueueReadBuffer(command_queue, dst_buff, CL_TRUE, 0, bufSize, data, 0, NULL, NULL); 
+    CHECK_CL(cl_error);
+    cl_error = clReleaseMemObject(dst_buff);
+    CHECK_CL(cl_error);
 }
 
 GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {

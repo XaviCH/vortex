@@ -7,31 +7,57 @@
 #define GL_RGB5_A1                        0x8057
 #define GL_RGB565                         0x8D62
 
+/**
+ * HEADER FOR VORTEX OPENCL FUNCTIONS
+ */
+float roundf(float x)
+{
+  int signbit;
+  uint w;
+  /* Most significant word, least significant word. */
+  int exponent_less_127;
 
-__kernel void gl_rgba4_rgba8(
-    __global const unsigned short* buf_in,
-    __global unsigned int* buf_out,
-    const int x,
-    const int y,
-    const int width,
-    const int height
-) {
-  int gid = get_global_id(0);
-  // cordinates of the (i,j)
-  int i = gid % width;
-  int j = gid / width;
+  w = *(uint*)&x; // GET_FLOAT_WORD(w, x);
 
-  unsigned short color4 = buf_in[(j+y)*width+(i+x)];
+  /* Extract sign bit. */
+  signbit = w & 0x80000000;
 
-  unsigned int color8 = 0x0;
-  color8 |= (unsigned int) (color4 & 0x000F) << 4 | (color4 & 0x000F);
-  color8 |= (unsigned int) (color4 & 0x00F0) << 8 | (color4 & 0x00F0) << 4;
-  color8 |= (unsigned int) (color4 & 0x0F00) << 12 | (color4 & 0x0F00) << 8;
-  color8 |= (unsigned int) (color4 & 0xF000) << 16 | (color4 & 0xF000) << 12;
+  /* Extract exponent field. */
+  exponent_less_127 = (int)((w & 0x7f800000) >> 23) - 127;
 
-  buf_out[j*width+i] = color8;
+  if (exponent_less_127 < 23)
+    {
+      if (exponent_less_127 < 0)
+        {
+          w &= 0x80000000;
+          if (exponent_less_127 == -1)
+            /* Result is +1.0 or -1.0. */
+            w |= ((uint)127 << 23);
+        }
+      else
+        {
+          unsigned int exponent_mask = 0x007fffff >> exponent_less_127;
+          if ((w & exponent_mask) == 0)
+            /* x has an integral value. */
+            return x;
+
+          w += 0x00400000 >> exponent_less_127;
+          w &= ~exponent_mask;
+        }
+    }
+  else
+    {
+      if (exponent_less_127 == 128)
+        /* x is NaN or infinite. */
+        return x + x;
+      else
+        return x;
+    }
+  
+  x = *(float*)&w; // SET_FLOAT_WORD(x, w);
+  return x;
 }
-
+/**END */
 
 inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset, uint internalformat) {
   float4 color; 
@@ -121,6 +147,11 @@ kernel void gl_readnpixels_rgba4(
 
   float4 color = get_color_from_colorbuffer(colorbuffer, offset, internalformat);
   color *= 15;
+  // color = round(color);
+  color.x = roundf(color.x);
+  color.y = roundf(color.y);
+  color.z = roundf(color.z);
+  color.w = roundf(color.w);
 
   ushort color4 = 0x0;
   color4 |= (ushort) color.x <<  0;
@@ -153,6 +184,11 @@ kernel void gl_readnpixels_rgba8(
   float4 color;
   color = get_color_from_colorbuffer(colorbuffer, offset, internalformat);
   color *= 255;
+  // color = round(color);
+  color.x = roundf(color.x);
+  color.y = roundf(color.y);
+  color.z = roundf(color.z);
+  color.w = roundf(color.w);
 
   uint color8 = 0x0;
   color8 |= (uint) color.x <<  0;

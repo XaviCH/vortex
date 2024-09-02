@@ -17,7 +17,7 @@ typedef struct {
 typedef struct {
     GLint size;
     GLenum type;
-    GLboolean normalized;
+    uint16_t normalized;
     GLsizei stride;
     void *pointer;
     GLuint binding;

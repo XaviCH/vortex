@@ -10,7 +10,7 @@
 
 void byte_write(
     int size,
-    unsigned char normalized,
+    ushort normalized,
     constant char *data_in,
 	global float4 *data_out
 ) {
@@ -29,7 +29,7 @@ void byte_write(
 
 void ubyte_write(
     int size,
-    unsigned char normalized,
+    ushort normalized,
     constant unsigned char *data_in,
 	global float4 *data_out
 ) {
@@ -48,7 +48,7 @@ void ubyte_write(
 
 void short_write(
     int size,
-    unsigned char normalized,
+    ushort normalized,
     constant short *data_in,
 	global float4 *data_out
 ) {
@@ -67,7 +67,7 @@ void short_write(
 
 void ushort_write(
     int size,
-    unsigned char normalized,
+    ushort normalized,
     constant unsigned short *data_in,
 	global float4 *data_out
 ) {
@@ -87,7 +87,7 @@ void ushort_write(
 
 void int_write(
     int size,
-    unsigned char normalized,
+    ushort normalized,
     constant int *data_in,
 	global float4 *data_out
 ) {
@@ -106,7 +106,7 @@ void int_write(
 
 void uint_write(
     int size,
-    unsigned char normalized,
+    ushort normalized,
     constant unsigned int *data_in,
 	global float4 *data_out
 ) {
@@ -137,7 +137,7 @@ void float_write(
 kernel void gl_strided_write(
     int size,
     int type,
-    unsigned char normalized,
+    int normalized,
     int stride,
 	constant void *buff_in,
 	global float4 *buff_out

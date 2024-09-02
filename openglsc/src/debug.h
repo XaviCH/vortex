@@ -50,7 +50,7 @@
     printf("\n");                                                                                                       \
   }
 #else
-#define PRINT_BUFFER_I(_BUFFER, _SIZE, _TYPE, __TYPE_SEQ)
+#define PRINT_BUFFER_I(_BUFFER, _SIZE, _TYPE, __TIMES)
 #endif
 
 #ifdef DEBUG
@@ -65,5 +65,27 @@
     printf("\n");                                                                                                       \
   }
 #else
-#define PRINT_BUFFER_I(_BUFFER, _SIZE, _TYPE, __TYPE_SEQ)
+#define PRINT_BUFFER_F(_BUFFER, _SIZE, _TYPE, __TIMES)
+#endif
+
+#ifdef DEBUG
+#define UNDEFINED_BEHAVIOUR                                                                         \
+{                                                                                                   \
+  printf("Function %s at %s:%d. Undefined behaviour.\n", __func__, __FILE__, __LINE__);             \
+  exit(1);                                                                                          \
+}
+#else
+#define UNDEFINED_BEHAVIOUR
+#endif
+
+#ifdef DEBUG
+#define CHECK_CL(_ERROR) \
+{ \
+  if (_ERROR != CL_SUCCESS) {                                                                   \
+    printf("Function %s at %s:%d. CL error: %d.\n", __func__, __FILE__, __LINE__, _ERROR);      \
+    exit(1);                                                                                    \
+  }                                                                                             \
+}
+#else
+#define CHECK_CL(_ERROR)
 #endif

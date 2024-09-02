@@ -24,17 +24,17 @@ kernel void gl_clear(
     const float depth_value,
     const int stencil_value,
     // scissor data
-    const uchar scissor_enabled,
+    const uint scissor_enabled,
     const int left,
     const int bottom,
     const uint width,
     const uint height,
     // mask data
-    const uchar color_red_mask, 
-    const uchar color_green_mask, 
-    const uchar color_blue_mask, 
-    const uchar color_alpha_mask,
-    const uchar depth_mask, 
+    const uint color_red_mask, 
+    const uint color_green_mask, 
+    const uint color_blue_mask, 
+    const uint color_alpha_mask,
+    const uint depth_mask, 
     const uint stencil_mask
 ) {
     int gid = get_global_id(0);
