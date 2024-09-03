@@ -4,21 +4,75 @@
 #include <CL/opencl.h>
 #include <GLSC2/glsc2.h>
 
+#ifndef C_OPENCL_HOSTDRIVER
+#ifndef C_OPENCL_VORTEX
+#define C_OPENCL_VORTEX
+#endif
+#endif
+
 // Extern compiled kernels
-#include "kernels/kernel.color.c"
-#include "kernels/kernel.scissor_test.c"
-#include "kernels/kernel.blending.c"
-#include "kernels/kernel.dither.c"
-#include "kernels/kernel.clear.c"
-#include "kernels/kernel.depth.c"
-#include "kernels/kernel.stencil_test.c"
-#include "kernels/kernel.perspective_division.c"
-#include "kernels/kernel.viewport_division.c"
-#include "kernels/kernel.rasterization.c"
-#include "kernels/kernel.rasterization.triangle_fan.c"
-#include "kernels/kernel.rasterization.triangle_strip.c"
-#include "kernels/kernel.readnpixels.c"
-#include "kernels/kernel.strided_write.c"
+#ifdef C_OPENCL_VORTEX
+#include "kernels/kernel.color.pocl.c"
+#include "kernels/kernel.scissor_test.pocl.c"
+#include "kernels/kernel.blending.pocl.c"
+#include "kernels/kernel.dither.pocl.c"
+#include "kernels/kernel.clear.pocl.c"
+#include "kernels/kernel.depth.pocl.c"
+#include "kernels/kernel.stencil_test.pocl.c"
+#include "kernels/kernel.perspective_division.pocl.c"
+#include "kernels/kernel.viewport_division.pocl.c"
+#include "kernels/kernel.rasterization.pocl.c"
+#include "kernels/kernel.rasterization.triangle_fan.pocl.c"
+#include "kernels/kernel.rasterization.triangle_strip.pocl.c"
+#include "kernels/kernel.readnpixels.pocl.c"
+#include "kernels/kernel.strided_write.pocl.c"
+
+#define KERNEL_DEPTH_BIN                            kernel_depth_pocl
+#define KERNEL_STENCIL_TEST_BIN                     kernel_stencil_test_pocl
+#define KERNEL_SCISSOR_TEST_BIN                     kernel_scissor_test_pocl
+#define KERNEL_BLENDING_BIN                         kernel_blending_pocl
+#define KERNEL_DITHER_BIN                           kernel_dither_pocl
+#define KERNEL_RASTERIZATION_BIN                    kernel_rasterization_pocl
+#define KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN       kernel_rasterization_triangle_fan_pocl
+#define KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN     kernel_rasterization_triangle_strip_pocl
+#define KERNEL_VIEWPORT_DIVISION_BIN                kernel_viewport_division_pocl
+#define KERNEL_PERSPECTIVE_DIVISION_BIN             kernel_perspective_division_pocl
+#define KERNEL_READNPIXELS_BIN                      kernel_readnpixels_pocl
+#define KERNEL_STRIDED_WRITE_BIN                    kernel_strided_write_pocl
+#define KERNEL_CLEAR_BIN                            kernel_clear_pocl
+#endif
+
+#ifdef C_OPENCL_HOSTDRIVER
+#include "kernels/kernel.color.ocl.c"
+#include "kernels/kernel.scissor_test.ocl.c"
+#include "kernels/kernel.blending.ocl.c"
+#include "kernels/kernel.dither.ocl.c"
+#include "kernels/kernel.clear.ocl.c"
+#include "kernels/kernel.depth.ocl.c"
+#include "kernels/kernel.stencil_test.ocl.c"
+#include "kernels/kernel.perspective_division.ocl.c"
+#include "kernels/kernel.viewport_division.ocl.c"
+#include "kernels/kernel.rasterization.ocl.c"
+#include "kernels/kernel.rasterization.triangle_fan.ocl.c"
+#include "kernels/kernel.rasterization.triangle_strip.ocl.c"
+#include "kernels/kernel.readnpixels.ocl.c"
+#include "kernels/kernel.strided_write.ocl.c"
+
+#define KERNEL_DEPTH_BIN                            kernel_depth_ocl
+#define KERNEL_STENCIL_TEST_BIN                     kernel_stencil_test_ocl
+#define KERNEL_SCISSOR_TEST_BIN                     kernel_scissor_test_ocl
+#define KERNEL_BLENDING_BIN                         kernel_blending_ocl
+#define KERNEL_DITHER_BIN                           kernel_dither_ocl
+#define KERNEL_RASTERIZATION_BIN                    kernel_rasterization_ocl
+#define KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN       kernel_rasterization_triangle_fan_ocl
+#define KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN     kernel_rasterization_triangle_strip_ocl
+#define KERNEL_VIEWPORT_DIVISION_BIN                kernel_viewport_division_ocl
+#define KERNEL_PERSPECTIVE_DIVISION_BIN             kernel_perspective_division_ocl
+#define KERNEL_READNPIXELS_BIN                      kernel_readnpixels_ocl
+#define KERNEL_STRIDED_WRITE_BIN                    kernel_strided_write_ocl
+#define KERNEL_CLEAR_BIN                            kernel_clear_ocl
+#endif
+
 
 
 // Our definitions

@@ -23,7 +23,7 @@ RISCV_SYSROOT ?= $(RISCV_TOOLCHAIN_PATH)/$(RISCV_PREFIX)
 
 POCL_CC_PATH ?= $(TOOLDIR)/pocl/compiler
 POCL_RT_PATH ?= $(TOOLDIR)/pocl/runtime
-VORTEX_OPENGLSC_PATH ?= $(VORTEX_PATH)/openglsc
+VORTEX_GLSC_PATH ?= $(VORTEX_PATH)/openglsc
 
 VORTEX_RT_PATH ?= $(VORTEX_PATH)/runtime
 VORTEX_KN_PATH ?= $(VORTEX_PATH)/kernel
@@ -50,7 +50,7 @@ ifdef HOSTDRIVER
 else ifdef HOSTGPU 
 	LDFLAGS += -lOpenCL ../lib/GLSC2/glsc2-gpu.c.so
 else
-	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_OPENGLSC_PATH)/lib/GLSC2/glsc2.c.so
+	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/lib/GLSC2/glsc2.c.so
 endif
 
 # Debugigng

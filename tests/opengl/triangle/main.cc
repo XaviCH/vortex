@@ -8,6 +8,16 @@
 
 #include "../common.h"
 
+#define KERNEL_FILE ""
+
+#ifdef C_OPENCL_HOSTDRIVER
+#define KERNEL_FILE "kernel.ocl"
+#endif
+
+#ifdef C_OPENCL_VORTEX
+#define KERNEL_FILE "kernel.pocl"
+#endif
+
 #define WIDTH 150
 #define HEIGHT 100
 
@@ -48,7 +58,7 @@ int main() {
   program = glCreateProgram();
   file_t file;
   #ifndef HOSTDRIVER
-  read_file("kernel.pocl", &file);
+  read_file(KERNEL_FILE, &file);
   glProgramBinary(program, 0, file.data, file.size);
   #else
   GLuint vs, fs;

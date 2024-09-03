@@ -7,11 +7,25 @@
 #define GL_UNSIGNED_INT                   0x1405
 #define GL_FLOAT                          0x1406
 
+#ifndef C_OPENCL_HOSTDRIVER
+#ifndef C_OPENCL_VORTEX
+#define C_OPENCL_VORTEX
+#endif
+#endif
+
+#ifdef C_OPENCL_HOSTDRIVER
+#define _CONSTANT global
+#endif
+
+#ifdef C_OPENCL_VORTEX
+#define _CONSTANT constant
+#endif
+
 
 void byte_write(
     int size,
     ushort normalized,
-    constant char *data_in,
+    _CONSTANT char *data_in,
 	global float4 *data_out
 ) {
     if (normalized) {
@@ -30,7 +44,7 @@ void byte_write(
 void ubyte_write(
     int size,
     ushort normalized,
-    constant unsigned char *data_in,
+    _CONSTANT unsigned char *data_in,
 	global float4 *data_out
 ) {
     if (normalized) {
@@ -49,7 +63,7 @@ void ubyte_write(
 void short_write(
     int size,
     ushort normalized,
-    constant short *data_in,
+    _CONSTANT short *data_in,
 	global float4 *data_out
 ) {
     if (normalized) {
@@ -68,7 +82,7 @@ void short_write(
 void ushort_write(
     int size,
     ushort normalized,
-    constant unsigned short *data_in,
+    _CONSTANT unsigned short *data_in,
 	global float4 *data_out
 ) {
     if (normalized) {
@@ -88,7 +102,7 @@ void ushort_write(
 void int_write(
     int size,
     ushort normalized,
-    constant int *data_in,
+    _CONSTANT int *data_in,
 	global float4 *data_out
 ) {
     if (normalized) {
@@ -107,7 +121,7 @@ void int_write(
 void uint_write(
     int size,
     ushort normalized,
-    constant unsigned int *data_in,
+    _CONSTANT unsigned int *data_in,
 	global float4 *data_out
 ) {
     if (normalized) {
@@ -125,7 +139,7 @@ void uint_write(
 
 void float_write(
     int size,
-    constant float *data_in,
+    _CONSTANT float *data_in,
 	global float4 *data_out
 ) {
     data_out->x = data_in[0];
@@ -139,7 +153,7 @@ kernel void gl_strided_write(
     int type,
     int normalized,
     int stride,
-	constant void *buff_in,
+	_CONSTANT void *buff_in,
 	global float4 *buff_out
 ) {
     int gid = get_global_id(0);
@@ -158,7 +172,7 @@ kernel void gl_strided_write(
             slice = 4; break;
     };
 
-    constant void *data_in = buff_in + gid*(size*slice+stride);
+    _CONSTANT void *data_in = buff_in + gid*(size*slice+stride);
     global float4 *data_out = buff_out + gid;
 
     if (type == GL_BYTE) byte_write(size, normalized, data_in, data_out);

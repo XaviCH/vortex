@@ -105,19 +105,19 @@ blend_data_t _blend_data = {
     }
 };
 
-extern unsigned char kernel_depth_pocl[];
-extern unsigned char kernel_stencil_test_pocl[];
-extern unsigned char kernel_scissor_test_pocl[];
-extern unsigned char kernel_blending_pocl[];
-extern unsigned char kernel_dither_pocl[];
-extern unsigned char kernel_rasterization_pocl[];
-extern unsigned char kernel_rasterization_triangle_fan_pocl[];
-extern unsigned char kernel_rasterization_triangle_strip_pocl[];
-extern unsigned char kernel_viewport_division_pocl[];
-extern unsigned char kernel_perspective_division_pocl[];
-extern unsigned char kernel_readnpixels_pocl[];
-extern unsigned char kernel_strided_write_pocl[];
-extern unsigned char kernel_clear_pocl[];
+extern unsigned char KERNEL_DEPTH_BIN [];
+extern unsigned char KERNEL_SCISSOR_TEST_BIN[];
+extern unsigned char KERNEL_STENCIL_TEST_BIN[];
+extern unsigned char KERNEL_BLENDING_BIN[];
+extern unsigned char KERNEL_DITHER_BIN[];
+extern unsigned char KERNEL_RASTERIZATION_BIN[];
+extern unsigned char KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN[];
+extern unsigned char KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN[];
+extern unsigned char KERNEL_VIEWPORT_DIVISION_BIN[];
+extern unsigned char KERNEL_PERSPECTIVE_DIVISION_BIN[];
+extern unsigned char KERNEL_READNPIXELS_BIN[];
+extern unsigned char KERNEL_STRIDED_WRITE_BIN[];
+extern unsigned char KERNEL_CLEAR_BIN[];
 
 __attribute__((constructor))
 void __context_constructor__() {
@@ -126,19 +126,19 @@ void __context_constructor__() {
                 rasterization_triangle_strip_program;
 
 
-    depth_program                           = createProgramWithBinary(kernel_depth_pocl,                            sizeof(kernel_depth_pocl));
-    scissor_test_program                    = createProgramWithBinary(kernel_scissor_test_pocl,                     sizeof(kernel_scissor_test_pocl));
-    stencil_test_program                    = createProgramWithBinary(kernel_stencil_test_pocl,                     sizeof(kernel_stencil_test_pocl));
-    blending_program                        = createProgramWithBinary(kernel_blending_pocl,                         sizeof(kernel_blending_pocl));
-    dither_program                          = createProgramWithBinary(kernel_dither_pocl,                           sizeof(kernel_dither_pocl));
-    rasterization_program                   = createProgramWithBinary(kernel_rasterization_pocl,                    sizeof(kernel_rasterization_pocl));
-    rasterization_triangle_fan_program      = createProgramWithBinary(kernel_rasterization_triangle_fan_pocl,       sizeof(kernel_rasterization_triangle_fan_pocl));
-    rasterization_triangle_strip_program    = createProgramWithBinary(kernel_rasterization_triangle_strip_pocl,     sizeof(kernel_rasterization_triangle_strip_pocl));
-    viewport_division_program               = createProgramWithBinary(kernel_viewport_division_pocl,                sizeof(kernel_viewport_division_pocl));
-    perspective_division_program            = createProgramWithBinary(kernel_perspective_division_pocl,             sizeof(kernel_perspective_division_pocl));
-    readnpixels_program                     = createProgramWithBinary(kernel_readnpixels_pocl,                      sizeof(kernel_readnpixels_pocl));
-    strided_write_program                   = createProgramWithBinary(kernel_strided_write_pocl,                    sizeof(kernel_strided_write_pocl));
-    clear_program                           = createProgramWithBinary(kernel_clear_pocl,                            sizeof(kernel_clear_pocl));
+    depth_program                           = createProgramWithBinary(KERNEL_DEPTH_BIN,                            sizeof(KERNEL_DEPTH_BIN));
+    scissor_test_program                    = createProgramWithBinary(KERNEL_SCISSOR_TEST_BIN,                     sizeof(KERNEL_SCISSOR_TEST_BIN));
+    stencil_test_program                    = createProgramWithBinary(KERNEL_STENCIL_TEST_BIN,                     sizeof(KERNEL_STENCIL_TEST_BIN));
+    blending_program                        = createProgramWithBinary(KERNEL_BLENDING_BIN,                         sizeof(KERNEL_BLENDING_BIN));
+    dither_program                          = createProgramWithBinary(KERNEL_DITHER_BIN,                           sizeof(KERNEL_DITHER_BIN));
+    rasterization_program                   = createProgramWithBinary(KERNEL_RASTERIZATION_BIN,                    sizeof(KERNEL_RASTERIZATION_BIN));
+    rasterization_triangle_fan_program      = createProgramWithBinary(KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN,       sizeof(KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN));
+    rasterization_triangle_strip_program    = createProgramWithBinary(KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN,     sizeof(KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN));
+    viewport_division_program               = createProgramWithBinary(KERNEL_VIEWPORT_DIVISION_BIN,                sizeof(KERNEL_VIEWPORT_DIVISION_BIN));
+    perspective_division_program            = createProgramWithBinary(KERNEL_PERSPECTIVE_DIVISION_BIN,             sizeof(KERNEL_PERSPECTIVE_DIVISION_BIN));
+    readnpixels_program                     = createProgramWithBinary(KERNEL_READNPIXELS_BIN,                      sizeof(KERNEL_READNPIXELS_BIN));
+    strided_write_program                   = createProgramWithBinary(KERNEL_STRIDED_WRITE_BIN,                    sizeof(KERNEL_STRIDED_WRITE_BIN));
+    clear_program                           = createProgramWithBinary(KERNEL_CLEAR_BIN,                            sizeof(KERNEL_CLEAR_BIN));
 
     buildProgram(depth_program);
     buildProgram(scissor_test_program);
