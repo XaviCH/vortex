@@ -859,11 +859,18 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(scissor_kernel, 4, sizeof(cl_uint),  &_scissor_data.width);
     setKernelArg(scissor_kernel, 5, sizeof(cl_uint),  &_scissor_data.height);
 
+    // Dummy objects set up
+    cl_int cl_error;
+    cl_mem dummy_stencil_mem = clCreateBuffer(_getContext(), CL_MEM_READ_WRITE, 200, NULL, &cl_error);
+    CHECK_CL(cl_error);
+    cl_mem dummy_depth_mem = clCreateBuffer(_getContext(), CL_MEM_READ_WRITE, 200, NULL, &cl_error);
+    CHECK_CL(cl_error);
+
     // Stencil Kernel Set Up
     cl_kernel stencil_kernel = _kernels.stencil_test;
     setKernelArg(stencil_kernel, 0, sizeof(cl_mem),  &facing_buffer);
     setKernelArg(stencil_kernel, 1, sizeof(cl_mem),  &gl_Discard);
-    setKernelArg(stencil_kernel, 2, sizeof(cl_mem),  _enableds.stencil_test ? &framebuffer.stencil.mem : NULL);
+    setKernelArg(stencil_kernel, 2, sizeof(cl_mem),  _enableds.stencil_test ? &framebuffer.stencil.mem : &dummy_stencil_mem);
     setKernelArg(stencil_kernel, 3, sizeof(cl_uint), &_masks.stencil.front);
     setKernelArg(stencil_kernel, 4, sizeof(cl_uint), &_masks.stencil.back);
     setKernelArg(stencil_kernel, 5, sizeof(cl_uint), &_stencil_data.front.function.func);
@@ -876,22 +883,28 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(stencil_kernel,12, sizeof(cl_uint), &_stencil_data.back.operation.sfail);
 
     // Depth Kernel Set Up
+    cl_uint depth_test, stencil_test;
+    depth_test = _enableds.depth_test;
+    stencil_test = _enableds.stencil_test;
+
     cl_kernel depth_kernel = _kernels.depth_test;
     setKernelArg(depth_kernel, 0, sizeof(cl_mem), &gl_FragCoord);
     setKernelArg(depth_kernel, 1, sizeof(cl_mem), &facing_buffer);
     setKernelArg(depth_kernel, 2, sizeof(cl_mem), &gl_Discard);
-    setKernelArg(depth_kernel, 3, sizeof(cl_mem), _enableds.depth_test ? &framebuffer.depth.mem : NULL);
-    setKernelArg(depth_kernel, 4, sizeof(cl_mem), _enableds.stencil_test ? &framebuffer.stencil.mem : NULL);
-    setKernelArg(depth_kernel, 5, sizeof(cl_uchar), &_masks.depth);
-    setKernelArg(depth_kernel, 6, sizeof(cl_uint), &_masks.stencil.front);
-    setKernelArg(depth_kernel, 7, sizeof(cl_uint), &_masks.stencil.back);
-    setKernelArg(depth_kernel, 8, sizeof(cl_uint), &_depth_func);
-    setKernelArg(depth_kernel, 9, sizeof(cl_int),  &_stencil_data.front.function.ref);
-    setKernelArg(depth_kernel,10, sizeof(cl_uint), &_stencil_data.front.operation.dpfail);
-    setKernelArg(depth_kernel,11, sizeof(cl_uint), &_stencil_data.front.operation.dppasss);
-    setKernelArg(depth_kernel,12, sizeof(cl_int),  &_stencil_data.back.function.ref);
-    setKernelArg(depth_kernel,13, sizeof(cl_uint), &_stencil_data.back.operation.dpfail);
-    setKernelArg(depth_kernel,14, sizeof(cl_uint), &_stencil_data.back.operation.dppasss);
+    setKernelArg(depth_kernel, 3, sizeof(cl_mem), _enableds.depth_test ? &framebuffer.depth.mem : &dummy_depth_mem);
+    setKernelArg(depth_kernel, 4, sizeof(cl_mem), _enableds.stencil_test ? &framebuffer.stencil.mem : &dummy_stencil_mem);
+    setKernelArg(depth_kernel, 5, sizeof(cl_uint), &depth_test);
+    setKernelArg(depth_kernel, 6, sizeof(cl_uint), &stencil_test);
+    setKernelArg(depth_kernel, 7, sizeof(cl_uchar), &_masks.depth);
+    setKernelArg(depth_kernel, 8, sizeof(cl_uint), &_masks.stencil.front);
+    setKernelArg(depth_kernel, 9, sizeof(cl_uint), &_masks.stencil.back);
+    setKernelArg(depth_kernel,10, sizeof(cl_uint), &_depth_func);
+    setKernelArg(depth_kernel,11, sizeof(cl_int),  &_stencil_data.front.function.ref);
+    setKernelArg(depth_kernel,12, sizeof(cl_uint), &_stencil_data.front.operation.dpfail);
+    setKernelArg(depth_kernel,13, sizeof(cl_uint), &_stencil_data.front.operation.dppasss);
+    setKernelArg(depth_kernel,14, sizeof(cl_int),  &_stencil_data.back.function.ref);
+    setKernelArg(depth_kernel,15, sizeof(cl_uint), &_stencil_data.back.operation.dpfail);
+    setKernelArg(depth_kernel,16, sizeof(cl_uint), &_stencil_data.back.operation.dppasss);
 
     /* Blending Kernel Set Up */
     cl_kernel blending_kernel = _kernels.blending;
@@ -2081,13 +2094,13 @@ unsigned int type_from_name_type(const char* name_type) {
     
     // OpenGL - OpenCL special types
     if (strcmp(name_type, "sampler2D_t") == 0) return SAMPLER2D_T;
-    #ifdef HOSTGPU
-    if (strcmp(name_type, "image_t")  == 0) return IMAGE_T;
-    #else 
     if (strncmp(name_type, "uchar*", sizeof("uchar*")-1)  == 0) return IMAGE_T;
-    #endif
 
     // 
+    #ifdef DEBUG
     printf("%s\n", name_type);
     NOT_IMPLEMENTED;
+    #else
+    return 0;
+    #endif
 }

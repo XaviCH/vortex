@@ -1,5 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
 #include <assert.h>
 #include <math.h>
 
@@ -7,16 +5,6 @@
 #include <string.h>
 
 #include "../common.h"
-
-#define KERNEL_FILE ""
-
-#ifdef C_OPENCL_HOSTDRIVER
-#define KERNEL_FILE "kernel.ocl"
-#endif
-
-#ifdef C_OPENCL_VORTEX
-#define KERNEL_FILE "kernel.pocl"
-#endif
 
 #define WIDTH 150
 #define HEIGHT 100
@@ -38,9 +26,7 @@ int main() {
   GLuint vbo, program, framebuffer, colorbuffer;
   GLint loc_position, loc_color;
 
-  #ifdef HOSTDRIVER
   EGL_SETUP();
-  #endif
 
   // Set Up Frame Context
   glGenFramebuffers(1, &framebuffer);
@@ -56,68 +42,7 @@ int main() {
 
   // Set Up Program
   program = glCreateProgram();
-  file_t file;
-  #ifndef HOSTDRIVER
-  read_file(KERNEL_FILE, &file);
-  glProgramBinary(program, 0, file.data, file.size);
-  #else
-  GLuint vs, fs;
-  GLchar *bin;
-  GLint size;
-  GLint success;
-
-  vs = glCreateShader(GL_VERTEX_SHADER);
-  fs = glCreateShader(GL_FRAGMENT_SHADER);
-
-  read_file("kernel.vs", &file);
-  bin = (char*)file.data;
-  size = file.size;
-
-  glShaderSource(vs, 1, &bin, &size);
-  glCompileShader(vs);
-  free(bin);
-
-  glGetShaderiv(vs, GL_COMPILE_STATUS, &success);  
-  if (success == GL_FALSE) {
-    GLint logSize = 0;
-    glGetShaderiv(vs, GL_INFO_LOG_LENGTH, &logSize);
-
-    GLchar* infoLog = (GLchar*) malloc(logSize);
-    glGetShaderInfoLog(vs, logSize, &logSize, infoLog);
-    printf("Fail compile vs: %s\n", infoLog);
-    exit(-1);
-  }
-  
-  read_file("kernel.fs", &file);
-  bin = (char*)file.data;
-  size = file.size;
-
-  glShaderSource(fs, 1, &bin, &size);
-  glCompileShader(fs);
-
-  glGetShaderiv(fs, GL_COMPILE_STATUS, &success);  
-  if (success == GL_FALSE) {
-    GLint logSize = 0;
-    glGetShaderiv(fs, GL_INFO_LOG_LENGTH, &logSize);
-
-    GLchar* infoLog = (GLchar*) malloc(logSize);
-    glGetShaderInfoLog(fs, logSize, &logSize, infoLog);
-    printf("Fail compile fs: %s\n", infoLog);
-    exit(-1);
-  }
-
-  free(file.data);
-
-  glAttachShader(program, vs);
-  glAttachShader(program, fs);
-
-  glLinkProgram(program);
-
-  glDetachShader(program, vs);
-  glDetachShader(program, fs);
-  glDeleteShader(vs);
-  glDeleteShader(fs);
-  #endif
+  LINK_PROGRAM(program, "kernel");
   glUseProgram(program);
 
   // Set Up Vertex Attributes
@@ -132,18 +57,21 @@ int main() {
   glBufferData(GL_ARRAY_BUFFER,sizeof(color), &color, GL_STATIC_DRAW);
   glVertexAttribPointer(loc_color, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
   glEnableVertexAttribArray(loc_color); 
-  // glEnable(GL_DITHER);
+
   // Draw
   glClear(GL_COLOR_BUFFER_BIT);
   glDrawArrays(GL_TRIANGLES, 0, 3);
   glFinish();
   
-  #ifdef HOSTDRIVER
+  #ifdef C_OPENGL_HOST
   glReadPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, result);
   #else
   glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
   #endif
+
   print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
+
+  EGL_DESTROY();
 
   return 0; 
 }

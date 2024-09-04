@@ -112,7 +112,7 @@ int Init ( ESContext *esContext )
    GLint linked;
 
    file_t file;
-   read_file("./kernel.pocl", &file);
+   read_file("./kernel.ocl", &file);
 
    // Create the program object
    programObject = glCreateProgram ( );

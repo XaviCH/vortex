@@ -6,7 +6,7 @@ KERNELS_C = $(wildcard kernels/*.c)
 KERNELS_CL = $(wildcard kernels/*.cl)
 
 KERNELS_POCL_C = $(wildcard kernels/*.pocl.c)
-KERNELS_CL_C = $(wildcard kernels/*.cl.c)
+KERNELS_CL_C = $(wildcard kernels/*.ocl.c)
 
 INCLUDES = -I../include
 
@@ -26,7 +26,7 @@ glsc2.c.so: glsc2.c.o
 	$(CC) glsc2.c.o -shared -o $(LIB_PATH)/glsc2.c.so -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so
 
 glsc2.opencl.o: glsc2.c config.h debug.h types.h kernel.c $(KERNELS_CL_C)
-	$(CC) $(CXXFLAGS) -o $@ -c glsc2.c $(INCLUDES) -fPIC -DC_OPENCL_HOSTDRIVER
+	$(CC) $(CXXFLAGS) -o $@ -c glsc2.c $(INCLUDES) -fPIC -DC_OPENCL_HOST
 
 glsc2.vortex.o: glsc2.c config.h debug.h types.h kernel.c $(KERNELS_POCL_C)
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC -DC_OPENCL_VORTEX

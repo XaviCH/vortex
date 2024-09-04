@@ -34,9 +34,7 @@ int main() {
   GLuint vbo, program, framebuffer, colorbuffer;
   GLint loc_position, loc_texCoord, loc_sampler;
 
-  #ifdef HOSTDRIVER
   EGL_SETUP();
-  #endif
 
   // Set Up Frame Context
   glGenFramebuffers(1, &framebuffer);
@@ -52,78 +50,14 @@ int main() {
 
   // Set Up Program
   program = glCreateProgram();
-  file_t file;
-  #ifndef HOSTDRIVER
-  read_file("kernel.pocl", &file);
-  glProgramBinary(program, 0, file.data, file.size);
-  printf("Heyy\n\n");
-  #else
-  GLuint vs, fs;
-  GLchar *bin;
-  GLint size;
-  GLint success;
-
-  vs = glCreateShader(GL_VERTEX_SHADER);
-  fs = glCreateShader(GL_FRAGMENT_SHADER);
-
-  read_file("kernel.vs", &file);
-  bin = (char*)file.data;
-  size = file.size;
-
-  glShaderSource(vs, 1, &bin, &size);
-  glCompileShader(vs);
-  free(bin);
-
-  glGetShaderiv(vs, GL_COMPILE_STATUS, &success);  
-  if (success == GL_FALSE) {
-    GLint logSize = 0;
-    glGetShaderiv(vs, GL_INFO_LOG_LENGTH, &logSize);
-
-    GLchar* infoLog = (GLchar*) malloc(logSize);
-    glGetShaderInfoLog(vs, logSize, &logSize, infoLog);
-    printf("Fail compile vs: %s\n", infoLog);
-    exit(-1);
-  }
-  
-  read_file("kernel.fs", &file);
-  bin = (char*)file.data;
-  size = file.size;
-
-  glShaderSource(fs, 1, &bin, &size);
-  glCompileShader(fs);
-
-  glGetShaderiv(fs, GL_COMPILE_STATUS, &success);  
-  if (success == GL_FALSE) {
-    GLint logSize = 0;
-    glGetShaderiv(fs, GL_INFO_LOG_LENGTH, &logSize);
-
-    GLchar* infoLog = (GLchar*) malloc(logSize);
-    glGetShaderInfoLog(fs, logSize, &logSize, infoLog);
-    printf("Fail compile fs: %s\n", infoLog);
-    exit(-1);
-  }
-
-  free(file.data);
-
-  glAttachShader(program, vs);
-  glAttachShader(program, fs);
-
-  glLinkProgram(program);
-
-  glDetachShader(program, vs);
-  glDetachShader(program, fs);
-  glDeleteShader(vs);
-  glDeleteShader(fs);
-  #endif
+  LINK_PROGRAM(program, "kernel");
   glUseProgram(program);
-  printf("Heyy\n\n");
+
   // Set Up Vertex Attributes
   loc_position  = glGetAttribLocation(program, "position");
   loc_texCoord  = glGetAttribLocation(program, "in_texCoord");
   loc_sampler   = glGetUniformLocation(program, "ourTexture");
 
-  printf("position: %i, coord: %i, sampler: %i\n", loc_position, loc_texCoord, loc_sampler);
-  
   glVertexAttribPointer(loc_position, 3, GL_FLOAT, GL_FALSE, 0, &position);
   glEnableVertexAttribArray(loc_position); 
 
@@ -143,7 +77,7 @@ int main() {
   glUniform1i(loc_sampler, 0); // texture unit 0
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // has to be enabled or mipmap has to be generated
+  // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // has to be enabled or mipmap has to be generated
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -157,26 +91,25 @@ int main() {
     data[i*4+2] = image->data[i].blue;
     data[i*4+3] = 0xFFu;
   }
-  #ifdef HOSTDRIVER
-  printf("Error: %i\n", glGetError());
+  #ifdef C_OPENGL_HOST
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image->x,image->y, 0, GL_RGB, GL_UNSIGNED_BYTE, image->data);
-  printf("Error: %i\n", glGetError());
   #else
   glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, image->x, image->y);
   glTexSubImage2D(GL_TEXTURE_2D,0,0,0,image->x,image->y, GL_RGBA, GL_UNSIGNED_BYTE, data);
   #endif
-  //glGenerateMipmap(GL_TEXTURE_2D);
-  // Draw
+
   glClear(GL_COLOR_BUFFER_BIT);
   glDrawArrays(GL_TRIANGLES, 0, 6);
   glFinish();
   
-  #ifdef HOSTDRIVER
+  #ifdef C_OPENGL_HOST
   glReadPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, result);
   #else
   glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
   #endif
   print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
+
+  EGL_DESTROY();
 
   return 0; 
 }

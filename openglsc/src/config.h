@@ -4,7 +4,7 @@
 #include <CL/opencl.h>
 #include <GLSC2/glsc2.h>
 
-#ifndef C_OPENCL_HOSTDRIVER
+#ifndef C_OPENCL_HOST
 #ifndef C_OPENCL_VORTEX
 #define C_OPENCL_VORTEX
 #endif
@@ -42,7 +42,7 @@
 #define KERNEL_CLEAR_BIN                            kernel_clear_pocl
 #endif
 
-#ifdef C_OPENCL_HOSTDRIVER
+#ifdef C_OPENCL_HOST
 #include "kernels/kernel.color.ocl.c"
 #include "kernels/kernel.scissor_test.ocl.c"
 #include "kernels/kernel.blending.ocl.c"

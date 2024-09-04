@@ -29,8 +29,16 @@ clean:
 ./kernel.pocl: ./kernel.cl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o $@ $<
 
-./vector_add: ${VEC_ADD} ./kernel.pocl
+./vector_add: ${VEC_ADD}
 	$(CC) $(CFLAGS) ${VEC_ADD} -o $@ $(CXXFLAGS) ${LDFLAGS} -lm
 
+ifdef HOSTGPU
+run: vector_add kernel.ocl
+	./vector_add
+else ifdef HOSTDRIVER
+run: clean run-hostdriver
+	feh -Z -F --force-aliasing -Y image.ppm
+else
 run: kernel.pocl vector_add
-	LD_LIBRARY_PATH=$(POCL_RT_PATH)/lib:$(VORTEX_RT_PATH)/simx:$(LD_LIBRARY_PATH) ./vector_add $(OPTS)
+	LD_LIBRARY_PATH=$(POCL_RT_PATH)/lib:$(VORTEX_RT_PATH)/rtlsim:$(LD_LIBRARY_PATH) ./vector_add $(OPTS)
+endif

@@ -1,17 +1,31 @@
+// Default is GLSC2 implentation with vortex OpenCL
+#ifndef C_OPENCL_HOST
+#ifndef C_OPENGL_HOST
+#define C_OPENCL_VORTEX
+#endif
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
-#ifdef HOSTDRIVER
 #include <EGL/egl.h>
+// #ifdef HOSTDRIVER
 #define EGL_EGLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES
 #include <EGL/eglext.h>
+#ifdef C_OPENGL_HOST
 #include <GLES2/gl2.h>
 #else
 #include <GLSC2/glsc2.h>
 #endif
 
+#ifdef C_OPENCL_HOST
+#define KERNEL_FILE_EXT ".ocl"
+#endif
+#ifdef C_OPENCL_VORTEX
+#define KERNEL_FILE_EXT ".pocl"
+#endif
 
-#ifdef HOSTDRIVER
+#ifdef C_OPENGL_HOST
 #define EGL_SETUP() \
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY); \
     EGLint major; \
@@ -46,15 +60,72 @@
     }; \
     EGLSurface surface = eglCreatePbufferSurface(display, config, surfaceAttribs); \
     eglMakeCurrent(display, surface, surface, eglContext); 
+#else
+#define EGL_SETUP()
+#endif
 
+#ifdef C_OPENGL_HOST
 #define EGL_DESTROY() \
     eglDestroyContext(display, eglContext); \
     eglDestroySurface(display, surface); \
     eglTerminate(display);
+#else
+#define EGL_DESTROY()
+#endif
+
+#ifdef C_OPENGL_HOST
+#define LINK_PROGRAM(_PROGRAM, _SHADER_NAME) \
+{ \
+  file_t file; \
+  GLuint vs, fs; \
+  GLint success; \
+  vs = glCreateShader(GL_VERTEX_SHADER); \
+  fs = glCreateShader(GL_FRAGMENT_SHADER); \
+  read_file(_SHADER_NAME ".vs", &file); \
+  glShaderSource(vs, 1, (const GLchar* const*) &file.data, (const int*) &file.size); \
+  glCompileShader(vs); \
+  free(file.data); \
+  glGetShaderiv(vs, GL_COMPILE_STATUS, &success);   \
+  if (success == GL_FALSE) { \
+    GLint logSize = 0; \
+    glGetShaderiv(vs, GL_INFO_LOG_LENGTH, &logSize); \
+    GLchar* infoLog = (GLchar*) malloc(logSize); \
+    glGetShaderInfoLog(vs, logSize, &logSize, infoLog); \
+    printf("Fail compile vs: %s\n", infoLog); \
+    exit(-1); \
+  } \
+  read_file(_SHADER_NAME ".fs", &file); \
+  glShaderSource(fs, 1,(const GLchar* const*) &file.data, (const int*) &file.size); \
+  glCompileShader(fs); \
+  glGetShaderiv(fs, GL_COMPILE_STATUS, &success);   \
+  if (success == GL_FALSE) { \
+    GLint logSize = 0; \
+    glGetShaderiv(fs, GL_INFO_LOG_LENGTH, &logSize); \
+    GLchar* infoLog = (GLchar*) malloc(logSize); \
+    glGetShaderInfoLog(fs, logSize, &logSize, infoLog); \
+    printf("Fail compile fs: %s\n", infoLog); \
+    exit(-1); \
+  } \
+  free(file.data); \
+  glAttachShader(_PROGRAM, vs); \
+  glAttachShader(_PROGRAM, fs); \
+  glLinkProgram(_PROGRAM); \
+  glDetachShader(_PROGRAM, vs); \
+  glDetachShader(_PROGRAM, fs); \
+  glDeleteShader(vs); \
+  glDeleteShader(fs); \
+} 
+#else
+#define LINK_PROGRAM(_PROGRAM, _SHADER_NAME) \
+{ \
+  file_t file; \
+  read_file(_SHADER_NAME KERNEL_FILE_EXT, &file); \
+  glProgramBinary(_PROGRAM, 0, file.data, file.size); \
+  free(file.data); \
+}
 #endif
 
 // IMAGES
-
 typedef struct {
      unsigned char red,green,blue;
 } ppm_pixel_t;

@@ -7,13 +7,13 @@
 #define GL_UNSIGNED_INT                   0x1405
 #define GL_FLOAT                          0x1406
 
-#ifndef C_OPENCL_HOSTDRIVER
+#ifndef C_OPENCL_HOST
 #ifndef C_OPENCL_VORTEX
 #define C_OPENCL_VORTEX
 #endif
 #endif
 
-#ifdef C_OPENCL_HOSTDRIVER
+#ifdef C_OPENCL_HOST
 #define _CONSTANT global
 #endif
 

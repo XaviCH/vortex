@@ -48,14 +48,14 @@ CXXFLAGS += -I$(VORTEX_EGL_PATH)/include
 CXXFLAGS += -I$(VORTEX_GLSC_PATH)/include
 
 ifdef HOSTDRIVER
-	CXXFLAGS += -DHOSTDRIVER
+	CXXFLAGS += -DC_OPENGL_HOST
 	LDFLAGS += -lGLESv2 -lEGL
 else ifdef HOSTGPU 
-	CXXFLAGS += -DC_OPENCL_HOSTDRIVER
-	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/libGLSCv2.so
+	CXXFLAGS += -DC_OPENCL_HOST
+	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/libGLSCv2.opencl.so
 else
 	CXXFLAGS += -DC_OPENCL_VORTEX
-	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/lib/glsc2.c.so $(VORTEX_EGL_PATH)/lib/egl.so
+	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/libGLSCv2.vortex.so $(VORTEX_EGL_PATH)/lib/egl.so
 endif
 
 # Debugigng
@@ -85,7 +85,7 @@ kernel.pocl: kernel.cl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o kernel.pocl kernel.cl
 
 kernel.ocl: kernel.cl
-	$(VORTEX_GLSC_PATH)/clcompiler kernel.cl kernel.ocl -DC_OPENCL_HOSTDRIVER -cl-kernel-arg-info
+	$(VORTEX_GLSC_PATH)/clcompiler kernel.cl kernel.ocl -DC_OPENCL_HOST -cl-kernel-arg-info
 
 %.cc.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -121,6 +121,26 @@ else
 	XCL_EMULATION_MODE=$(TARGET) XRT_INI_PATH=$(XRT_SYN_DIR)/xrt.ini EMCONFIG_PATH=$(FPGA_BIN_DIR) XRT_DEVICE_INDEX=$(XRT_DEVICE_INDEX) XRT_XCLBIN_PATH=$(FPGA_BIN_DIR)/vortex_afu.xclbin LD_LIBRARY_PATH=$(XILINX_XRT)/lib:$(POCL_RT_PATH)/lib:$(VORTEX_RT_PATH)/xrt:$(LD_LIBRARY_PATH) ./$(PROJECT) $(OPTS)	
 endif
 
+display:
+	feh -Z -F --force-aliasing -Y image.ppm
+
+ifdef HOSTGPU
+run:
+	$(MAKE) clean
+	$(MAKE) run-hostgpu
+	$(MAKE) display
+else ifdef HOSTDRIVER
+run:
+	$(MAKE) clean
+	$(MAKE) run-hostdriver
+	$(MAKE) display
+else
+run: 
+	$(MAKE) clean
+	$(MAKE) run-simx
+	$(MAKE) display
+endif
+
 .depend: $(SRCS)
 	$(CXX) $(CXXFLAGS) -MM $^ > .depend;
 
@@ -128,7 +148,7 @@ clean:
 	rm -rf $(PROJECT) *.o .depend
 
 clean-all: clean
-	rm -rf *.dump *.pocl
+	rm -rf *.dump *.pocl *.ocl
 
 ifneq ($(MAKECMDGOALS),clean)
     -include .depend

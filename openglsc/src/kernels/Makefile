@@ -17,7 +17,7 @@ all: vortex opencl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o $@ $<
 
 %.ocl: %.cl
-	$(VORTEX_GLSC_PATH)/clcompiler $< $@ -DC_OPENCL_HOSTDRIVER
+	$(VORTEX_GLSC_PATH)/clcompiler $< $@ -DC_OPENCL_HOST
 
 %.pocl.c: %.pocl
 	xxd -i $< > $@

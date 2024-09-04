@@ -87,12 +87,14 @@ bool depth_test(uint func, float z, uchar mask, global ushort* depth_buffer) {
 
 kernel void gl_depth_test(
   // fragment data
-  constant float4* gl_FragCoord,
-  constant bool* facing, // 0: front, 1: back
+  global float4* gl_FragCoord,
+  global bool* facing, // 0: front, 1: back
   global bool* discard,
   // framebuffer data
   global ushort* depth_buffer,
   global uchar* stencil_buffer,
+  const uint depth_enabled,
+  const uint stencil_enabled,
   const uchar depth_mask,
   const uint stencil_front_mask,
   const uint stencil_back_mask,
@@ -106,14 +108,15 @@ kernel void gl_depth_test(
   const uint back_dpfail,
   const uint back_dppass
 ) {
+
   int gid = get_global_id(0);
   if (discard[gid]) return;
 
   bool pass;
-  if (depth_buffer == NULL) pass = true; // depth test always pass, NULL if framebuffer does not have any, or is disabled
+  if (depth_enabled == 0) pass = true; // depth test always pass, NULL if framebuffer does not have any, or is disabled
   else pass = depth_test(func, gl_FragCoord[gid].z, depth_mask, depth_buffer + gid);
 
-  if (stencil_buffer != NULL) {
+  if (stencil_enabled != 0) {
     bool face = facing[gid];
 
     if (pass) {
