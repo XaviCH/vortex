@@ -79,10 +79,11 @@
 #endif
 
 #ifdef DEBUG
-#define CHECK_CL(_ERROR) \
-{ \
-  if (_ERROR != CL_SUCCESS) {                                                                   \
-    printf("Function %s at %s:%d. CL error: %d.\n", __func__, __FILE__, __LINE__, _ERROR);      \
+#define CHECK_CL(_ERROR)                                                                        \
+{                                                                                               \
+  cl_int __cl_error = _ERROR;                                                                   \
+  if (__cl_error != CL_SUCCESS) {                                                               \
+    printf("Function %s at %s:%d. CL error: %d.\n", __func__, __FILE__, __LINE__, __cl_error);  \
     exit(1);                                                                                    \
   }                                                                                             \
 }

@@ -1,6 +1,8 @@
 
 /** HEADER */
 /** THIS MUST BE INCLUDED TO SUPPORT TEXTURING **/
+
+/** TEXTURE DEFINITIONS **/
 #define GL_REPEAT                         0x2901
 #define GL_CLAMP_TO_EDGE                  0x812F
 #define GL_MIRRORED_REPEAT                0x8370
@@ -23,7 +25,7 @@
 typedef global unsigned char* image_t;
 
 typedef struct {
-    short s, t, min_filter, mag_filter;
+    ushort s, t, min_filter, mag_filter;
 } texture_wraps_t;
 
 typedef struct __attribute__((packed)) {
@@ -33,8 +35,21 @@ typedef struct __attribute__((packed)) {
 } sampler2D_t;
 
 float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t sampler, float2 coord) {
-    // TODO: Only works for GL_NEAREST
     int width, height;
+
+    // TODO: simx 
+    #ifndef C_OPENCL_HOST 
+
+    coord.x = (coord.x - floor(coord.x));
+    coord.y = (coord.y - floor(coord.y));
+
+    width   = sampler.width * coord.x;
+    height  = sampler.height * coord.y;
+
+    global uchar* color = image + (height*sampler.width + width)*4;
+    return (float4) ((float)*color / 255, (float)*(color+1) / 255, (float)*(color+2) / 255, (float)*(color+3) / 255);
+    
+    #else 
 
     switch (sampler.wraps.s) {
         case GL_REPEAT:
@@ -56,7 +71,7 @@ float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t samp
         default: break;
     }
 
-    switch (sampler.wraps.s) {
+    switch (sampler.wraps.t) {
         case GL_REPEAT:
             coord.y = (coord.y - floor(coord.y));
             break;
@@ -76,6 +91,7 @@ float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t samp
         default: break;
     }
 
+
     width   = sampler.width * coord.x;
     height  = sampler.height * coord.y;
 
@@ -93,7 +109,7 @@ float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t samp
         default: break;
     }
 
-    // 
+    
     switch (sampler.internalformat) {
         case GL_R8:
             {
@@ -148,6 +164,7 @@ float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t samp
         default:
             return (float4) (0.5f);
     }
+    #endif
 
 }
 
