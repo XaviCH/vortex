@@ -56,7 +56,7 @@ float4 __attribute__((overloadable)) read_imagef(image_t image, sampler2D_t samp
         default: break;
     }
 
-    switch (sampler.wraps.s) {
+    switch (sampler.wraps.t) {
         case GL_REPEAT:
             coord.y = (coord.y - floor(coord.y));
             break;

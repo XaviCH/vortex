@@ -162,8 +162,8 @@ void __context_constructor__() {
     _kernels.dithering = createKernel(dither_program, "gl_dithering");
 
     _kernels.rasterization.triangles        = createKernel(rasterization_program, "gl_rasterization_triangle");
-    _kernels.rasterization.triangle_fan     = createKernel(rasterization_program, "gl_rasterization_triangle_fan");
-    _kernels.rasterization.triangle_strip   = createKernel(rasterization_program, "gl_rasterization_triangle_strip");
+    _kernels.rasterization.triangle_fan     = createKernel(rasterization_triangle_fan_program, "gl_rasterization_triangle_fan");
+    _kernels.rasterization.triangle_strip   = createKernel(rasterization_triangle_strip_program, "gl_rasterization_triangle_strip");
 
     _kernels.viewport_division = createKernel(viewport_division_program, "gl_viewport_division");
     _kernels.perspective_division = createKernel(perspective_division_program, "gl_perspective_division");
@@ -804,7 +804,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         }
     }
     for(int sampler = 0; sampler < CURRENT_PROGRAM.texture_unit_size; ++sampler) {
-        
+
         typedef struct __attribute__((packed)) {
             unsigned int width, height;
             unsigned int internalformat;
@@ -1002,19 +1002,17 @@ GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
 }
 
 GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index) {
-    if (index >= GL_MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
-
+    if (index >= MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
+    
     _vertex_attrib_enable[index] = 1;
 }
 
 GL_APICALL void GL_APIENTRY glFinish (void) {
-    finish(getCommandQueue());
-    // TODO: Checkout multiqueuing
+    CHECK_CL(clFinish(getCommandQueue()));
 }
 
 GL_APICALL void GL_APIENTRY glFlush (void) {
-    clFlush(getCommandQueue());
-    // TODO: Checkout multiqueuing
+    CHECK_CL(clFlush(getCommandQueue()));
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) {
