@@ -59,23 +59,23 @@ float roundf(float x)
 }
 /**END */
 
-inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset, uint internalformat) {
+inline float4 get_color_from_colorbuffer(global void* colorbuffer, uint offset, uint internalformat) {
   float4 color; 
 
   switch (internalformat) {
   case GL_R8:
-    color.x = ((float) *((constant uchar*) colorbuffer)) / 255;
+    color.x = ((float) *((global uchar*) colorbuffer)) / 255;
     break;
   case GL_RG8:
     {
-      constant uchar* buffer = (constant uchar*) colorbuffer + offset * 2;
+      global uchar* buffer = (global uchar*) colorbuffer + offset * 2;
       color.x = (float) buffer[0] / 255;
       color.y = (float) buffer[1] / 255;
     }
     break;
   case GL_RGB8:
     {
-      constant uchar* buffer = (constant uchar*) colorbuffer + offset * 3;
+      global uchar* buffer = (global uchar*) colorbuffer + offset * 3;
       color.x = (float) buffer[0] / 255;
       color.y = (float) buffer[1] / 255;
       color.z = (float) buffer[2] / 255;
@@ -83,7 +83,7 @@ inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset
     break;
   case GL_RGBA8:
     {
-      constant uchar* buffer = (constant uchar*) colorbuffer + offset * 4;
+      global uchar* buffer = (global uchar*) colorbuffer + offset * 4;
       color.x = (float) buffer[0] / 255;
       color.y = (float) buffer[1] / 255;
       color.z = (float) buffer[2] / 255;
@@ -92,7 +92,7 @@ inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset
     break;
   case GL_RGBA4:
     {
-      constant ushort* buffer = ((constant ushort*) colorbuffer) + offset;
+      global ushort* buffer = ((global ushort*) colorbuffer) + offset;
       color.x = (float) ((*buffer & 0x000F) >>  0) / 15;
       color.y = (float) ((*buffer & 0x00F0) >>  4) / 15;
       color.z = (float) ((*buffer & 0x0F00) >>  8) / 15;
@@ -101,7 +101,7 @@ inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset
     break;
   case GL_RGB5_A1:
     {
-      constant ushort* buffer = (constant ushort*) colorbuffer + offset;
+      global ushort* buffer = (global ushort*) colorbuffer + offset;
       color.x = (float) (*buffer & 0x001F >>  0) / 31;
       color.y = (float) (*buffer & 0x03E0 >>  5) / 31;
       color.z = (float) (*buffer & 0x7C00 >> 10) / 31;
@@ -110,7 +110,7 @@ inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset
     break;
   case GL_RGB565:
     {
-      constant ushort* buffer = (constant ushort*) colorbuffer + offset;
+      global ushort* buffer = (global ushort*) colorbuffer + offset;
       color.x = (float) (*buffer & 0x001F >>  0) / 31;
       color.y = (float) (*buffer & 0x07E0 >>  5) / 63;
       color.z = (float) (*buffer & 0xF800 >> 11) / 31;
@@ -128,7 +128,7 @@ inline float4 get_color_from_colorbuffer(constant void* colorbuffer, uint offset
 kernel void gl_readnpixels_rgba4(
   global ushort* buffer_out,
   // framebuffer data
-  constant void* colorbuffer,
+  global void* colorbuffer,
   const uint internalformat,
   const uint color_width,
   // readnpixels data
@@ -165,7 +165,7 @@ kernel void gl_readnpixels_rgba4(
 kernel void gl_readnpixels_rgba8(
   global uint* buffer_out,
   // framebuffer data
-  constant void* colorbuffer,
+  global void* colorbuffer,
   const uint internalformat,
   const uint color_width,
   // readnpixels data

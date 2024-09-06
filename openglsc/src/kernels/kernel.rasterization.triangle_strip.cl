@@ -27,10 +27,10 @@ kernel void gl_rasterization_triangle_strip (
     const int index, // gl_Index 
     const int width, // 
     const int attributes, //
-    constant float4 *gl_Positions,
+    global float4 *gl_Positions,
     global float4 *gl_FragCoords,
     global bool *gl_Discard,
-    constant float4 *gl_Primitives,
+    global float4 *gl_Primitives,
     global float4 *gl_Rasterization,
     global bool* facing, // 0: front, 1: back
     const ushort front_face,
@@ -40,8 +40,8 @@ kernel void gl_rasterization_triangle_strip (
     int gid = get_global_id(0);
     int gsize = get_global_size(0); // number of fragments
     // input values
-    constant float4 *position = gl_Positions + index;
-    constant float4 *primitives = gl_Primitives + index;
+    global float4 *position = gl_Positions + index;
+    global float4 *primitives = gl_Primitives + index;
     global float4 *fragCoord = gl_FragCoords + gid;
     global float4 *rasterization = gl_Rasterization + gid;
 
@@ -89,7 +89,7 @@ kernel void gl_rasterization_triangle_strip (
     fragCoord->z = abc.x*v0.z + abc.y*v1.z + abc.z*v2.z;
     // fragCoord->w = abc.x*v0.w + abc.y*v1.w + abc.z*v2.w; // maybe this is not required
 
-    constant float4 *p0, *p1, *p2;
+    global float4 *p0, *p1, *p2;
     for(int attribute = 0 ; attribute < attributes; attribute++) {
         if (index % 2) {
             p2 = primitives + gsize*attribute;

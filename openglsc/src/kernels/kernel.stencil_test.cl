@@ -69,7 +69,7 @@ void stencil_operation(uint operation, int ref, uint mask, global uchar* stencil
 
 kernel void gl_stencil_test (
   // fragment data
-  constant bool* facing, // 0: front, 1: back
+  global bool* facing, // 0: front, 1: back
   global bool *discard,
   // framebuffer data
   global uchar* stencil_buffer,
@@ -94,7 +94,7 @@ kernel void gl_stencil_test (
   uchar stencil_value = stencil_buffer[gid];
 
   bool pass;
-  if (face) {
+  if (!face) {
     pass = stencil_test(back_func, back_ref, back_mask, stencil_value);
     if (pass) return;
 

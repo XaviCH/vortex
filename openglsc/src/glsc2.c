@@ -12,24 +12,25 @@
 #define NOT_IMPLEMENTED              \
     {                               \
         printf("Funtion %s at %s:%d is not implemented.\n", __func__, __FILE__, __LINE__); \
-        exit(0);                     \
+        exit(1);                     \
     }
 
 #define INTERNAL_ERROR               \
     ({                               \
-        printf("Unexpected reached point in %s at %s:%d.\n");  \
-        exit(0);                     \
+        printf("Unexpected reached point in %s at %s:%d.\n",__func__, __FILE__, __LINE__);  \
+        exit(1);                     \
     })
 
 GLenum gl_error = GL_NO_ERROR;
 
-#define RETURN_ERROR(error)                 \
-    ({                                      \
-        if(gl_error == GL_NO_ERROR) {       \
-            gl_error = error;               \
-            exit(error);                    \
-        }                                   \
-        return;                             \
+#define RETURN_ERROR(error)                     \
+    ({                                          \
+        if(gl_error == GL_NO_ERROR) {           \
+            gl_error = error;                   \
+            printf("OpenGL error generated (%d | %x) in %s at %s:%d.\n", gl_error, gl_error, __func__, __FILE__, __LINE__);    \
+            exit(error);                        \
+        }                                       \
+        return;                                 \
     })
 
 /************ CONTEXT ************\
@@ -718,7 +719,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     cl_mem gl_Positions         = createBuffer(MEM_READ_WRITE,      sizeof(float[4])*num_vertices,                              NULL);
 
     /* ---- Set Up Per-Vertex Kernels ---- */
-    printf("Vertex Kernel Set Up.");
+    //printf("Vertex Kernel Set Up.");
     cl_kernel vertex_kernel = CURRENT_PROGRAM.vertex_kernel;
 
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
@@ -933,22 +934,22 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     /* ---- Enqueue Kernels ---- */
     cl_command_queue command_queue = getCommandQueue();
 
-    PRINT_BUFFER_F(vertex_array_mem[0], num_vertices, float, 4);
+    //PRINT_BUFFER_F(vertex_array_mem[0], num_vertices, float, 4);
     
     enqueueNDRangeKernel(command_queue, vertex_kernel,                  num_vertices);
     enqueueNDRangeKernel(command_queue, _kernels.perspective_division,   num_vertices);
     enqueueNDRangeKernel(command_queue, _kernels.viewport_division,      num_vertices);
 
-    PRINT_BUFFER_F(gl_Positions, num_vertices, float, 4);
+    //PRINT_BUFFER_F(gl_Positions, num_vertices, float, 4);
 
     for(GLsizei primitive=0; primitive < num_primitives; ++primitive) {
         setKernelArg(_kernels.rasterization.triangles, 0, sizeof(primitive), &primitive);
 
-        PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
+        //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
 
         enqueueNDRangeKernel(command_queue, _kernels.rasterization.triangles,   num_fragments);
 
-        PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
+        //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
 
         enqueueNDRangeKernel(command_queue, fragment_kernel,                    num_fragments);
 
@@ -956,8 +957,11 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         if (_enableds.scissor_test) 
             enqueueNDRangeKernel(command_queue, scissor_kernel, num_fragments);
         // TODO: Multisample Pre Operations, is controlled by the context provider
-        if (_enableds.stencil_test) 
+        if (_enableds.stencil_test) {
+            //PRINT_BUFFER_I(framebuffer.stencil.mem, num_fragments, uint8_t, 1);
             enqueueNDRangeKernel(command_queue, stencil_kernel, num_fragments); // Also manage write on stencilbuffer
+            //PRINT_BUFFER_I(framebuffer.stencil.mem, num_fragments, uint8_t, 1);
+        }
         if (_enableds.stencil_test || _enableds.depth_test) 
             enqueueNDRangeKernel(command_queue, depth_kernel, num_fragments); // Also manage write on depthbuffer and on stencilbuffer
         if (_enableds.blend)
@@ -969,7 +973,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         // TODO: Write on buffers (now is handled using other kernels )
     }
 
-    PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
+    //PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
     //PRINT_BUFFER_I(framebuffer.color.mem, num_fragments, uint8_t, 2);  
 }
 

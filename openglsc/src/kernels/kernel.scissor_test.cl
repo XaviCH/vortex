@@ -1,6 +1,6 @@
 kernel void gl_scissor_test (
   // fragment data
-  constant float4* gl_FragCood,
+  global float4* gl_FragCood,
   global bool *discard,
   // scissor data
   const int left,
