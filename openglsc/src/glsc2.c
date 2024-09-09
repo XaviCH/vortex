@@ -706,15 +706,18 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
             setKernelArg(_kernels.strided_write, 0, sizeof(pointer->size),       &pointer->size);
             setKernelArg(_kernels.strided_write, 1, sizeof(pointer->type),       &pointer->type);
-            setKernelArg(_kernels.strided_write, 2, sizeof(cl_uint),           &normalized);
+            setKernelArg(_kernels.strided_write, 2, sizeof(cl_uint),             &normalized);
             setKernelArg(_kernels.strided_write, 3, sizeof(pointer->stride),     &pointer->stride);
             setKernelArg(_kernels.strided_write, 4, sizeof(cl_mem),              &temp_mem[attrib]);
             setKernelArg(_kernels.strided_write, 5, sizeof(cl_mem),              &vertex_array_mem[attrib]);
             
             enqueueNDRangeKernel(command_queue, _kernels.strided_write, num_vertices);
+
         }
     }
     
+    
+
     cl_mem vertex_out_buffer    = createBuffer(CL_MEM_READ_WRITE,   sizeof(float[4])*num_vertices*CURRENT_PROGRAM.varying_size, NULL);
     cl_mem gl_Positions         = createBuffer(MEM_READ_WRITE,      sizeof(float[4])*num_vertices,                              NULL);
 
@@ -975,6 +978,23 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     //PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
     //PRINT_BUFFER_I(framebuffer.color.mem, num_fragments, uint8_t, 2);  
+    CHECK_CL(clReleaseMemObject(vertex_out_buffer));
+    CHECK_CL(clReleaseMemObject(fragment_in_buffer));
+    CHECK_CL(clReleaseMemObject(gl_Positions));
+    CHECK_CL(clReleaseMemObject(gl_FragCoord));
+    CHECK_CL(clReleaseMemObject(gl_Discard));
+    CHECK_CL(clReleaseMemObject(gl_FragColor));
+    CHECK_CL(clReleaseMemObject(facing_buffer));
+    CHECK_CL(clReleaseMemObject(dummy_stencil_mem));
+    CHECK_CL(clReleaseMemObject(dummy_depth_mem));
+
+    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
+        if (_vertex_attrib_enable[attrib]) {
+            CHECK_CL(clReleaseMemObject(temp_mem[attrib]));
+            CHECK_CL(clReleaseMemObject(vertex_array_mem[attrib]));
+        }
+    }
+
 }
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) NOT_IMPLEMENTED;
