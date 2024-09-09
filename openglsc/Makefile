@@ -19,7 +19,8 @@ libGLSCv2.opencl.so: src/glsc2.opencl.o
 libGLSCv2.vortex.so: src/glsc2.vortex.o
 	$(CC) $< -shared -o $(LIB_NAME).vortex.so -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so
 
-opencl: clcompiler
+opencl: 
+	make clcompiler
 	make -C src opencl
 	make libGLSCv2.opencl.so
 
