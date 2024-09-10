@@ -32,7 +32,7 @@ kernel void gl_blending (
   global float4* gl_FragColor,
   global bool *discard,
   // framebuffer data
-  constant void* colorbuffer,
+  global void* colorbuffer,
   const uint type, 
   // blending data
   const uint modeRGB,
@@ -55,7 +55,7 @@ kernel void gl_blending (
   switch (type) {
     case GL_RGBA4:
       {
-        ushort color = ((constant ushort*) colorbuffer)[gid];
+        ushort color = ((global ushort*) colorbuffer)[gid];
         dstColor = (float4) { 
           (float) ((color & 0x000Fu) >>  0) / 15.f, 
           (float) ((color & 0x00F0u) >>  4) / 15.f,
@@ -66,7 +66,7 @@ kernel void gl_blending (
       break;
     case GL_RGB5_A1:
       {
-        ushort color = ((constant ushort*) colorbuffer)[gid];
+        ushort color = ((global ushort*) colorbuffer)[gid];
         dstColor = (float4) { 
           (float) ((color & 0x001Fu) >>  0) / 31.f, 
           (float) ((color & 0x03E0u) >>  5) / 31.f,
@@ -77,7 +77,7 @@ kernel void gl_blending (
       break;
     case GL_RGB565:
       {
-        ushort color = ((constant ushort*) colorbuffer)[gid];
+        ushort color = ((global ushort*) colorbuffer)[gid];
         dstColor = (float4) { 
           (float) ((color & 0x001Fu) >>  0) / 31.f, 
           (float) ((color & 0x07E0u) >>  5) / 63.f,
