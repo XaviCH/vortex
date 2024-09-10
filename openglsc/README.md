@@ -64,7 +64,7 @@ For varying vertex attributes it is require to create a parameter in vs and fs w
 ```c
 kernel void main_vs(
     ...
-    global const float4* in_attrib,
+    global const float4* varying,
     ...
 ) {
     ...
@@ -72,7 +72,7 @@ kernel void main_vs(
 
 kernel void main_fs(
     ...
-    global float4* out_attrib,
+    global float4* varying,
     ...
 ) {
     ...
@@ -84,6 +84,25 @@ kernel void main_vs(
     ...
     constant float4* uniform,
     ...
+) {
+    ...
+}
+```
+Textures are self handle for the user. Samplers can be define as follows:
+```c
+typedef struct {
+    short s, t, min_filter, mag_filter;
+} texture_wraps_t;
+
+typedef struct __attribute__((packed)) {
+  uint width, height;
+  uint internalformat;
+  texture_wraps_t wraps;
+} sampler2D_t;
+
+kernel void main_fs(
+    sampler2D_t sampler,
+    global unsigned char* image
 ) {
     ...
 }
