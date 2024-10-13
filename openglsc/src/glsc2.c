@@ -63,6 +63,7 @@ GLenum _cull_face = GL_BACK;
 
 pixel_store_t _pixel_store = { .unpack_aligment = 4 };
 
+cl_command_queue  _vertex_attrib_command_queues[MAX_VERTEX_ATTRIBS];
 unsigned char     _vertex_attrib_enable[MAX_VERTEX_ATTRIBS]; // TODO: use it as checker for state
 unsigned char     _vertex_attrib_state[MAX_VERTEX_ATTRIBS];
 vertex_attrib_u   _vertex_attribs[MAX_VERTEX_ATTRIBS];
@@ -173,6 +174,10 @@ void __context_constructor__() {
     _kernels.strided_write = createKernel(strided_write_program, "gl_strided_write");
 
     _kernels.clear  = createKernel(clear_program, "gl_clear");
+
+    for (uint32_t queue = 0; queue < MAX_VERTEX_ATTRIBS; ++queue) {
+        _vertex_attrib_command_queues[queue] = createCommandQueue(0);
+    }
 } 
 
 /****** MEMORY HANDLERS ******/
@@ -691,7 +696,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
             vertex_attrib_pointer_t *pointer = &_vertex_attribs[attrib].pointer;
             size_t buffer_in_size = num_vertices*sizeof_type(pointer->type)*pointer->size+pointer->stride;
 
-            cl_command_queue command_queue = createCommandQueue(0);
+            //cl_command_queue command_queue = createCommandQueue(0);
             
             if (pointer->binding) {
                 region.origin = (uint64_t) pointer->pointer, 
@@ -711,7 +716,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
             setKernelArg(_kernels.strided_write, 4, sizeof(cl_mem),              &temp_mem[attrib]);
             setKernelArg(_kernels.strided_write, 5, sizeof(cl_mem),              &vertex_array_mem[attrib]);
             
-            enqueueNDRangeKernel(command_queue, _kernels.strided_write, num_vertices);
+            enqueueNDRangeKernel(_vertex_attrib_command_queues[attrib], _kernels.strided_write, num_vertices);
 
         }
     }
