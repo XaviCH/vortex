@@ -33,6 +33,16 @@ GLenum gl_error = GL_NO_ERROR;
         return;                                 \
     })
 
+#define RETURN_ERROR_WITH_MESSAGE(error, message) \
+    ({                                            \
+        if(gl_error == GL_NO_ERROR) {           \
+            gl_error = error;                   \
+            printf("OpenGL error generated (%d | %x) in %s at %s:%d.\n" message "\n", gl_error, gl_error, __func__, __FILE__, __LINE__);    \
+            exit(error);                        \
+        }                                       \
+        return;                                 \
+    })    
+
 /************ CONTEXT ************\
  * TODO: Create context using a context manager instead of the library 
  * 
@@ -1918,13 +1928,13 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
 }
 
 #define ERROR_CHECKER(_COUNT, _SIZE, _TYPE) ({                                                                          \
-    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);                                                          \
-    if (CURRENT_PROGRAM.uniforms_data[location].size != _SIZE) RETURN_ERROR(GL_INVALID_OPERATION);                      \
+    if (!_current_program) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "No current program setted.");                                                          \
+    if (CURRENT_PROGRAM.uniforms_data[location].size != _SIZE) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Size do not match.");                      \
     if (   CURRENT_PROGRAM.uniforms_data[location].type != GL_BYTE                                                      \
         && CURRENT_PROGRAM.uniforms_data[location].type != _TYPE)                                                       \
-        RETURN_ERROR(GL_INVALID_OPERATION);                                                                             \
-    if (location >= CURRENT_PROGRAM.active_uniforms) RETURN_ERROR(GL_INVALID_OPERATION);                                \
-    if (_COUNT < -1 || _COUNT > CURRENT_PROGRAM.uniforms_array_size[location]) RETURN_ERROR(GL_INVALID_OPERATION);      \
+        RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Type do not match.");                                                                             \
+    if (location >= CURRENT_PROGRAM.active_uniforms) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Location equal or greater than active uniforms.");                                \
+    if (_COUNT < -1 || _COUNT > CURRENT_PROGRAM.uniforms_array_size[location]) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Array size is less than -1 or greater than expected.");      \
     if (location == -1) return;                                                                                         \
     })
 
@@ -2089,7 +2099,7 @@ unsigned int size_from_name_type(const char* name_type) {
     #define RETURN_IF_SIZE_FROM(_TYPE)                              \
         if (strncmp(name_type, _TYPE, sizeof(_TYPE) - 1) == 0) {    \
             substr_size = name_type + sizeof(_TYPE) - 1;            \
-            if (*substr_size == '\0') return 1;                     \
+            if (*substr_size == '*' || *substr_size == '\0') return 1;                     \
             return atoi(substr_size);                               \
         }
 
