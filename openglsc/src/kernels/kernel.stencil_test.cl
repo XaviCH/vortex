@@ -85,7 +85,7 @@ kernel void gl_stencil_test (
   const uint back_mask,
   const uint back_sfail
 ) {
-  if (stencil_buffer == NULL) return;
+  // if (stencil_buffer == NULL) return;
 
   int gid = get_global_id(0);
   if (discard[gid]) return;
