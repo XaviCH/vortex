@@ -34,6 +34,10 @@ typedef void* vx_buffer_h;
 #define VX_CAPS_GLOBAL_MEM_SIZE     0x5
 #define VX_CAPS_LOCAL_MEM_SIZE      0x6
 #define VX_CAPS_ISA_FLAGS           0x7
+#define VX_CAPS_NUM_MEM_BANKS       0x8
+#define VX_CAPS_MEM_BANK_SIZE       0x9
+#define VX_CAPS_TC_SIZE             0xA
+#define VX_CAPS_TC_NUM              0xB
 
 // device isa flags
 #define VX_ISA_STD_A                (1ull << ISA_STD_A)
@@ -65,6 +69,7 @@ typedef void* vx_buffer_h;
 #define VX_MEM_READ                 0x1
 #define VX_MEM_WRITE                0x2
 #define VX_MEM_READ_WRITE           0x3
+#define VX_MEM_PIN_MEMORY           0x4
 
 // open the device and connect to it
 int vx_dev_open(vx_device_h* hdevice);

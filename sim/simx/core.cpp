@@ -129,12 +129,14 @@ Core::Core(const SimContext& ctx,
   dispatchers_.at((int)FUType::FPU) = SimPlatform::instance().create_object<Dispatcher>(arch, 2, NUM_FPU_BLOCKS, NUM_FPU_LANES);
   dispatchers_.at((int)FUType::LSU) = SimPlatform::instance().create_object<Dispatcher>(arch, 2, NUM_LSU_BLOCKS, NUM_LSU_LANES);
   dispatchers_.at((int)FUType::SFU) = SimPlatform::instance().create_object<Dispatcher>(arch, 2, NUM_SFU_BLOCKS, NUM_SFU_LANES);
-
+  dispatchers_.at((int)FUType::TCU) = SimPlatform::instance().create_object<Dispatcher>(arch, 2, NUM_TCU_BLOCKS, NUM_TCU_LANES);
+  
   // initialize execute units
   func_units_.at((int)FUType::ALU) = SimPlatform::instance().create_object<AluUnit>(this);
   func_units_.at((int)FUType::FPU) = SimPlatform::instance().create_object<FpuUnit>(this);
   func_units_.at((int)FUType::LSU) = SimPlatform::instance().create_object<LsuUnit>(this);
   func_units_.at((int)FUType::SFU) = SimPlatform::instance().create_object<SfuUnit>(this);
+  func_units_.at((int)FUType::TCU) = SimPlatform::instance().create_object<TcuUnit>(this);
 
   // bind commit arbiters
   for (uint32_t i = 0; i < ISSUE_WIDTH; ++i) {
@@ -428,3 +430,10 @@ bool Core::wspawn(uint32_t num_warps, Word nextPC) {
 void Core::attach_ram(RAM* ram) {
   emulator_.attach_ram(ram);
 }
+
+#ifdef VM_ENABLE
+void Core::set_satp(uint64_t satp) {
+  emulator_.set_satp(satp); //JAEWON wit, tid???
+  // emulator_.set_csr(VX_CSR_SATP,satp,0,0); //JAEWON wit, tid???
+}
+#endif
