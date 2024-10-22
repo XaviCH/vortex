@@ -46,7 +46,7 @@ jobs:
       - name: Install Dependencies
         if: steps.cache-toolchain.outputs.cache-hit != 'true' || steps.cache-thirdparty.outputs.cache-hit != 'true'
         run: |
-          sudo bash ./ci/system_updates.sh
+          sudo bash ./ci/install_dependencies.sh
 
       - name: Setup Toolchain
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
@@ -75,7 +75,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo bash ./ci/system_updates.sh
+          sudo bash ./ci/install_dependencies.sh
 
       - name: Cache Toolchain Directory
         id: cache-toolchain
@@ -106,7 +106,7 @@ jobs:
           make tests -s > /dev/null
 
       - name: Upload Build Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: build-${{ matrix.xlen }}
           path: build${{ matrix.xlen }}
@@ -117,7 +117,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [regression, opencl, cache, config1, config2, debug, stress]
+        name: [regression, opencl, cache, config1, config2, debug, scope, stress, synthesis, vm]
         xlen: [32, 64]
 
     steps:
@@ -126,7 +126,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo bash ./ci/system_updates.sh
+          sudo bash ./ci/install_dependencies.sh
 
       - name: Cache Toolchain Directory
         id: cache-toolchain
@@ -147,7 +147,7 @@ jobs:
             ${{ runner.os }}-thirdparty-
 
       - name: Download Build Artifact
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: build-${{ matrix.xlen }}
           path: build${{ matrix.xlen }}
@@ -161,7 +161,6 @@ jobs:
             ./ci/regression.sh --unittest
             ./ci/regression.sh --isa
             ./ci/regression.sh --kernel
-            ./ci/regression.sh --synthesis
             ./ci/regression.sh --regression
           else
             ./ci/regression.sh --${{ matrix.name }}

@@ -40,7 +40,7 @@ const char* program = nullptr;
 
 static void parse_args(int argc, char **argv) {
   	int c;
-  	while ((c = getopt(argc, argv, "t:w:c:rsh?")) != -1) {
+  	while ((c = getopt(argc, argv, "t:w:c:rsh")) != -1) {
     	switch (c) {
       case 't':
         num_threads = atoi(optarg);
@@ -55,13 +55,12 @@ static void parse_args(int argc, char **argv) {
         showStats = true;
         break;
     	case 'h':
-    	case '?':
-      		show_usage();
-      		exit(0);
+      	show_usage();
+      	exit(0);
     		break;
     	default:
-      		show_usage();
-      		exit(-1);
+      	show_usage();
+      	exit(-1);
     	}
 	}
 
@@ -84,7 +83,7 @@ int main(int argc, char **argv) {
     Arch arch(num_threads, num_warps, num_cores);
 
     // create memory module
-    RAM ram(0, RAM_PAGE_SIZE);
+    RAM ram(0, MEM_PAGE_SIZE);
 
     // create processor
     Processor processor(arch);

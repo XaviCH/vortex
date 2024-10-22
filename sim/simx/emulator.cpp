@@ -30,17 +30,6 @@
 
 using namespace vortex;
 
-Emulator::ipdom_entry_t::ipdom_entry_t(const ThreadMask &tmask, Word PC)
-  : tmask(tmask)
-  , PC(PC)
-  , fallthrough(false)
-{}
-
-Emulator::ipdom_entry_t::ipdom_entry_t(const ThreadMask &tmask)
-  : tmask(tmask)
-  , fallthrough(true)
-{}
-
 Emulator::warp_t::warp_t(const Arch& arch)
   : ireg_file(arch.num_threads(), std::vector<Word>(MAX_NUM_REGS))
   , freg_file(arch.num_threads(), std::vector<uint64_t>(MAX_NUM_REGS))
@@ -85,7 +74,11 @@ Emulator::Emulator(const Arch &arch, const DCRS &dcrs, Core* core)
     , core_(core)
     , warps_(arch.num_warps(), arch)
     , barriers_(arch.num_barriers(), 0)
-    , ipdom_size_((arch.num_threads()-1) * 2)
+    , ipdom_size_(arch.num_threads()-1)
+    // [TBC] Currently, tradeoff between scratchpad size & performance has not been evaluated. Scratchpad is
+    // considered to be big enough to hold input tiles for one output tile.
+    // In future versions, scratchpad size should be fixed to an appropriate value.
+    , scratchpad(std::vector<Word>(32 * 32 * 32768))
 {
   this->clear();
 }
@@ -122,12 +115,17 @@ void Emulator::clear() {
   active_warps_.set(0);
   warps_[0].tmask.set(0);
   wspawn_.valid = false;
+
+  for (auto& reg : scratchpad) 
+  {
+    reg = 0;
+  }
 }
 
 void Emulator::attach_ram(RAM* ram) {
   // bind RAM to memory unit
 #if (XLEN == 64)
-  mmu_.attach(*ram, 0, 0xFFFFFFFFFFFFFFFF);
+  mmu_.attach(*ram, 0, 0x7FFFFFFFFF); //39bit SV39
 #else
   mmu_.attach(*ram, 0, 0xFFFFFFFF);
 #endif
@@ -173,10 +171,8 @@ instr_trace_t* Emulator::step() {
   uint64_t uuid = 0;
 #endif
 
-  DPH(1, "Fetch: cid=" << core_->id() << ", wid=" << scheduled_warp << ", tmask=");
-  for (uint32_t i = 0, n = arch_.num_threads(); i < n; ++i)
-    DPN(1, warp.tmask.test(i));
-  DPN(1, ", PC=0x" << std::hex << warp.PC << " (#" << std::dec << uuid << ")" << std::endl);
+  DP(1, "Fetch: cid=" << core_->id() << ", wid=" << scheduled_warp << ", tmask=" << ThreadMaskOS(warp.tmask, arch_.num_threads())
+         << ", PC=0x" << std::hex << warp.PC << " (#" << std::dec << uuid << ")");
 
   // Fetch
   uint32_t instr_code = 0;
@@ -280,10 +276,54 @@ bool Emulator::barrier(uint32_t bar_id, uint32_t count, uint32_t wid) {
   return false;
 }
 
+#ifdef VM_ENABLE
 void Emulator::icache_read(void *data, uint64_t addr, uint32_t size) {
-  mmu_.read(data, addr, size, 0);
-}
+  DP(3, "*** icache_read 0x" << std::hex << addr << ", size = 0x "  << size);
 
+  try  
+  {
+    mmu_.read(data, addr, size, ACCESS_TYPE::FETCH);
+  }
+  catch (Page_Fault_Exception& page_fault)  
+  {
+    std::cout<<page_fault.what()<<std::endl;
+    throw;
+  }  
+}
+#else
+void Emulator::icache_read(void *data, uint64_t addr, uint32_t size) {
+    mmu_.read(data, addr, size, 0);
+}
+#endif
+
+#ifdef VM_ENABLE
+void Emulator::set_satp(uint64_t satp) {
+  DPH(3, "set satp 0x" << std::hex << satp << " in emulator module\n");
+  set_csr(VX_CSR_SATP,satp,0,0); 
+}
+#endif
+
+
+#ifdef VM_ENABLE
+void Emulator::dcache_read(void *data, uint64_t addr, uint32_t size) {
+  DP(1, "*** dcache_read 0x" << std::hex << addr << ", size = 0x "  << size);
+  auto type = get_addr_type(addr);
+  if (type == AddrType::Shared) {
+    core_->local_mem()->read(data, addr, size);
+  } else {
+    try  
+    {
+      mmu_.read(data, addr, size, ACCESS_TYPE::LOAD);
+    }
+    catch (Page_Fault_Exception& page_fault)  
+    {
+      std::cout<<page_fault.what()<<std::endl;
+      throw;
+    }
+  }
+  DPH(2, "Mem Read: addr=0x" << std::hex << addr << ", data=0x" << ByteStream(data, size) << " (size=" << size << ", type=" << type << ")" << std::endl);
+}
+#else
 void Emulator::dcache_read(void *data, uint64_t addr, uint32_t size) {
   auto type = get_addr_type(addr);
   if (type == AddrType::Shared) {
@@ -294,7 +334,34 @@ void Emulator::dcache_read(void *data, uint64_t addr, uint32_t size) {
 
   DPH(2, "Mem Read: addr=0x" << std::hex << addr << ", data=0x" << ByteStream(data, size) << std::dec << " (size=" << size << ", type=" << type << ")" << std::endl);
 }
+#endif
 
+#ifdef VM_ENABLE
+void Emulator::dcache_write(const void* data, uint64_t addr, uint32_t size) {
+  DP(1, "*** dcache_write 0x" << std::hex << addr << ", size = 0x "  << size);
+  auto type = get_addr_type(addr);
+  if (addr >= uint64_t(IO_COUT_ADDR)
+   && addr < (uint64_t(IO_COUT_ADDR) + IO_COUT_SIZE)) {
+     this->writeToStdOut(data, addr, size);
+  } else {
+    if (type == AddrType::Shared) {
+      core_->local_mem()->write(data, addr, size);
+    } else {
+      try  
+      {
+        // mmu_.write(data, addr, size, 0);
+        mmu_.write(data, addr, size, ACCESS_TYPE::STORE);
+      }
+      catch (Page_Fault_Exception& page_fault)  
+      {
+        std::cout<<page_fault.what()<<std::endl;
+        throw;
+      }  
+    }
+  }
+  DPH(2, "Mem Write: addr=0x" << std::hex << addr << ", data=0x" << ByteStream(data, size) << " (size=" << size << ", type=" << type << ")" << std::endl);
+}
+#else
 void Emulator::dcache_write(const void* data, uint64_t addr, uint32_t size) {
   auto type = get_addr_type(addr);
   if (addr >= uint64_t(IO_COUT_ADDR)
@@ -309,6 +376,7 @@ void Emulator::dcache_write(const void* data, uint64_t addr, uint32_t size) {
   }
   DPH(2, "Mem Write: addr=0x" << std::hex << addr << ", data=0x" << ByteStream(data, size) << std::dec << " (size=" << size << ", type=" << type << ")" << std::endl);
 }
+#endif
 
 void Emulator::dcache_amo_reserve(uint64_t addr) {
   auto type = get_addr_type(addr);
@@ -356,10 +424,29 @@ void Emulator::cout_flush() {
     case (addr + (VX_CSR_MPM_BASE_H-VX_CSR_MPM_BASE)) : return ((value >> 32) & 0xFFFFFFFF)
 #endif
 
+Word Emulator::get_tiles()
+{
+  return mat_size;
+}
+
+Word Emulator::get_tc_size()
+{
+  return tc_size;
+}
+
+Word Emulator::get_tc_num()
+{
+  return tc_num;
+}
+
 Word Emulator::get_csr(uint32_t addr, uint32_t tid, uint32_t wid) {
   auto core_perf = core_->perf_stats();
   switch (addr) {
   case VX_CSR_SATP:
+#ifdef VM_ENABLE
+    // return csrs_.at(wid).at(tid)[addr];
+    return mmu_.get_satp();
+#endif
   case VX_CSR_PMPCFG0:
   case VX_CSR_PMPADDR0:
   case VX_CSR_MSTATUS:
@@ -387,6 +474,10 @@ Word Emulator::get_csr(uint32_t addr, uint32_t tid, uint32_t wid) {
   case VX_CSR_NUM_CORES:  return uint32_t(arch_.num_cores()) * arch_.num_clusters();
   case VX_CSR_LOCAL_MEM_BASE: return arch_.local_mem_base();
   case VX_CSR_MSCRATCH:   return csr_mscratch_;
+  case VX_MAT_MUL_SIZE:   return mat_size;
+  case VX_TC_NUM:         return tc_num;
+  case VX_TC_SIZE:        return tc_size;
+
   CSR_READ_64(VX_CSR_MCYCLE, core_perf.cycles);
   CSR_READ_64(VX_CSR_MINSTRET, core_perf.instrs);
   default:
@@ -451,6 +542,8 @@ Word Emulator::get_csr(uint32_t addr, uint32_t tid, uint32_t wid) {
         CSR_READ_64(VX_CSR_MPM_MEM_READS, proc_perf.mem_reads);
         CSR_READ_64(VX_CSR_MPM_MEM_WRITES, proc_perf.mem_writes);
         CSR_READ_64(VX_CSR_MPM_MEM_LT, proc_perf.mem_latency);
+        CSR_READ_64(VX_CSR_MPM_MEM_BANK_CNTR, proc_perf.memsim.counter);
+        CSR_READ_64(VX_CSR_MPM_MEM_BANK_TICK, proc_perf.memsim.ticks);
 
         CSR_READ_64(VX_CSR_MPM_LMEM_READS, lmem_perf.reads);
         CSR_READ_64(VX_CSR_MPM_LMEM_WRITES, lmem_perf.writes);
@@ -486,6 +579,12 @@ void Emulator::set_csr(uint32_t addr, Word value, uint32_t tid, uint32_t wid) {
     csr_mscratch_ = value;
     break;
   case VX_CSR_SATP:
+  #ifdef VM_ENABLE
+    // warps_.at(wid).fcsr = (warps_.at(wid).fcsr & ~0x1F) | (value & 0x1F);
+    // csrs_.at(wid).at(tid)[addr] = value; //what is wid and tid?
+    mmu_.set_satp(value);
+    break;
+  #endif
   case VX_CSR_MSTATUS:
   case VX_CSR_MEDELEG:
   case VX_CSR_MIDELEG:
@@ -497,12 +596,24 @@ void Emulator::set_csr(uint32_t addr, Word value, uint32_t tid, uint32_t wid) {
   case VX_CSR_MNSTATUS:
   case VX_CSR_MCAUSE:
     break;
+  case VX_MAT_MUL_SIZE:
+    mat_size = value;
+    break;
+  case VX_TC_NUM:
+    tc_num = value;
+    break;
+  case VX_TC_SIZE:
+    tc_size = value;
+    break;
+  
   default: {
       std::cout << "Error: invalid CSR write addr=0x" << std::hex << addr << ", value=0x" << value << std::dec << std::endl;
       std::abort();
     }
   }
 }
+
+
 
 uint32_t Emulator::get_fpu_rm(uint32_t func3, uint32_t tid, uint32_t wid) {
   return (func3 == 0x7) ? this->get_csr(VX_CSR_FRM, tid, wid) : func3;
@@ -513,4 +624,16 @@ void Emulator::update_fcrs(uint32_t fflags, uint32_t tid, uint32_t wid) {
     this->set_csr(VX_CSR_FCSR, this->get_csr(VX_CSR_FCSR, tid, wid) | fflags, tid, wid);
     this->set_csr(VX_CSR_FFLAGS, this->get_csr(VX_CSR_FFLAGS, tid, wid) | fflags, tid, wid);
   }
+}
+
+// For riscv-vector test functionality, ecall and ebreak must trap
+// These instructions are used in the vector tests to stop execution of the test
+// Therefore, without these instructions, undefined and incorrect behavior happens
+//
+// For now, we need these instructions to trap for testing the riscv-vector isa
+void Emulator::trigger_ecall() {
+  active_warps_.reset();
+}
+void Emulator::trigger_ebreak() {
+  active_warps_.reset();
 }

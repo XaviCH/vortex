@@ -47,8 +47,10 @@ ProcessorImpl::ProcessorImpl(const Arch& arch)
   );
 
   // connect L3 memory ports
-  l3cache_->MemReqPort.bind(&memsim_->MemReqPort);
-  memsim_->MemRspPort.bind(&l3cache_->MemRspPort);
+  for (uint32_t i = 0; i < NUM_MEM_PORTS; ++i) {
+    l3cache_->MemReqPorts.at(i).bind(&memsim_->MemReqPorts.at(i));
+    memsim_->MemRspPorts.at(i).bind(&l3cache_->MemRspPorts.at(i));
+  }
 
   // create clusters
   for (uint32_t i = 0; i < arch.num_clusters(); ++i) {
@@ -59,16 +61,18 @@ ProcessorImpl::ProcessorImpl(const Arch& arch)
   }
 
   // set up memory profiling
-  memsim_->MemReqPort.tx_callback([&](const MemReq& req, uint64_t cycle){
-    __unused (cycle);
-    perf_mem_reads_   += !req.write;
-    perf_mem_writes_  += req.write;
-    perf_mem_pending_reads_ += !req.write;
-  });
-  memsim_->MemRspPort.tx_callback([&](const MemRsp&, uint64_t cycle){
-    __unused (cycle);
-    --perf_mem_pending_reads_;
-  });
+  for (uint32_t i = 0; i < NUM_MEM_PORTS; ++i) {
+    memsim_->MemReqPorts.at(i).tx_callback([&](const MemReq& req, uint64_t cycle){
+      __unused (cycle);
+      perf_mem_reads_   += !req.write;
+      perf_mem_writes_  += req.write;
+      perf_mem_pending_reads_ += !req.write;
+    });
+    memsim_->MemRspPorts.at(i).tx_callback([&](const MemRsp&, uint64_t cycle){
+      __unused (cycle);
+      --perf_mem_pending_reads_;
+    });
+  }
 
 #ifndef NDEBUG
   // dump device configuration
@@ -95,6 +99,13 @@ void ProcessorImpl::attach_ram(RAM* ram) {
     cluster->attach_ram(ram);
   }
 }
+#ifdef VM_ENABLE
+void ProcessorImpl::set_satp(uint64_t satp) {
+  for (auto cluster : clusters_) {
+    cluster->set_satp(satp);
+  }
+}
+#endif
 
 void ProcessorImpl::run() {
   SimPlatform::instance().reset();
@@ -131,6 +142,7 @@ ProcessorImpl::PerfStats ProcessorImpl::perf_stats() const {
   perf.mem_writes  = perf_mem_writes_;
   perf.mem_latency = perf_mem_latency_;
   perf.l3cache     = l3cache_->perf_stats();
+  perf.memsim      = memsim_->perf_stats();
   return perf;
 }
 
@@ -138,10 +150,18 @@ ProcessorImpl::PerfStats ProcessorImpl::perf_stats() const {
 
 Processor::Processor(const Arch& arch)
   : impl_(new ProcessorImpl(arch))
-{}
+{
+#ifdef VM_ENABLE
+  satp_ = NULL;
+#endif
+}
 
 Processor::~Processor() {
   delete impl_;
+#ifdef VM_ENABLE
+  if (satp_ != NULL)
+    delete satp_;
+#endif
 }
 
 void Processor::attach_ram(RAM* mem) {
@@ -155,3 +175,26 @@ void Processor::run() {
 void Processor::dcr_write(uint32_t addr, uint32_t value) {
   return impl_->dcr_write(addr, value);
 }
+
+#ifdef VM_ENABLE
+int16_t Processor::set_satp_by_addr(uint64_t base_addr) {
+  uint16_t asid = 0;
+  satp_ = new SATP_t (base_addr,asid);
+  if (satp_ == NULL)
+    return 1;
+  uint64_t satp = satp_->get_satp();
+  impl_->set_satp(satp);
+  return 0;
+}
+bool Processor::is_satp_unset() {
+  return (satp_== NULL);
+}
+uint8_t Processor::get_satp_mode() {
+  assert (satp_!=NULL);
+  return satp_->get_mode();
+}
+uint64_t Processor::get_base_ppn() {
+  assert (satp_!=NULL);
+  return satp_->get_base_ppn();
+}
+#endif
