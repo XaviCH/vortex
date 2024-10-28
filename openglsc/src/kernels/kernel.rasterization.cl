@@ -13,7 +13,11 @@ inline float cross2d(float2 a, float2 b) {
     return a.x * b.y - a.y * b.x;
 }
 
-float3 get_baricentric_coords(float2 p, float4 v0, float4 v1, float4 v2) {
+inline float cross(float2 a, float2 b) {
+    return a.x * b.y - a.y * b.x;
+}
+
+inline float3 get_baricentric_coords(float2 p, float4 v0, float4 v1, float4 v2) {
     float3 barycentricCoords;
 
     float areaABC = cross2d(v2.xy - v0.xy, v1.xy - v0.xy);
@@ -27,158 +31,204 @@ float3 get_baricentric_coords(float2 p, float4 v0, float4 v1, float4 v2) {
     return barycentricCoords;
 }
 
-kernel void gl_rasterization_triangles(
-    // Vertex buffers 
-    global const float4 *gl_Position,
-    global const float4 *in_varying,
-    // Fragment buffers
-    global float4 *gl_FragCoord,
-    global float4 *out_varying,
-    global bool *gl_FrontFacing,
-    global uchar *gl_Discard,
-    // Vertex shader data
-    const uint n_varying,
-    // Rasterization data
-    const uint vertex0,
-    const uint primitive_id,
-    // Rasterization config
-    const int front_face,
-    const int cull_face,
-    const float polygon_offset_factor,
-    const float polygon_offset_units,
-    const int enabled_culling,
+#define TRIANGLE_PARAMETERS \
+    /* Vertex buffers */ \
+    global const float4 *gl_Position, \
+    global const float4 *in_varying, \
+    /* Fragment buffers */ \
+    global float4 *gl_FragCoord, \
+    global float4 *out_varying, \
+    global bool *gl_FrontFacing, \
+    global uchar *gl_Discard, \
+    /* Vertex shader data */ \
+    const uint n_varying, \
+    /* Rasterization data */ \
+    const uint vertex0, \
+    const uint primitive_id, \
+    /* Rasterization config */ \
+    const int front_face, \
+    const int cull_face, \
+    const float polygon_offset_factor, \
+    const float polygon_offset_units, \
+    const int enabled_culling, \
     const int enabled_polygon_offset_fill
-) {
-    uint xid = get_global_id(0);
-    uint yid = get_global_id(1);
-    uint xsize = get_global_size(0); 
-    uint ysize = get_global_size(1); 
-    uint gid = xid*yid;
 
-    float2 point = (float2){xid, yid} + 0.5f;
-    
-    const float4 v0 = *(gl_Position + (vertex0 + primitive_id) * 3 + 0);
-    const float4 v1 = *(gl_Position + (vertex0 + primitive_id) * 3 + 1);
-    const float4 v2 = *(gl_Position + (vertex0 + primitive_id) * 3 + 2);
-
-    // Area
-
-    float area = 0.5f * (v0.x*v1.y - v1.x*v0.y + v1.x*v2.y - v2.x*v1.y + v2.x*v0.y - v0.x*v2.y);
-    if (front_face == GL_CCW) area = -area;
-
-    if (enabled_culling && (
-            (cull_face == GL_FRONT_AND_BACK     ) ||
-            (cull_face == GL_FRONT && area > 0.f) ||
-            (cull_face == GL_BACK  && area > 0.f))
-        ) {
-        gl_Discard[gid] = 3;
-        return;
-    }
-
-    gl_FrontFacing[gid] = area > 0.f ? 1 : 0;
-
-    // Polygon Offset
-
-    float3 abc = get_baricentric_coords(point, v0, v1, v2);
-    
-    if ((abc.x < -0.00001f) || (abc.y < -0.00001f) || (abc.z < -0.00001f)) {
-        gl_Discard[gid] = 2;
-        return;
-    }
-
-    float depth = abc.x*v0.z + abc.y*v1.z + abc.z*v2.z;
-    if (enabled_polygon_offset_fill) {
-        float m = max(depth / point.x, depth / point.y);
-        float r = 1 / 0xFFFFFFFFu; // implement-dependent min value that may generate a change
-        depth += m * polygon_offset_factor + r * polygon_offset_units;
-        depth = min(max(depth, 1.0f), 0.0f);
-    }
-
-    // Rasterize varying
-    /* TODO
-    for (uint varying = 0; varying < n_varying; ++varying) {
-        float4 var0 = *(in_varying ) 
-
-        out_varying[gid] = (float4) {
-
-        };
-    }
-    */
-
+#define BASIC_VARS \
+    uint xid = get_global_id(0); \
+    uint yid = get_global_id(1); \
+    uint xsize = get_global_size(0); \
+    uint ysize = get_global_size(1); \
+    uint gid = xid+yid*xsize; \
+    uint gsize = xsize*ysize; \
+    float2 point = (float2){xid, yid} + 0.5f; \
     gl_FragCoord[gid].xy = point;
-    gl_FragCoord[gid].z = depth;
+    
+
+#define CHECK_OUT_OF_POLYGON(v0, v1, v2, abc) \
+    { \
+        abc = get_baricentric_coords(point, v0, v1, v2); \
+        if ((abc.x < -0.00001f || abc.y < -0.00001f || abc.z < -0.00001f)) { \
+            gl_Discard[gid] = 2; \
+            return; \
+        } \
+    }
+
+#define CULL_FACE(v0, v1, v2) \
+    { \
+        float area = 0.5f * cross(v0.xy, v1.xy) + cross(v1.xy, v2.xy) + cross(v2.xy, v0.xy); \
+        if (front_face == GL_CCW) area = -area; \
+        if (enabled_culling && ( \
+                (cull_face == GL_FRONT_AND_BACK     ) || \
+                (cull_face == GL_FRONT && area > 0.f) || \
+                (cull_face == GL_BACK  && area > 0.f) \
+            )) { \
+            gl_Discard[gid] = 3; \
+            return; \
+        } \
+        gl_FrontFacing[gid] = area > 0.f ? 1 : 0; \
+    }
+
+#define POLYGON_OFFSET(v0, v1, v2, abc) \
+    { \
+        float depth = abc.x*v0.z + abc.y*v1.z + abc.z*v2.z; \
+        if (enabled_polygon_offset_fill) { \
+            float m = max(depth / point.x, depth / point.y); \
+            float r = 1.0 / 0xFFFFFFFFu; /* implement-dependent min value that may generate a change */ \
+            depth += m * polygon_offset_factor + r * polygon_offset_units; \
+            depth = min(max(depth, 1.0f), 0.0f); \
+        } \
+        gl_FragCoord[gid].z = depth; \
+    }
+
+kernel void gl_rasterization_triangle_fan(
+    TRIANGLE_PARAMETERS
+) {
+    BASIC_VARS;
+    
+    // Get primitive vertices
+    uint primitive_index = (vertex0 + primitive_id) + 1;
+
+    const float4 v0 = gl_Position[vertex0];
+    const float4 v1 = gl_Position[primitive_index + 0];
+    const float4 v2 = gl_Position[primitive_index + 1];
+
+    float3 bcoords;
+    CHECK_OUT_OF_POLYGON(v0, v1, v2, bcoords);
+
+    CULL_FACE(v0, v1, v2);
+
+    POLYGON_OFFSET(v0, v1, v2, bcoords);
+
+    for (uint varying = 0; varying < n_varying; ++varying) {
+        uint vertex_subbuff_offset   = primitive_index + gsize * varying;
+        uint fragment_subbuff_offset = gid + gsize * varying;
+
+        float4 var0 = in_varying[gsize * varying + vertex0];
+        float4 var1 = in_varying[vertex_subbuff_offset + 0];
+        float4 var2 = in_varying[vertex_subbuff_offset + 1];
+
+        var0 = (var0 * bcoords.x) / v0.w;
+        var1 = (var1 * bcoords.y) / v1.w;
+        var2 = (var2 * bcoords.z) / v2.w;
+
+        float div = (bcoords.x/v0.w + bcoords.y/v1.w + bcoords.z/v2.w);
+
+        out_varying[fragment_subbuff_offset] = (float4) {
+            (var0.x + var1.x + var2.x),
+            (var0.y + var1.y + var2.y),
+            (var0.z + var1.z + var2.z),
+            (var0.w + var1.w + var2.w)
+        } / div;
+    }
+
+    gl_Discard[gid] = 0;
+
+}
+
+kernel void gl_rasterization_triangle_strip(
+    TRIANGLE_PARAMETERS
+) {
+    BASIC_VARS;
+
+    // Get primitive vertices 
+    uint primitive_index = (vertex0 + primitive_id);
+    uint oddity = primitive_id%2;
+
+    const float4 v0 = gl_Position[primitive_index + 0 + 2*oddity];
+    const float4 v1 = gl_Position[primitive_index + 1];
+    const float4 v2 = gl_Position[primitive_index + 2 - 2*oddity];
+
+    float3 bcoords;
+    CHECK_OUT_OF_POLYGON(v0, v1, v2, bcoords);
+
+    CULL_FACE(v0, v1, v2);
+
+    POLYGON_OFFSET(v0, v1, v2, bcoords);
+
+    for (uint varying = 0; varying < n_varying; ++varying) {
+        uint vertex_subbuff_offset   = primitive_index + gsize * varying;
+        uint fragment_subbuff_offset = gid + gsize * varying;
+
+        float4 var0 = in_varying[vertex_subbuff_offset + 0 + 2*oddity];
+        float4 var1 = in_varying[vertex_subbuff_offset + 1];
+        float4 var2 = in_varying[vertex_subbuff_offset + 2 - 2*oddity];
+
+        var0 = (var0 * bcoords.x) / v0.w;
+        var1 = (var1 * bcoords.y) / v1.w;
+        var2 = (var2 * bcoords.z) / v2.w;
+
+        float div = (bcoords.x/v0.w + bcoords.y/v1.w + bcoords.z/v2.w);
+
+        out_varying[fragment_subbuff_offset] = (float4) {
+            (var0.x + var1.x + var2.x),
+            (var0.y + var1.y + var2.y),
+            (var0.z + var1.z + var2.z),
+            (var0.w + var1.w + var2.w)
+        } / div;
+    }
+
     gl_Discard[gid] = 0;
 }
 
-kernel void gl_rasterization_triangle (
-    const int gl_Index, // gl_Index 
-    const int width, // 
-    const int attributes, //
-    global const float4 *gl_Positions,
-    global float4 *gl_FragCoords,
-    global uchar *gl_Discard,
-    global const float4 *gl_Primitives,
-    global float4 *gl_Rasterization,
-    global bool* facing, // 0: front, 1: back
-    const ushort front_face,
-    const ushort culling
-)
-{
-    int gid = get_global_id(0);
-    int gsize = get_global_size(0); // number of fragments
-    // input values
-    global const float4 *position = gl_Positions + gl_Index*3;
-    global const float4 *primitives = gl_Primitives + gl_Index*3;
-    global float4 *fragCoord = gl_FragCoords + gid;
-    global float4 *rasterization = gl_Rasterization + gid;
-
-    // base info
-    float yf = (float) (gid / width) + 0.5f; // center of the fragment
-    float xf = (float) (gid % width) + 0.5f; // center of the fragment
-
-    float4 v0 = position[0];
-    float4 v1 = position[1];
-    float4 v2 = position[2];
-
-    // area
-
-    float area = 0.5f * (v0.x*v1.y - v1.x*v0.y + v1.x*v2.y - v2.x*v1.y + v2.x*v0.y - v0.x*v2.y);
-
+kernel void gl_rasterization_triangles(
+    TRIANGLE_PARAMETERS
+) {
+    BASIC_VARS;
     
-    if (front_face == GL_CCW) area = -area;
+    uint primitive_index = (vertex0 + primitive_id) * 3;
 
-    facing[gid] = area < 0.f ? 1 : 0;
+    const float4 v0 = gl_Position[primitive_index + 0];
+    const float4 v1 = gl_Position[primitive_index + 1];
+    const float4 v2 = gl_Position[primitive_index + 2];
 
-    if (area == 0.f || culling == GL_FRONT_AND_BACK || (culling == GL_BACK && area < 0.f) || (culling == GL_FRONT && area > 0.f)) {
-        gl_Discard[gid] = 3;
-        return;
-    }
+    float3 bcoords;
+    CHECK_OUT_OF_POLYGON(v0, v1, v2, bcoords);
+
+    CULL_FACE(v0, v1, v2);
+
+    POLYGON_OFFSET(v0, v1, v2, bcoords);
     
-    // barycenter
-    float3 abc = get_baricentric_coords((float2) (xf,yf), v0, v1, v2);
-    
-    if ((abc.x < -0.00001f) || (abc.y < -0.00001f) || (abc.z < -0.00001f)) {
-        gl_Discard[gid] = 2;
-        return;
+    for (uint varying = 0; varying < n_varying; ++varying) {
+        uint vertex_subbuff_offset   = primitive_index + gsize * varying;
+        uint fragment_subbuff_offset = gid + gsize * varying;
+
+        float4 var0 = in_varying[vertex_subbuff_offset + 0];
+        float4 var1 = in_varying[vertex_subbuff_offset + 1];
+        float4 var2 = in_varying[vertex_subbuff_offset + 2];
+
+        var0 = (var0 * bcoords.x) / v0.w;
+        var1 = (var1 * bcoords.y) / v1.w;
+        var2 = (var2 * bcoords.z) / v2.w;
+
+        float div = (bcoords.x/v0.w + bcoords.y/v1.w + bcoords.z/v2.w);
+
+        out_varying[fragment_subbuff_offset] = (float4) {
+            (var0.x + var1.x + var2.x),
+            (var0.y + var1.y + var2.y),
+            (var0.z + var1.z + var2.z),
+            (var0.w + var1.w + var2.w)
+        } / div;
     }
 
-    fragCoord->x = xf;
-    fragCoord->y = yf;
-    fragCoord->z = abc.x*v0.z + abc.y*v1.z + abc.z*v2.z;
-    // fragCoord->w = abc.x*v0.w + abc.y*v1.w + abc.z*v2.w; // maybe this is not required
-
-    for(int attribute = 0 ; attribute < attributes; attribute++) {
-        global const float4 *p0 = primitives + gsize*attribute;
-        global const float4 *p1 = p0 + 1;
-        global const float4 *p2 = p0 + 2;
-        
-        // HW optimization ?? 
-        rasterization[gsize*attribute].x = (abc.x*p0->x/v0.w + abc.y*p1->x/v1.w + abc.z*p2->x/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
-        rasterization[gsize*attribute].y = (abc.x*p0->y/v0.w + abc.y*p1->y/v1.w + abc.z*p2->y/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
-        rasterization[gsize*attribute].z = (abc.x*p0->z/v0.w + abc.y*p1->z/v1.w + abc.z*p2->z/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
-        rasterization[gsize*attribute].w = (abc.x*p0->w/v0.w + abc.y*p1->w/v1.w + abc.z*p2->w/v2.w) / (abc.x/v0.w + abc.y/v1.w + abc.z/v2.w);
-    }
-
-    // Instruction optimization ?? gl_Discard[gid] = abc.x*abc.y*abc.z; // maybe if abc wasn't float could go faster
-    gl_Discard[gid] = false;
+    gl_Discard[gid] = 0;
 }

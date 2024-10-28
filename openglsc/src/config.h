@@ -22,8 +22,6 @@
 #include "kernels/kernel.perspective_division.pocl.c"
 #include "kernels/kernel.viewport_division.pocl.c"
 #include "kernels/kernel.rasterization.pocl.c"
-#include "kernels/kernel.rasterization.triangle_fan.pocl.c"
-#include "kernels/kernel.rasterization.triangle_strip.pocl.c"
 #include "kernels/kernel.readnpixels.pocl.c"
 #include "kernels/kernel.strided_write.pocl.c"
 
@@ -33,8 +31,6 @@
 #define KERNEL_BLENDING_BIN                         kernel_blending_pocl
 #define KERNEL_DITHER_BIN                           kernel_dither_pocl
 #define KERNEL_RASTERIZATION_BIN                    kernel_rasterization_pocl
-#define KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN       kernel_rasterization_triangle_fan_pocl
-#define KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN     kernel_rasterization_triangle_strip_pocl
 #define KERNEL_VIEWPORT_DIVISION_BIN                kernel_viewport_division_pocl
 #define KERNEL_PERSPECTIVE_DIVISION_BIN             kernel_perspective_division_pocl
 #define KERNEL_READNPIXELS_BIN                      kernel_readnpixels_pocl
@@ -53,8 +49,6 @@
 #include "kernels/kernel.perspective_division.ocl.c"
 #include "kernels/kernel.viewport_division.ocl.c"
 #include "kernels/kernel.rasterization.ocl.c"
-#include "kernels/kernel.rasterization.triangle_fan.ocl.c"
-#include "kernels/kernel.rasterization.triangle_strip.ocl.c"
 #include "kernels/kernel.readnpixels.ocl.c"
 #include "kernels/kernel.strided_write.ocl.c"
 
@@ -64,8 +58,6 @@
 #define KERNEL_BLENDING_BIN                         kernel_blending_ocl
 #define KERNEL_DITHER_BIN                           kernel_dither_ocl
 #define KERNEL_RASTERIZATION_BIN                    kernel_rasterization_ocl
-#define KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN       kernel_rasterization_triangle_fan_ocl
-#define KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN     kernel_rasterization_triangle_strip_ocl
 #define KERNEL_VIEWPORT_DIVISION_BIN                kernel_viewport_division_ocl
 #define KERNEL_PERSPECTIVE_DIVISION_BIN             kernel_perspective_division_ocl
 #define KERNEL_READNPIXELS_BIN                      kernel_readnpixels_ocl

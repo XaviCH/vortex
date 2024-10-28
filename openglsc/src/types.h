@@ -86,7 +86,7 @@ typedef struct {
 } kernel_container_t;
 
 typedef struct {
-    GLboolean depth_test, stencil_test, scissor_test, pixel_ownership, dither, blend, cull_face;
+    GLboolean depth_test, stencil_test, scissor_test, pixel_ownership, dither, blend, cull_face, polygon_offset_fill;
 } enabled_container_t;
 
 typedef struct {
@@ -202,5 +202,15 @@ typedef struct {
     GLfloat depth; 
     GLint stencil;
 } clear_data_t;
+
+typedef struct {
+    GLfloat factor, units
+} polygon_offset_t;
+
+typedef struct {
+    polygon_offset_t polygon_offset;
+    GLenum front_face, cull_face;
+    GLfloat line_width;
+} rasterization_data_t;
 
 #endif

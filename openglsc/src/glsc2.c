@@ -60,6 +60,7 @@ enabled_container_t _enableds = {
     .blend = GL_FALSE,
     .dither = GL_TRUE,
     .cull_face = GL_FALSE,
+    .polygon_offset_fill = GL_FALSE,
 };
 
 mask_container_t _masks = {
@@ -67,9 +68,6 @@ mask_container_t _masks = {
     .depth = GL_TRUE,
     .stencil = GL_TRUE
 };
-
-GLenum _front_face = GL_CCW;
-GLenum _cull_face = GL_BACK;
 
 pixel_store_t _pixel_store = { .unpack_aligment = 4 };
 
@@ -117,14 +115,22 @@ blend_data_t _blend_data = {
     }
 };
 
+rasterization_data_t _rasterization_data = {
+    .polygon_offset = {
+        .factor = GL_ZERO,
+        .units = GL_ZERO,
+    },
+    .cull_face = GL_BACK,
+    .front_face = GL_CCW,
+    .line_width = GL_ONE,
+};
+
 extern unsigned char KERNEL_DEPTH_BIN [];
 extern unsigned char KERNEL_SCISSOR_TEST_BIN[];
 extern unsigned char KERNEL_STENCIL_TEST_BIN[];
 extern unsigned char KERNEL_BLENDING_BIN[];
 extern unsigned char KERNEL_DITHER_BIN[];
 extern unsigned char KERNEL_RASTERIZATION_BIN[];
-extern unsigned char KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN[];
-extern unsigned char KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN[];
 extern unsigned char KERNEL_VIEWPORT_DIVISION_BIN[];
 extern unsigned char KERNEL_PERSPECTIVE_DIVISION_BIN[];
 extern unsigned char KERNEL_READNPIXELS_BIN[];
@@ -134,8 +140,7 @@ extern unsigned char KERNEL_CLEAR_BIN[];
 __attribute__((constructor))
 void __context_constructor__() {
     cl_program  depth_program, stencil_test_program, scissor_test_program, dither_program, rasterization_program, viewport_division_program, 
-                perspective_division_program, readnpixels_program, strided_write_program, clear_program, blending_program, rasterization_triangle_fan_program,
-                rasterization_triangle_strip_program;
+                perspective_division_program, readnpixels_program, strided_write_program, clear_program, blending_program;
 
 
     depth_program                           = createProgramWithBinary(KERNEL_DEPTH_BIN,                            sizeof(KERNEL_DEPTH_BIN));
@@ -144,8 +149,6 @@ void __context_constructor__() {
     blending_program                        = createProgramWithBinary(KERNEL_BLENDING_BIN,                         sizeof(KERNEL_BLENDING_BIN));
     dither_program                          = createProgramWithBinary(KERNEL_DITHER_BIN,                           sizeof(KERNEL_DITHER_BIN));
     rasterization_program                   = createProgramWithBinary(KERNEL_RASTERIZATION_BIN,                    sizeof(KERNEL_RASTERIZATION_BIN));
-    rasterization_triangle_fan_program      = createProgramWithBinary(KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN,       sizeof(KERNEL_RASTERIZATION_TRIANGLE_FAN_BIN));
-    rasterization_triangle_strip_program    = createProgramWithBinary(KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN,     sizeof(KERNEL_RASTERIZATION_TRIANGLE_STRIP_BIN));
     viewport_division_program               = createProgramWithBinary(KERNEL_VIEWPORT_DIVISION_BIN,                sizeof(KERNEL_VIEWPORT_DIVISION_BIN));
     perspective_division_program            = createProgramWithBinary(KERNEL_PERSPECTIVE_DIVISION_BIN,             sizeof(KERNEL_PERSPECTIVE_DIVISION_BIN));
     readnpixels_program                     = createProgramWithBinary(KERNEL_READNPIXELS_BIN,                      sizeof(KERNEL_READNPIXELS_BIN));
@@ -158,8 +161,6 @@ void __context_constructor__() {
     buildProgram(blending_program);
     buildProgram(dither_program);
     buildProgram(rasterization_program);
-    buildProgram(rasterization_triangle_fan_program);
-    buildProgram(rasterization_triangle_strip_program);
     buildProgram(viewport_division_program);
     buildProgram(perspective_division_program);
     buildProgram(readnpixels_program);
@@ -173,9 +174,9 @@ void __context_constructor__() {
 
     _kernels.dithering = createKernel(dither_program, "gl_dithering");
 
-    _kernels.rasterization.triangles        = createKernel(rasterization_program, "gl_rasterization_triangle");
-    _kernels.rasterization.triangle_fan     = createKernel(rasterization_triangle_fan_program, "gl_rasterization_triangle_fan");
-    _kernels.rasterization.triangle_strip   = createKernel(rasterization_triangle_strip_program, "gl_rasterization_triangle_strip");
+    _kernels.rasterization.triangles        = createKernel(rasterization_program, "gl_rasterization_triangles");
+    _kernels.rasterization.triangle_fan     = createKernel(rasterization_program, "gl_rasterization_triangle_fan");
+    _kernels.rasterization.triangle_strip   = createKernel(rasterization_program, "gl_rasterization_triangle_strip");
 
     _kernels.viewport_division = createKernel(viewport_division_program, "gl_viewport_division");
     _kernels.perspective_division = createKernel(perspective_division_program, "gl_perspective_division");
@@ -539,10 +540,10 @@ GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) {
     case GL_FRONT:
     case GL_BACK:
     case GL_FRONT_AND_BACK:
-        _cull_face = mode;
+        _rasterization_data.cull_face = mode;
         return;
     default:
-        NOT_IMPLEMENTED;
+        RETURN_ERROR(GL_INVALID_ENUM); // TODO: Checkout error;
     }
 }
 
@@ -597,7 +598,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     if (first < 0) RETURN_ERROR(GL_INVALID_VALUE);
 
-    if (first != 0) NOT_IMPLEMENTED;
+    // if (first != 0) NOT_IMPLEMENTED;
     if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
 
     /* ---- General vars ---- */
@@ -731,8 +732,6 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         }
     }
     
-    
-
     cl_mem vertex_out_buffer    = createBuffer(CL_MEM_READ_WRITE,   sizeof(float[4])*num_vertices*CURRENT_PROGRAM.varying_size, NULL);
     cl_mem gl_Positions         = createBuffer(MEM_READ_WRITE,      sizeof(float[4])*num_vertices,                              NULL);
 
@@ -787,9 +786,13 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     /* ---- Set Up Per-Fragment Kernels ---- */
     cl_kernel fragment_kernel;
+
     // Rasterization Kernel Set Up
-    uint16_t cull_face = 0;
-    if (_enableds.cull_face) cull_face = _cull_face;
+    cl_int cull_face, front_face, enabled_culling, enabled_polygon_offset_fill;
+    cull_face = _rasterization_data.cull_face;
+    front_face = _rasterization_data.front_face;
+    enabled_culling = _enableds.cull_face;
+    enabled_polygon_offset_fill = _enableds.polygon_offset_fill;
 
     cl_kernel rasterization_kernel;
     switch (mode)
@@ -799,17 +802,22 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     case GL_TRIANGLE_STRIP: rasterization_kernel = _kernels.rasterization.triangle_strip;   break;
     default: NOT_IMPLEMENTED;
     }
-    // arg 0 is reserved for the primitive index
-    setKernelArg(_kernels.rasterization.triangles, 1, sizeof(int),      &framebuffer.width);
-    setKernelArg(_kernels.rasterization.triangles, 2, sizeof(int),      &CURRENT_PROGRAM.varying_size);
-    setKernelArg(_kernels.rasterization.triangles, 3, sizeof(cl_mem),   &gl_Positions);
-    setKernelArg(_kernels.rasterization.triangles, 4, sizeof(cl_mem),   &gl_FragCoord);
-    setKernelArg(_kernels.rasterization.triangles, 5, sizeof(cl_mem),   &gl_Discard);
-    setKernelArg(_kernels.rasterization.triangles, 6, sizeof(cl_mem),   &vertex_out_buffer);
-    setKernelArg(_kernels.rasterization.triangles, 7, sizeof(cl_mem),   &fragment_in_buffer);
-    setKernelArg(_kernels.rasterization.triangles, 8, sizeof(cl_mem),   &facing_buffer);
-    setKernelArg(_kernels.rasterization.triangles, 9, sizeof(uint16_t), &_front_face);
-    setKernelArg(_kernels.rasterization.triangles,10, sizeof(uint16_t), &cull_face);
+
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 0, sizeof(cl_mem), &gl_Positions));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 1, sizeof(cl_mem), &vertex_out_buffer));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 2, sizeof(cl_mem), &gl_FragCoord));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 3, sizeof(cl_mem), &fragment_in_buffer));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 4, sizeof(cl_mem), &facing_buffer));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 5, sizeof(cl_mem), &gl_Discard));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 6, sizeof(cl_uint), &CURRENT_PROGRAM.varying_size));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 7, sizeof(cl_uint), &first));
+    // CL_CHECK(clSetKernelArg(kernel, 8, sizeof(cl_uint), &primitive_id)); declared on the loop
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 9, sizeof(cl_int), &front_face));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 10, sizeof(cl_int), &cull_face));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 11, sizeof(cl_float), &_rasterization_data.polygon_offset.factor));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 12, sizeof(cl_float), &_rasterization_data.polygon_offset.units));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 13, sizeof(cl_int), &enabled_culling));
+    CL_CHECK(clSetKernelArg(rasterization_kernel, 14, sizeof(cl_int), &enabled_polygon_offset_fill));
 
     // Fragment Kernel Set Up
     fragment_kernel = CURRENT_PROGRAM.fragment_kernel;
@@ -954,22 +962,26 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     //PRINT_BUFFER_F(vertex_array_mem[0], num_vertices, float, 4);
     
-    enqueueNDRangeKernel(command_queue, vertex_kernel,                  num_vertices);
-    enqueueNDRangeKernel(command_queue, _kernels.perspective_division,   num_vertices);
-    enqueueNDRangeKernel(command_queue, _kernels.viewport_division,      num_vertices);
+    size_t ver_gw_offset[1] = {first};
+    size_t ver_gw_size[1]   = {count};
+
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, vertex_kernel, 1, ver_gw_offset, ver_gw_size, NULL, 0, NULL, NULL));
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, _kernels.perspective_division, 1, ver_gw_offset, ver_gw_size, NULL, 0, NULL, NULL));
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, _kernels.viewport_division, 1, ver_gw_offset, ver_gw_size, NULL, 0, NULL, NULL));
 
     //PRINT_BUFFER_F(gl_Positions, num_vertices, float, 4);
 
+    size_t ras_gw_size[2] = {framebuffer.width, framebuffer.height};
+
     for(GLsizei primitive=0; primitive < num_primitives; ++primitive) {
-        setKernelArg(_kernels.rasterization.triangles, 0, sizeof(primitive), &primitive);
+        CL_CHECK(clSetKernelArg(rasterization_kernel, 8, sizeof(cl_uint), &primitive));
+
+        //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
+        CL_CHECK(clEnqueueNDRangeKernel(command_queue, rasterization_kernel, 2, NULL, ras_gw_size, NULL, 0, NULL, NULL));
 
         //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
 
-        enqueueNDRangeKernel(command_queue, _kernels.rasterization.triangles,   num_fragments);
-
-        //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
-
-        enqueueNDRangeKernel(command_queue, fragment_kernel,                    num_fragments);
+        enqueueNDRangeKernel(command_queue, fragment_kernel, num_fragments);
 
         // TODO: Pixel Ownership, is controled by the context provider
         if (_enableds.scissor_test) 
@@ -988,7 +1000,6 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         enqueueNDRangeKernel(command_queue, dithering_kernel, num_fragments); // Also manage write on colorbuffer
         // TODO: Multisample Post Operations, is controlled by the context provider
 
-        // TODO: Write on buffers (now is handled using other kernels )
     }
 
     //PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
@@ -1124,10 +1135,10 @@ GL_APICALL void GL_APIENTRY glFrontFace (GLenum mode) {
     {
     case GL_CCW:
     case GL_CW:
-        _front_face = mode;
+        _rasterization_data.front_face = mode;
         return;
     default:
-        NOT_IMPLEMENTED;
+        RETURN_ERROR(GL_INVALID_ENUM); // TODO: Checkout error
     }
 }
 
@@ -1323,7 +1334,11 @@ GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode) {
 
 GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap) NOT_IMPLEMENTED;
 
-GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) {
+    if (width <= (GLfloat) 0.0) RETURN_ERROR(GL_INVALID_VALUE);
+
+    _rasterization_data.line_width = width;
+};
 
 GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) {
     switch (pname)
@@ -1337,7 +1352,12 @@ GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) {
     }
 }
 
-GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) {
+    _rasterization_data.polygon_offset = (polygon_offset_t) {
+        .factor = factor,
+        .units = units
+    };
+}
 
 GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length){
 
