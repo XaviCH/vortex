@@ -40,9 +40,74 @@ cl_context context;
 
 int main(int argc, char** argv) {
 
-
-    error = clGetPlatformIDs(1, &platform_id, NULL);
+    cl_uint num_platforms;
+    cl_int platform_error;
+    platform_error = clGetPlatformIDs(1, &platform_id, &num_platforms);
+    switch (platform_error)
+    {
+    case CL_PLATFORM_NOT_FOUND_KHR:
+        fprintf(stderr, "No platform found. CL_PLATFORM_NOT_FOUND_KHR %d.\n", CL_PLATFORM_NOT_FOUND_KHR);
+        exit(platform_error);
+    case CL_SUCCESS:
+        break;
+    default:
+        fprintf(stderr, "Unexepected error.");
+        exit(platform_error);
+    }
+    
     CHECK(error);
+
+    cl_platform_id* platform_ids = NULL;
+    if (num_platforms > 1)
+        platform_ids = malloc(num_platforms*sizeof(cl_platform_id));
+    else
+        platform_ids = &platform_id;
+
+    printf("Platforms Available.\n");
+    for (cl_uint platform = 0; platform < num_platforms; ++platform) {
+        size_t param_value_size_ret;
+        clGetPlatformInfo(platform_ids[platform], CL_PLATFORM_NAME, 0, NULL, &param_value_size_ret);
+        char* name = malloc(param_value_size_ret);
+        clGetPlatformInfo(platform_ids[platform], CL_PLATFORM_NAME, param_value_size_ret, name, NULL);
+
+        clGetPlatformInfo(platform_ids[platform], CL_PLATFORM_VENDOR, 0, NULL, &param_value_size_ret);
+        char* vendor = malloc(param_value_size_ret);
+        clGetPlatformInfo(platform_ids[platform], CL_PLATFORM_VENDOR, param_value_size_ret, vendor, NULL);
+
+        clGetPlatformInfo(platform_ids[platform], CL_PLATFORM_VERSION, 0, NULL, &param_value_size_ret);
+        char* version = malloc(param_value_size_ret);
+        clGetPlatformInfo(platform_ids[platform], CL_PLATFORM_VERSION, param_value_size_ret, version, NULL);
+
+        printf("\t%s, %s: %s\n", name, vendor, version);
+
+        free(name);
+        free(vendor);
+        free(version);
+    }
+
+    size_t param_value_size_ret;
+    clGetPlatformInfo(platform_id, CL_PLATFORM_NAME, 0, NULL, &param_value_size_ret);
+    char* name = malloc(param_value_size_ret);
+    clGetPlatformInfo(platform_id, CL_PLATFORM_NAME, param_value_size_ret, name, NULL);
+
+    clGetPlatformInfo(platform_id, CL_PLATFORM_VENDOR, 0, NULL, &param_value_size_ret);
+    char* vendor = malloc(param_value_size_ret);
+    clGetPlatformInfo(platform_id, CL_PLATFORM_VENDOR, param_value_size_ret, vendor, NULL);
+
+    clGetPlatformInfo(platform_id, CL_PLATFORM_VERSION, 0, NULL, &param_value_size_ret);
+    char* version = malloc(param_value_size_ret);
+    clGetPlatformInfo(platform_id, CL_PLATFORM_VERSION, param_value_size_ret, version, NULL);
+    
+    clGetPlatformInfo(platform_id, CL_PLATFORM_EXTENSIONS, 0, NULL, &param_value_size_ret);
+    char* extensions = malloc(param_value_size_ret);
+    clGetPlatformInfo(platform_id, CL_PLATFORM_EXTENSIONS, param_value_size_ret, extensions, NULL);
+
+    printf("Compiling in platform %s %s with %s.\nExtensions available: %s\n.", name, vendor, version, extensions);
+
+    free(name);
+    free(vendor);
+    free(version);
+    free(extensions);
 
     error = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, NULL);
     CHECK(error);

@@ -133,12 +133,7 @@ kernel void gl_rasterization_triangle_fan(
 
         float div = (bcoords.x/v0.w + bcoords.y/v1.w + bcoords.z/v2.w);
 
-        out_varying[fragment_subbuff_offset] = (float4) {
-            (var0.x + var1.x + var2.x),
-            (var0.y + var1.y + var2.y),
-            (var0.z + var1.z + var2.z),
-            (var0.w + var1.w + var2.w)
-        } / div;
+        out_varying[fragment_subbuff_offset] = (var0 + var1 + var2) / div;
     }
 
     gl_Discard[gid] = 0;
@@ -179,12 +174,7 @@ kernel void gl_rasterization_triangle_strip(
 
         float div = (bcoords.x/v0.w + bcoords.y/v1.w + bcoords.z/v2.w);
 
-        out_varying[fragment_subbuff_offset] = (float4) {
-            (var0.x + var1.x + var2.x),
-            (var0.y + var1.y + var2.y),
-            (var0.z + var1.z + var2.z),
-            (var0.w + var1.w + var2.w)
-        } / div;
+        out_varying[fragment_subbuff_offset] = (var0 + var1 + var2) / div;
     }
 
     gl_Discard[gid] = 0;
@@ -222,12 +212,7 @@ kernel void gl_rasterization_triangles(
 
         float div = (bcoords.x/v0.w + bcoords.y/v1.w + bcoords.z/v2.w);
 
-        out_varying[fragment_subbuff_offset] = (float4) {
-            (var0.x + var1.x + var2.x),
-            (var0.y + var1.y + var2.y),
-            (var0.z + var1.z + var2.z),
-            (var0.w + var1.w + var2.w)
-        } / div;
+        out_varying[fragment_subbuff_offset] = (var0 + var1 + var2) / div;
     }
 
     gl_Discard[gid] = 0;

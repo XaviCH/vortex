@@ -131,6 +131,8 @@ extern unsigned char KERNEL_STENCIL_TEST_BIN[];
 extern unsigned char KERNEL_BLENDING_BIN[];
 extern unsigned char KERNEL_DITHER_BIN[];
 extern unsigned char KERNEL_RASTERIZATION_BIN[];
+extern unsigned char KERNEL_RASTERIZATION_POINT_BIN[];
+extern unsigned char KERNEL_RASTERIZATION_LINE_BIN[];
 extern unsigned char KERNEL_VIEWPORT_DIVISION_BIN[];
 extern unsigned char KERNEL_PERSPECTIVE_DIVISION_BIN[];
 extern unsigned char KERNEL_READNPIXELS_BIN[];
@@ -140,7 +142,7 @@ extern unsigned char KERNEL_CLEAR_BIN[];
 __attribute__((constructor))
 void __context_constructor__() {
     cl_program  depth_program, stencil_test_program, scissor_test_program, dither_program, rasterization_program, viewport_division_program, 
-                perspective_division_program, readnpixels_program, strided_write_program, clear_program, blending_program;
+                perspective_division_program, readnpixels_program, strided_write_program, clear_program, blending_program, rasterization_point_program, rasterization_line_program;
 
 
     depth_program                           = createProgramWithBinary(KERNEL_DEPTH_BIN,                            sizeof(KERNEL_DEPTH_BIN));
@@ -149,6 +151,8 @@ void __context_constructor__() {
     blending_program                        = createProgramWithBinary(KERNEL_BLENDING_BIN,                         sizeof(KERNEL_BLENDING_BIN));
     dither_program                          = createProgramWithBinary(KERNEL_DITHER_BIN,                           sizeof(KERNEL_DITHER_BIN));
     rasterization_program                   = createProgramWithBinary(KERNEL_RASTERIZATION_BIN,                    sizeof(KERNEL_RASTERIZATION_BIN));
+    rasterization_point_program             = createProgramWithBinary(KERNEL_RASTERIZATION_POINT_BIN,              sizeof(KERNEL_RASTERIZATION_POINT_BIN));
+    rasterization_line_program              = createProgramWithBinary(KERNEL_RASTERIZATION_LINE_BIN,               sizeof(KERNEL_RASTERIZATION_LINE_BIN));
     viewport_division_program               = createProgramWithBinary(KERNEL_VIEWPORT_DIVISION_BIN,                sizeof(KERNEL_VIEWPORT_DIVISION_BIN));
     perspective_division_program            = createProgramWithBinary(KERNEL_PERSPECTIVE_DIVISION_BIN,             sizeof(KERNEL_PERSPECTIVE_DIVISION_BIN));
     readnpixels_program                     = createProgramWithBinary(KERNEL_READNPIXELS_BIN,                      sizeof(KERNEL_READNPIXELS_BIN));
@@ -161,6 +165,8 @@ void __context_constructor__() {
     buildProgram(blending_program);
     buildProgram(dither_program);
     buildProgram(rasterization_program);
+    buildProgram(rasterization_point_program);
+    buildProgram(rasterization_line_program);
     buildProgram(viewport_division_program);
     buildProgram(perspective_division_program);
     buildProgram(readnpixels_program);
@@ -174,6 +180,10 @@ void __context_constructor__() {
 
     _kernels.dithering = createKernel(dither_program, "gl_dithering");
 
+    _kernels.rasterization.points           = createKernel(rasterization_point_program, "gl_rasterization_points");
+    _kernels.rasterization.lines            = createKernel(rasterization_line_program, "gl_rasterization_lines");
+    _kernels.rasterization.line_stip        = createKernel(rasterization_line_program, "gl_rasterization_line_stip");
+    _kernels.rasterization.line_loop        = createKernel(rasterization_line_program, "gl_rasterization_line_loop");
     _kernels.rasterization.triangles        = createKernel(rasterization_program, "gl_rasterization_triangles");
     _kernels.rasterization.triangle_fan     = createKernel(rasterization_program, "gl_rasterization_triangle_fan");
     _kernels.rasterization.triangle_strip   = createKernel(rasterization_program, "gl_rasterization_triangle_strip");
@@ -1023,7 +1033,180 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
 }
 
-GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) NOT_IMPLEMENTED;
+#define IS_DRAW_MODE(_MODE) \
+    (   \
+        _MODE == GL_POINTS          || \
+        _MODE == GL_LINES           || \
+        _MODE == GL_LINE_LOOP       || \
+        _MODE == GL_LINE_STRIP      || \
+        _MODE == GL_TRIANGLES       || \
+        _MODE == GL_TRIANGLE_STRIP  || \
+        _MODE == GL_TRIANGLE_FAN    || \
+    )
+
+inline uint32_t get_num_primitives(GLenum mode, uint32_t count) {
+    switch (mode)
+    {
+    case GL_POINTS: return count;
+    case GL_LINES: return count / 2;
+    case GL_LINE_LOOP: return count;
+    case GL_LINE_STRIP: return count - 1;
+    case GL_TRIANGLES: return count / 3;
+    case GL_TRIANGLE_STRIP: return count <= 2 ? 0 : count - 2;
+    case GL_TRIANGLE_FAN: return count <= 2 ? 0 : count - 2;
+    default: UNDEFINED_BEHAVIOUR; return 0; 
+    }
+}
+
+inline uint32_t get_num_primitives_assembled(GLenum mode, size_t offset, size_t size) {
+    switch (mode)
+    {
+    case GL_POINTS: return size - offset;
+    case GL_LINES: return (size - offset) / 2;
+    case GL_LINE_LOOP: return size - offset;
+    case GL_LINE_STRIP: return size - offset - 1;
+    case GL_TRIANGLES: return (size - offset) / 3;
+    case GL_TRIANGLE_STRIP: return size - offset - 2;
+    case GL_TRIANGLE_FAN: return size - offset - 2;
+    default: UNDEFINED_BEHAVIOUR; return 0;
+    }
+};
+
+
+inline int32_t get_primitive_offset(GLenum mode) {
+    switch (mode)
+    {
+    case GL_POINTS:
+    case GL_LINES:
+    case GL_TRIANGLES: 
+        return 0;
+    case GL_LINE_LOOP: 
+    case GL_LINE_STRIP:
+    case GL_TRIANGLE_FAN:
+        return -1;
+    case GL_TRIANGLE_STRIP:
+        return -2;
+    default: UNDEFINED_BEHAVIOUR; return 0; 
+    }
+} 
+
+#define WARP_SIZE 32 // TODO: Check this value
+#define GROUP_SIZE 512 // TODO: Check this value
+#define NUM_GROUP 32 // TODO: Check this value
+cl_context _context;
+
+// VS data
+#define MAX_ELEMENTS_INDICES 256 // max element indices that can be move to server
+cl_mem _indices_mem_obj; // size == MAX_
+#define VERTEX_OUT_BUFFER_SIZE 256 // bytes
+cl_mem _vertex_out_buffer; // size ==
+// programs create their own subbuffers required for varying
+// programs also creates their displaced _vertex_out_subbuffer
+cl_mem _vertex_out_subbuffer; //
+
+#define VS_VARYING_INDEX_0_RESERVED (1 << 0)
+#define VS_LAST_AS_FIRST            (1 << 1)
+
+// RAS data
+cl_command_queue _rasterization_command_queues[NUM_GROUP];
+cl_mem _rasterization_bin_data[NUM_GROUP];
+
+
+GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+    if (!IS_DRAW_MODE(mode)) RETURN_ERROR(GL_INVALID_ENUM);
+    if (count < 0) RETURN_ERROR(GL_INVALID_VALUE);
+    if (end < start) RETURN_ERROR(GL_INVALID_VALUE);
+    if (type != GL_UNSIGNED_SHORT) RETURN_ERROR(GL_INVALID_ENUM); // Maybe implementation dependant
+
+    // CL objects
+    cl_int cl_error;
+    cl_command_queue command_queue; // TODO: Get the queue
+
+    // General resources
+    uint32_t missing_primitives = get_num_primitives(mode, count);
+
+    // VS resources
+    cl_kernel vertex_kernel;
+    size_t ver_gw_offset[1] = {0};
+    size_t ver_gw_size[1];
+    cl_int vertex_attribute_enabled_flag; // MAX_VERTEX_ATTRIBUTE could not be greater than sizeof(cl_int)
+    int32_t primitive_offset = get_primitive_offset(mode);
+
+    // FS resources
+    
+    while(missing_primitives) {
+
+        size_t max_num_vertices; // TODO: must be multiple of primitive, depends on memory and mode
+        
+        ver_gw_size[0] = min(ver_gw_offset[0] + max_num_vertices, count);
+        size_t per_ver_gw_size[0] = {ver_gw_size[0] - ver_gw_offset[0]};
+
+        cl_int gl_vs_flags = 0;
+        if (mode == GL_TRIANGLE_FAN && ver_gw_offset[0] != 0) gl_vs_flags |= VS_VARYING_INDEX_0_RESERVED; // first varying position is ommited.
+        if (mode == GL_LINE_LOOP && missing_primitives - ver_gw_size[0]/2 == 0) gl_vs_flags |= VS_LAST_AS_FIRST; // last thread uses first vertex attributes
+        
+        // TODO: Check if this flags are just setted one time and never changed, cause maybe could be interseting to just callid one time.
+        CHECK_CL(clSetKernelArg(vertex_kernel, 0 /* TODO: gl_vs_flags_index */, sizeof(cl_int), &gl_vs_flags));
+        CHECK_CL(clEnqueueNDRangeKernel(
+            command_queue, vertex_kernel, 
+            1, ver_gw_offset, ver_gw_size, NULL,
+            0, NULL, NULL));
+
+        // TODO: Join into the vs using the compiler, as no geometry shader or tesellation shader is implemented
+        CHECK_CL(clEnqueueNDRangeKernel(command_queue, _kernels.perspective_division, 
+            1, NULL, per_ver_gw_size, NULL, 
+            0, NULL, NULL));
+        CHECK_CL(clEnqueueNDRangeKernel(command_queue, _kernels.viewport_division, 
+            1, NULL, per_ver_gw_size, NULL, 
+            0, NULL, NULL));
+        
+        
+        uint32_t primitive_assembled = get_num_primitives_assembled(mode, ver_gw_offset[0], ver_gw_size[0]);
+        
+        missing_primitives -= primitive_assembled;
+
+        // Rasterize enqueue fragments, if queue can hold more fragments rasterize
+        while (primitive_assembled) {
+            size_t num_enqueued_fragments, enqueued_fragments_threashold;
+
+            // Run rasterize || rasterize with stencil test and depth test if gl_FragDepth is not used.
+            // For now gl_FragDepth would not be implemented
+            /* Idea of Kernel doing rasterize + stencil test + depth test
+                WIDTH x HEIGHT are split into local groups, each local group has
+                its own memory space, so could be understood as each local group has
+                its own framebuffer.
+                For each fragment not discarted, local group syncs and add the fragment to a shared memory queue.
+                At the end, the queue is copied to global memory.
+                For each discarded fragment it operations are done into framebuffer. No collision cause each
+                thread work in its own 2d domain. Ex. 16x16 pixels.
+
+                Also need to implement some reduce function to optain how many fragments are on each group.
+
+                Problem, sparse data [A1, A2, , , , ] [B1, B2, B3, , , ,]
+                Posible solution. All other per-frag operations also works on local groups just managing its queue.
+                Problem, unbalanced loads. 
+                Solution, each render step works independantly to each other, so multiple command queue for
+                each local group.
+                Problem primitives can be updated until all finished, so at some point they must wait.
+                Solution??? Tile primitives.
+            */
+            // update num_enqueued_fragments
+            // update primitive_assembled
+
+            if (num_enqueued_fragments >= enqueued_fragments_threashold || missing_primitives == 0) {
+                // Run per-frag operations
+
+                // if gl_FragDepth is used
+            }
+
+        }
+
+        ver_gw_offset[0] = ver_gw_size[0] - primitive_offset;
+    }
+
+
+
+};
 
 GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
     switch (cap)
