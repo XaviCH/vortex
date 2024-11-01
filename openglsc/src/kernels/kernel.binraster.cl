@@ -43,7 +43,6 @@ typedef struct
 #pragma OPENCL EXTENSION __opencl_c_subgroups : enable
 #pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
 
-
 // ISA dependancy
 #ifdef CUDA
 inline int      add_s16lo_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
@@ -56,7 +55,9 @@ inline uint     add_sub             (uint a, uint b, uint c)    { uint v; asm("v
 inline int      add_clamp_0_x       (int a, int b, int c)       { int v; asm("vadd.u32.s32.s32.sat.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
 inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }
 
-// inline uint     get_max_sub_group_size() { return 32; }
+inline uint     get_max_sub_group_size(void) { return 32; }
+inline uint     sub_group_ballot(int p) { uint r; asm("vote.sync.ballot.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
+inline uint     sub_group_any(int p)    { uint r; asm("vote.sync.any.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
 #else
 inline int      add_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) + (b & 0xFFFF); }
 inline int      add_s16hi_s16lo     (int a, int b)              { return (a >> 16) + (b & 0xFFFF); }
@@ -67,7 +68,6 @@ inline int      min_min             (int a, int b, int c)       { return min(a, 
 inline uint     add_sub             (uint a, uint b, uint c)    { return a+b-c; }
 inline int      add_clamp_0_x       (int a, int b, int c)       { return clamp(a+b,0,c); }
 inline uint     getLaneMaskLt       (void) {
-    // TODO: this might just work with 32 warp
     uint mask;
     for(uint warp = 0; warp < get_max_sub_group_size(); ++warp) mask |= 1 << warp;
     return mask >> (get_max_sub_group_size() - get_local_id(0));
