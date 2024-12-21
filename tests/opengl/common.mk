@@ -23,10 +23,12 @@ RISCV_SYSROOT ?= $(RISCV_TOOLCHAIN_PATH)/$(RISCV_PREFIX)
 
 POCL_CC_PATH ?= $(TOOLDIR)/pocl/compiler
 POCL_RT_PATH ?= $(TOOLDIR)/pocl/runtime
-OPENGL_PATH ?= $(realpath ..)
+OPENGLSC_PATH ?= $(realpath ..)
 
 VORTEX_RT_PATH ?= $(realpath ../../../runtime)
 VORTEX_KN_PATH ?= $(realpath ../../../kernel)
+VORTEX_GLSC_PATH ?= $(realpath ../../../openglsc)
+VORTEX_EGL_PATH ?= $(realpath ../../../egl)
 
 FPGA_BIN_DIR ?= $(VORTEX_RT_PATH)/opae
 
@@ -42,13 +44,18 @@ CXXFLAGS += -std=c++11 -Wall -Wextra -Wfatal-errors
 CXXFLAGS += -Wno-deprecated-declarations -Wno-unused-parameter -Wno-narrowing
 CXXFLAGS += -pthread
 CXXFLAGS += -I$(POCL_RT_PATH)/include
-CXXFLAGS += -I$(OPENGL_PATH)/include
+CXXFLAGS += -I$(VORTEX_EGL_PATH)/include
+CXXFLAGS += -I$(VORTEX_GLSC_PATH)/include
 
-ifdef HOSTGPU
-	CXXFLAGS += -DHOSTGPU
-	LDFLAGS += -lOpenCL
+ifdef HOSTDRIVER
+	CXXFLAGS += -DC_OPENGL_HOST
+	LDFLAGS += -lGLESv2 -lEGL
+else ifdef HOSTGPU 
+	CXXFLAGS += -DC_OPENCL_HOST
+	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/libGLSCv2.opencl.so
 else
-	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so
+	CXXFLAGS += -DC_OPENCL_VORTEX
+	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/libGLSCv2.vortex.so $(VORTEX_EGL_PATH)/lib/egl.so
 endif
 
 # Debugigng
@@ -77,6 +84,9 @@ all: $(PROJECT) kernel.pocl
 kernel.pocl: kernel.cl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o kernel.pocl kernel.cl
 
+kernel.ocl: kernel.cl
+	$(VORTEX_GLSC_PATH)/clcompiler kernel.cl kernel.ocl -DC_OPENCL_HOST -cl-kernel-arg-info
+
 %.cc.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -89,7 +99,10 @@ kernel.pocl: kernel.cl
 $(PROJECT): $(OBJS)
 	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) $(LD_PROJECT_FLAGS) -o $@
 
-run-hostgpu: $(PROJECT) kernel.pocl
+run-hostdriver: $(PROJECT)
+	./$(PROJECT) $(OPTS)
+
+run-hostgpu: $(PROJECT) kernel.ocl
 	./$(PROJECT) $(OPTS)
 
 run-simx: $(PROJECT) kernel.pocl   
@@ -108,6 +121,26 @@ else
 	XCL_EMULATION_MODE=$(TARGET) XRT_INI_PATH=$(XRT_SYN_DIR)/xrt.ini EMCONFIG_PATH=$(FPGA_BIN_DIR) XRT_DEVICE_INDEX=$(XRT_DEVICE_INDEX) XRT_XCLBIN_PATH=$(FPGA_BIN_DIR)/vortex_afu.xclbin LD_LIBRARY_PATH=$(XILINX_XRT)/lib:$(POCL_RT_PATH)/lib:$(VORTEX_RT_PATH)/xrt:$(LD_LIBRARY_PATH) ./$(PROJECT) $(OPTS)	
 endif
 
+display:
+	feh -Z -F --force-aliasing -Y image.ppm
+
+ifdef HOSTGPU
+run:
+	$(MAKE) clean
+	$(MAKE) run-hostgpu
+	$(MAKE) display
+else ifdef HOSTDRIVER
+run:
+	$(MAKE) clean
+	$(MAKE) run-hostdriver
+	$(MAKE) display
+else
+run: 
+	$(MAKE) clean
+	$(MAKE) run-simx
+	$(MAKE) display
+endif
+
 .depend: $(SRCS)
 	$(CXX) $(CXXFLAGS) -MM $^ > .depend;
 
@@ -115,7 +148,7 @@ clean:
 	rm -rf $(PROJECT) *.o .depend
 
 clean-all: clean
-	rm -rf *.dump *.pocl
+	rm -rf *.dump *.pocl *.ocl
 
 ifneq ($(MAKECMDGOALS),clean)
     -include .depend
