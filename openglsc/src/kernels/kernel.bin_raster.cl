@@ -75,7 +75,7 @@ inline uint     getLaneMaskLt       (void) {
 #endif
 
 // Bin rasterizer 
-kernel void binraster(
+kernel void bin_raster(
     // global atomics
     global   int* g_num_subtris,
     global   int* g_bin_counter, 
