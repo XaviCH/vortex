@@ -1,29 +1,26 @@
+ROOT_DIR := $(realpath ../../..)
+include $(ROOT_DIR)/config.mk
+
+SRC_DIR := $(VORTEX_HOME)/hw/syn/yosys
+
 TOP_LEVEL_ENTITY ?= Vortex
 PREFIX ?= build
 NUM_CORES ?= 1
-XLEN ?= 32
 
-SCRIPT_DIR = ../../../scripts
-RTL_DIR = ../../../rtl
-DPI_DIR = ../../../dpi
-THIRD_PARTY_DIR = ../../../../third_party
+SCRIPT_DIR := $(VORTEX_HOME)/hw/scripts
+RTL_DIR := $(VORTEX_HOME)/hw/rtl
 
 CP = cp -rf
 RMDIR = rm -rf
 ECHO = @echo
 
-BUILD_DIR = $(PREFIX)_$(TOP_LEVEL_ENTITY)
-BIN_DIR   = $(BUILD_DIR)/bin
+BUILD_DIR := $(PREFIX)_$(TOP_LEVEL_ENTITY)
+BIN_DIR := $(BUILD_DIR)/bin
 
 # control RTL debug tracing states
-DBG_TRACE_FLAGS += -DDBG_TRACE_CORE_PIPELINE  
-DBG_TRACE_FLAGS += -DDBG_TRACE_CORE_ICACHE
-DBG_TRACE_FLAGS += -DDBG_TRACE_CORE_DCACHE
-DBG_TRACE_FLAGS += -DDBG_TRACE_CORE_MEM
-DBG_TRACE_FLAGS += -DDBG_TRACE_CACHE_BANK
-DBG_TRACE_FLAGS += -DDBG_TRACE_CACHE_MSHR
-DBG_TRACE_FLAGS += -DDBG_TRACE_CACHE_TAG
-DBG_TRACE_FLAGS += -DDBG_TRACE_CACHE_DATA
+DBG_TRACE_FLAGS += -DDBG_TRACE_PIPELINE
+DBG_TRACE_FLAGS += -DDBG_TRACE_MEM
+DBG_TRACE_FLAGS += -DDBG_TRACE_CACHE
 DBG_TRACE_FLAGS += -DDBG_TRACE_AFU
 DBG_TRACE_FLAGS += -DDBG_TRACE_GBAR
 
@@ -32,7 +29,7 @@ DBG_SCOPE_FLAGS += -DDBG_SCOPE_AFU
 DBG_SCOPE_FLAGS += -DDBG_SCOPE_ISSUE
 DBG_SCOPE_FLAGS += -DDBG_SCOPE_FETCH
 DBG_SCOPE_FLAGS += -DDBG_SCOPE_LSU
-DBG_SCOPE_FLAGS += -DDBG_SCOPE_MSCHED
+
 
 # cluster configuration
 CONFIGS_1c  := -DNUM_CLUSTERS=1 -DNUM_CORES=1
@@ -47,22 +44,22 @@ CONFIGS += $(CONFIGS_$(NUM_CORES)c)
 # include paths
 FPU_INCLUDE = -I$(RTL_DIR)/fpu
 ifneq (,$(findstring FPU_FPNEW,$(CONFIGS)))
-	FPU_INCLUDE += -J$(THIRD_PARTY_DIR)/fpnew/src/common_cells/include -J$(THIRD_PARTY_DIR)/fpnew/src/common_cells/src -J$(THIRD_PARTY_DIR)/fpnew/src/fpu_div_sqrt_mvp/hdl -J$(THIRD_PARTY_DIR)/fpnew/src
+	FPU_INCLUDE += -J$(THIRD_PARTY_DIR)/cvfpu/src/common_cells/include -J$(THIRD_PARTY_DIR)/cvfpu/src/common_cells/src -J$(THIRD_PARTY_DIR)/cvfpu/src/fpu_div_sqrt_mvp/hdl -J$(THIRD_PARTY_DIR)/cvfpu/src
 endif
 RTL_INCLUDE = -I$(RTL_DIR) -I$(RTL_DIR)/libs -I$(RTL_DIR)/interfaces -I$(RTL_DIR)/core -I$(RTL_DIR)/mem -I$(RTL_DIR)/cache
 RTL_INCLUDE += $(FPU_INCLUDE)
 
-# Debugigng
+# Debugging
 ifdef DEBUG
-	CFLAGS += -DNDEBUG -DSCOPE $(DBG_SCOPE_FLAGS)
-	SCOPE_JSON += $(BUILD_DIR)/scope.json
-else    
+	CFLAGS += $(DBG_TRACE_FLAGS)
+else
 	CFLAGS += -DNDEBUG
 endif
 
 # Enable scope analyzer
 ifdef SCOPE
-	CFLAGS += -DSCOPE
+	CFLAGS += -DSCOPE $(DBG_SCOPE_FLAGS)
+	SCOPE_JSON += $(BUILD_DIR)/scope.json
 endif
 
 # Enable perf counters
@@ -82,14 +79,18 @@ gen-sources: $(BUILD_DIR)/sources.txt
 $(BUILD_DIR)/sources.txt:
 	mkdir -p $(BUILD_DIR); cd $(BUILD_DIR); $(SCRIPT_DIR)/gen_sources.sh -P $(CFLAGS) -Csrc -Osources.txt
 
+sv2v: $(BUILD_DIR)/project.v
 $(BUILD_DIR)/project.v: gen-sources
 	cd $(BUILD_DIR); $(SCRIPT_DIR)/sv2v.sh -t$(TOP_LEVEL_ENTITY) -Isrc -oproject.v
 
 build: $(BUILD_DIR)/project.v
-	cd $(BUILD_DIR); ../synth.sh -t$(TOP_LEVEL_ENTITY) -sproject.v
+	cd $(BUILD_DIR); $(SRC_DIR)/synth.sh -t$(TOP_LEVEL_ENTITY) -sproject.v
 
 elaborate: $(BUILD_DIR)/project.v
-	cd $(BUILD_DIR); ../synth.sh -t$(TOP_LEVEL_ENTITY) -sproject.v -P="elaborate"
+	cd $(BUILD_DIR); $(SRC_DIR)/synth.sh -t$(TOP_LEVEL_ENTITY) -sproject.v -P="elaborate"
+
+synthesis: $(BUILD_DIR)/project.v
+	cd $(BUILD_DIR); $(SRC_DIR)/synth.sh -t$(TOP_LEVEL_ENTITY) -sproject.v -P="synthesis"
 
 clean:
 	$(RMDIR) $(BUILD_DIR)

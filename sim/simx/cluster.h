@@ -57,9 +57,13 @@ public:
 
   void attach_ram(RAM* ram);
 
+  #ifdef VM_ENABLE
+  void set_satp(uint64_t satp);
+  #endif
+
   bool running() const;
 
-  bool check_exit(Word* exitcode, bool riscv_test) const;  
+  int get_exitcode() const;  
 
   void barrier(uint32_t bar_id, uint32_t count, uint32_t core_id);
 

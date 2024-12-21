@@ -1,11 +1,4 @@
-
+/build*
 /.vscode
-*.dump
-*.o
 *.cache
-*.a
-*.so
-*.bin
-*.elf
-*.depend
-*.pocl
+*.code-workspace
