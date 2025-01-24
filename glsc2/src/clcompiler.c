@@ -38,8 +38,17 @@ cl_platform_id platform_id;
 cl_device_id device_id;
 cl_context context;
 
+// args
+char** input_files;
+char* output_file;
+char** options;
+
+void parse_args(int argc, char** argv);
+
 int main(int argc, char** argv) {
 
+    // Check drivers availability
+    // TODO: Change to select multiple platforms
     cl_uint num_platforms;
     cl_int platform_error;
     platform_error = clGetPlatformIDs(1, &platform_id, &num_platforms);
@@ -102,7 +111,7 @@ int main(int argc, char** argv) {
     char* extensions = malloc(param_value_size_ret);
     clGetPlatformInfo(platform_id, CL_PLATFORM_EXTENSIONS, param_value_size_ret, extensions, NULL);
 
-    printf("Compiling in platform %s %s with %s.\nExtensions available: %s\n.", name, vendor, version, extensions);
+    printf("Compiling in platform %s %s with %s.\nExtensions available: %s.\n", name, vendor, version, extensions);
 
     free(name);
     free(vendor);
@@ -169,7 +178,7 @@ int main(int argc, char** argv) {
 
     error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_STATUS, sizeof(result), &result, &size_result);
     CHECK(error);
-    /*
+
     if (result != CL_BUILD_SUCCESS) {
         printf("Error at building OpenCL binary: %ld | %lx\n.", result, result);
 
@@ -182,13 +191,35 @@ int main(int argc, char** argv) {
         CHECK(error);
 
         printf("Build log:\n%s\n", log);
-
+        free(log);
         exit(1);
+    } 
+    
+    /*else {
+        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &size_result);
+        CHECK(error);
+        char* log = (char*) malloc(size_result);
+
+        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, size_result, log, &size_result);
+        CHECK(error);
+
+        printf("Build log:\n\t%s\n", log);
+        free(log);
     }*/
+
+    size_t returned_size;
+    
+    size_t kernel_num;
+    error = clGetProgramInfo(program, CL_PROGRAM_NUM_KERNELS, sizeof(kernel_num), &kernel_num, &returned_size);
+    CHECK(error);
+    
+    if (kernel_num == 0) {
+        printf("No kernel on detected on program.\n");
+        exit(-1);
+    }
 
     uint8_t* binary;
     size_t binary_size;
-    size_t returned_size;
 
     error = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(binary_size), &binary_size, &returned_size);
     CHECK(error);
@@ -205,4 +236,5 @@ int main(int argc, char** argv) {
     FILE *out = fopen(argv[2], "wb");
 
     fwrite(binary,1,binary_size,out);
+    free(binary);
 }

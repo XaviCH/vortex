@@ -6,9 +6,6 @@ KERNELS_CL = $(wildcard *.cl)
 KERNELS_POCL_C = $(KERNELS_CL:.cl=.pocl.c)
 KERNELS_CL_C = $(KERNELS_CL:.cl=.ocl.c)
 
-
-AMM = amm.c
-
 .PHONY: all clean vortex opencl
 
 all: vortex opencl
