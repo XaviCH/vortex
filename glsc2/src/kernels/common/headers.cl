@@ -10,6 +10,7 @@
 #define FW_F64_MAX          (1.7976931348623158e+308)
 #define FW_PI               (3.14159265358979323846f)
 
+#define FW_ARRAY_SIZE(X)    ((int)(sizeof(X) / sizeof((X)[0])))
 // Constants
 
 #define CR_MAXVIEWPORT_LOG2     11      // ViewportSize / PixelSize.
@@ -130,7 +131,7 @@ inline ulong    ucombineLoHi     (uint lo, uint hi)     { return ((ulong)hi << 3
 inline long     combineLoHi      (int lo, int hi)       { return ((long)hi << 32) + (long)lo; }
 
 // ISA dependancy
-#define CUDA
+// #define CUDA
 
 #ifdef CUDA
 inline int      findLeadingOne      (uint v)                    { uint r; asm("bfind.u32 %0, %1;" : "=r"(r) : "r"(v)); return r; }
@@ -154,9 +155,9 @@ inline int      add_clamp_0_x       (int a, int b, int c)       { int v; asm("va
 inline uint     prmt				(uint a, uint b, uint c)    { uint v; asm("prmt.b32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
 
 inline uint     get_max_sub_group_size(void) { return 32; }
-inline uint     sub_group_ballot(int p) { uint r; asm("vote.sync.ballot.b32  r,p,0xffffffff" : "=r"(r) : "r"(p)); return r; }
-inline uint     sub_group_any(int p)    { uint r; asm("vote.sync.any.b32  r,p,0xffffffff" : "=r"(r) : "r"(p)); return r; }
-inline uint     sub_group_all(int p)    { uint r; asm("vote.sync.all.b32  r,p,0xffffffff" : "=r"(r) : "r"(p)); return r; }
+inline uint     sub_group_ballot(int p) { uint r; asm("{ .reg .pred p; setp.ne.u32 p, %1, 0; vote.sync.ballot.b32 %0, p, 0xffffffff; }" : "=r"(r) : "r"(p)); return r; }
+inline uint     sub_group_any(int p)    { uint r; asm("{ .reg .pred pi, po; setp.ne.u32 pi, %1, 0; vote.sync.any.pred  po, pi, 0xffffffff; selp.u32 %0, 0, 1, po; }" : "=r"(r) : "r"(p)); return r; }
+inline uint     sub_group_all(int p)    { uint r; asm("{ .reg .pred pi, po; setp.ne.u32 pi, %1, 0; vote.sync.all.pred  po, pi, 0xffffffff; selp.u32 %0, 0, 1, po; }" : "=r"(r) : "r"(p)); return r; }
 #else
 inline int      f32_to_s32_sat      (float a)                   { return (int)a; }
 inline uint     f32_to_u32_sat_rmi  (float a)                   { return (uint)a; }

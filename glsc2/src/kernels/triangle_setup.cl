@@ -219,12 +219,12 @@ inline void setupTriangle(
 kernel void triangleSetupImpl(
     global const int* c_index_buffer, // maybe fit in constant memory
     read_only image1d_t t_vertex_buffer,
-    global CRTriangleHeader* c_tri_header, 
-    global CRTriangleData* c_tri_data,
+    global CRTriangleHeader* g_tri_header, 
+    global CRTriangleData* g_tri_data,
     global uchar* g_tri_subtris,
-    global int* g_num_subtris, // atomic
-    int c_num_tris, 
-    int c_max_subtris,
+    global int* a_num_subtris, // atomic
+    const int c_num_tris, 
+    const int c_max_subtris,
 
     int vertex_size, // size of varying attributes
     int c_viewport_width, int c_viewport_height,
@@ -295,7 +295,7 @@ kernel void triangleSetupImpl(
 
             if (res == 0)
                 setupTriangle(
-                    &c_tri_header[taskIdx], &c_tri_data[taskIdx], vidx,
+                    &g_tri_header[taskIdx], &g_tri_data[taskIdx], vidx,
                     v0, v1, v2,
                     (float2)(0.0f, 0.0f),
                     (float2)(1.0f, 0.0f),
@@ -351,8 +351,8 @@ kernel void triangleSetupImpl(
     int subtriBase = taskIdx;
     if (numSubtris > 1)
     {
-        subtriBase = atomic_add(g_num_subtris, numSubtris);
-        c_tri_header[taskIdx].misc = subtriBase;
+        subtriBase = atomic_add(a_num_subtris, numSubtris);
+        g_tri_header[taskIdx].misc = subtriBase;
         if (subtriBase + numSubtris > c_max_subtris)
             numVerts = 0;
     }
@@ -372,7 +372,7 @@ kernel void triangleSetupImpl(
         {
 
             setupTriangle(
-                &c_tri_header[subtriBase], &c_tri_data[subtriBase], vidx,
+                &g_tri_header[subtriBase], &g_tri_data[subtriBase], vidx,
                 v0, v1, v2,
                 (float2)(bary[0], bary[1]),
                 (float2)(bary[i * 2 - 2], bary[i * 2 - 1]),

@@ -38,7 +38,7 @@ cl_uint render_mode_flags = 0 | RENDER_MODE_FLAG_ENABLE_DEPTH | RENDER_MODE_FLAG
 const glm::ivec2 viewport_size = {WIDTH, HEIGHT};
 cl_int c_max_subtris = std::max(MAX_SUBTRIS, NUM_TRIS + maxSubtrisSlack);
 
-// Output result
+// OUTPUTS
 typedef struct {
     cl_int a_num_subtris;
     cl_uchar* tri_subtris;
