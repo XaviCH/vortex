@@ -179,19 +179,19 @@ int main(int argc, char** argv) {
     error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_STATUS, sizeof(result), &result, &size_result);
     CHECK(error);
 
+    // printf("Error at building OpenCL binary: %ld | %lx\n.", result, result);
+
+    error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &size_result);
+    CHECK(error);
+
+    char* log = (char*) malloc(size_result);
+
+    error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, size_result, log, &size_result);
+    CHECK(error);
+
+    printf("%s\n", log);
+    free(log);
     if (result != CL_BUILD_SUCCESS) {
-        printf("Error at building OpenCL binary: %ld | %lx\n.", result, result);
-
-        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &size_result);
-        CHECK(error);
-
-        char* log = (char*) malloc(size_result);
-
-        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, size_result, log, &size_result);
-        CHECK(error);
-
-        printf("Build log:\n%s\n", log);
-        free(log);
         exit(1);
     } 
     

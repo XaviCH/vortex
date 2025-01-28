@@ -1,4 +1,3 @@
-
 #include "common/headers.cl"
 
 inline void snapTriangle(
@@ -34,7 +33,7 @@ inline int prepareTriangle(
     *d2 = (int2)(p2.x - p0.x, p2.y - p0.y);
     *area = d1->x * d2->y - d1->y * d2->x;
 
-    if (area <= 0)
+    if (*area <= 0)
         return 1; // Backfacing.
 
     // AABB falls between samples => cull.
@@ -92,12 +91,12 @@ inline void setupTriangle(
     float2 b0, float2 b1, float2 b2,
     int2 p0, int2 p1, int2 p2, float3 rcpW,
     int2 d1, int2 d2, int area,
+
     int c_viewport_width, int c_viewport_height,
     int samples_log2, uint render_mode_flags
     )
 {
     uint dep = 0;
-
     float areaRcp;
     int2 wv0;
 
@@ -138,9 +137,9 @@ inline void setupTriangle(
 
         dep += zpleq.x + zpleq.y + zpleq.z + zmin + zslope;
     }
-
+    
     // Setup lerp plane equations.
-
+    
     uint3 wpleq, upleq, vpleq;
     if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_LERP) != 0)
     {
@@ -154,16 +153,41 @@ inline void setupTriangle(
         vpleq = setupPleq(vvert, wv0, d1, d2, areaRcp, samples_log2 + 1);
         dep += wpleq.x + wpleq.y + wpleq.z + upleq.x + upleq.y + upleq.z;
     }
-
+    
     // Write CRTriangleData.
 
-    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
+    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
+        // td->zx = zpleq.x;
+        // td->zy = zpleq.y;
+        // td->zb = zpleq.z;
+        // td->zslope = zslope;
+        // TODO: enable vector unit
         *(uint4*)&td->zx = (uint4)(zpleq.x, zpleq.y, zpleq.z, zslope);
-
-    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_LERP) == 0)
+    }
+    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_LERP) == 0) {
+        // td->vb = 0;
+        // td->vi0 = vidx.x;
+        // td->vi1 = vidx.y;
+        // td->vi2 = vidx.z;
+        // TODO: enable vector unit
         *(uint4*)&td->vb = (uint4)(0, vidx.x, vidx.y, vidx.z);
+    }
     else
     {
+        //return; // TODO: OutofBound access ??? Idk
+        // td->wx = wpleq.x;
+        // td->wy = wpleq.y;
+        // td->wb = wpleq.z;
+        // td->ux = upleq.x;
+        // td->uy = upleq.y;
+        // td->ub = upleq.z;
+        // td->vx = vpleq.x;
+        // td->vy = vpleq.y;
+        // td->vb = vpleq.z;
+        // td->vi0 = vidx.x;
+        // td->vi1 = vidx.y;
+        // td->vi2 = vidx.z;
+        // TODO: enable vector unit
         *(uint4*)&td->wx = (uint4)(wpleq.x, wpleq.y, wpleq.z, upleq.x);
         *(uint4*)&td->uy = (uint4)(upleq.y, upleq.z, vpleq.x, vpleq.y);
         *(uint4*)&td->vb = (uint4)(vpleq.z, vidx.x, vidx.y, vidx.z);
@@ -191,7 +215,7 @@ inline void setupTriangle(
     Triangle setup for index buffer
  */
 //template <class VertexClass>
-__attribute__((reqd_work_group_size(32, 2, 1)))
+//__attribute__((reqd_work_group_size(32, 2, 1)))
 kernel void triangleSetupImpl(
     global const int* c_index_buffer, // maybe fit in constant memory
     read_only image1d_t t_vertex_buffer,
@@ -204,7 +228,9 @@ kernel void triangleSetupImpl(
 
     int vertex_size, // size of varying attributes
     int c_viewport_width, int c_viewport_height,
-    int samples_log2, uint render_mode_flags
+    int samples_log2, uint render_mode_flags,
+
+    global int* debug_return
 )
 {
     local float s_bary[CR_SETUP_WARPS * 32][18]; // TODO: WARP DEPENDANT
@@ -216,14 +242,17 @@ kernel void triangleSetupImpl(
 
     // Pick a task.
 
-    int taskIdx = get_local_id(0) + 32 * (get_local_id(1) + CR_SETUP_WARPS * (get_global_id(0) + get_global_size(0) * get_global_id(1)));
+    int taskIdx = get_local_id(0) + 32 * (get_local_id(1) + CR_SETUP_WARPS * (get_group_id(0) + get_num_groups(0) * get_group_id(1)));
+    debug_return[taskIdx] = 0;
     if (taskIdx >= c_num_tris)
         return;
 
     // Read vertices.
+    debug_return[taskIdx] = 1;
 
-    int3 vidx = *((global const int3*) (c_index_buffer + taskIdx*3)); // int3 is an int4 in opencl check
-    int stride = sizeof(vertex_size) / sizeof(float4);
+    global const int* index_buffer = c_index_buffer + taskIdx*3;
+    int3 vidx = {*index_buffer, *(index_buffer+1), *(index_buffer+2)}; // int3 is an int4 in opencl check
+    int stride = vertex_size / sizeof(float4);
     float4 v0 = read_imagef(t_vertex_buffer, vidx.x * stride); // gl_Position must be in first position
     float4 v1 = read_imagef(t_vertex_buffer, vidx.y * stride);
     float4 v2 = read_imagef(t_vertex_buffer, vidx.z * stride);
@@ -239,12 +268,13 @@ kernel void triangleSetupImpl(
             (v0.w < +v0.z & v1.w < +v1.z & v2.w < +v2.z) |
             (v0.w < -v0.z & v1.w < -v1.z & v2.w < -v2.z))
         {
-            g_tri_subtris[taskIdx] = 0;
+            g_tri_subtris[taskIdx] = 0; 
             return;
         }
     }
 
     // Inside depth range => try to snap vertices.
+    debug_return[taskIdx] = 2;
 
     if (v0.w >= fabs(v0.z) & v1.w >= fabs(v1.z) & v2.w >= fabs(v2.z))
     {
@@ -280,6 +310,7 @@ kernel void triangleSetupImpl(
     }
 
     // Clip to view frustum.
+    debug_return[taskIdx] = 3;
 
     float4 ov0 = v0;
     float4 od1 = (float4)(v1.x - v0.x, v1.y - v0.y, v1.z - v0.z, v1.w - v0.w);

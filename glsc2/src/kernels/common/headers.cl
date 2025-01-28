@@ -210,7 +210,7 @@ inline uint idiv_fast(uint a, uint b)
 
 inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, int samplesLog2)
 {
-    float mx = max(max(values.x, values.y), values.z);
+    float mx = fmax(fmax(values.x, values.y), values.z);
     int sh = min(max((__float_as_int(mx) >> 23) - (127 + 22), 0), 8);
     int t0 = (uint)values.x >> sh;
     int t1 = ((uint)values.y >> sh) - t0;
