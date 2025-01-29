@@ -2,45 +2,30 @@
 
 // Bin rasterizer 
 kernel void bin_raster(
-    // global atomics
-    global const int* c_num_subtris,
-    global int* a_bin_counter, 
-    global int* a_num_bin_segs, 
-    // common params
-    private  int    c_num_tris,
-    // global   void*  g_vertex_buffer,
-    // private  uint   p_vertex_item_sz,
-    // global   int*   g_index_buffer,
-    private  int    c_viewport_width,
-    private  int    c_viewport_height,
-    // private  int    p_width_pixels,
-    // private  int    p_height_pixels,
-    private  int    c_width_bins,
-    private  int    c_height_bins,
-    private  int    c_num_bins,
-    // private  int    p_width_tiles,
-    // private  int    p_height_tiles,
-    // private  int    p_num_tiles,
-    private  int    c_bin_batch_sz,
-    // private  int    p_deferred_clear,
-    // private  uint   p_clear_color,
-    // private  uint   p_clear_depth,
-    // input
-    private  int    c_max_subtris,
-    global   uchar* c_tri_subtris, // maybe constant ??
-    global   CRTriangleHeader*  c_tri_header,
-    // global   void*  g_tri_data, // unused
-    // private  uint   p_tri_data_item_sz, // unused
-    // output
-    private  int    c_max_bin_segs,
-    global   int*   g_bin_first_seg,    
-    global   int*   g_bin_total,
-    global   int*   g_bin_seg_data,
-    global   int*   g_bin_seg_next,
-    global   int*   g_bin_seg_count,
-    // texture
-    read_only image1d_buffer_t t_tri_header
-    //sampler_t p_s_tri_header
+    read_only image1d_buffer_t t_tri_header,
+
+    global const int*               c_num_subtris,
+    global const CRTriangleHeader*  c_tri_header,
+    global const uchar*             c_tri_subtris, // maybe constant ??
+    
+    global int*   a_bin_counter, 
+    global int*   a_num_bin_segs,
+    
+    global int*   g_bin_first_seg,
+    global int*   g_bin_seg_data,
+    global int*   g_bin_seg_next,
+    global int*   g_bin_seg_count,
+    global int*   g_bin_total,
+
+    private int   c_bin_batch_sz,
+    private int   c_height_bins,
+    private int   c_max_bin_segs,
+    private int   c_max_subtris,
+    private int   c_num_bins,
+    private int   c_num_tris,
+    private int   c_viewport_height,
+    private int   c_viewport_width,
+    private int   c_width_bins
 ) {
 
     // Local space
