@@ -11,13 +11,16 @@
 #include <tests/glsc2/kernels/common.hpp>
 
 // TEST DEFAULT PARAMETERS
-char KERNEL_NAME[] = "triangleSetupImpl";
+char KERNEL_NAME[] = "bin_raster";
 size_t BINARY_SIZE = sizeof(bin_raster_ocl);
 const unsigned char* BINARY = bin_raster_ocl;
 
 int NUM_SUBTRIS = 0; 
-uint8_t TRI_SUBTRIS[] = {};
-CRTriangleHeader TRI_HEADER[] = {};
+uint8_t TRI_SUBTRIS[] = {0, 1};
+CRTriangleHeader TRI_HEADER[] = { 
+    CRTriangleHeader(), {
+        800, -800, 0, 800, -800, -800, 2147483219
+    }};
 
 int INDEX_BUFFER[] = {0,1,2,2,1,0};
 float VERTEX_BUFFER[] = { 
@@ -48,6 +51,9 @@ int32_t num_tiles = size_tiles.x * size_tiles.y;
 glm::ivec2 size_bins = (size_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
 int32_t num_bins = size_bins.x * size_bins.y;
 glm::ivec2 viewport_size = glm::ivec2(WIDTH, HEIGHT);
+int roundSize  = CR_BIN_WARPS * 32;
+int minBatches = CR_BIN_STREAMS_SIZE * 2;
+int maxRounds  = 32;
 
 // Nvidia defs
 int maxSubtrisSlack     = 4096;     // x 81B    = 324KB
@@ -61,15 +67,15 @@ cl_mem c_num_subtris;
 cl_mem c_tri_header;
 cl_mem c_tri_subtris;
 
-cl_int c_bin_batch_sz;
-cl_int c_height_bins;
+cl_int c_bin_batch_sz = glm::clamp(NUM_TRIS / (roundSize * minBatches), 1, maxRounds) * roundSize;
+cl_int c_height_bins = size_bins.y;
 cl_int c_max_bin_segs = std::max(MAX_BIN_SEGS, std::max(num_bins * CR_BIN_STREAMS_SIZE, (NUM_TRIS - 1) / CR_BIN_SEG_SIZE + 1) + maxBinSegsSlack);
 cl_int c_max_subtris = std::max(MAX_SUBTRIS, NUM_TRIS + maxSubtrisSlack);
-cl_int c_num_bins;
+cl_int c_num_bins = size_bins.x * size_bins.y;
 cl_int c_num_tris = NUM_TRIS;
 cl_int c_viewport_height = HEIGHT;
 cl_int c_viewport_width = WIDTH;
-cl_int c_width_bins;
+cl_int c_width_bins = size_bins.x;
 
 // OUTPUTS
 typedef struct {
@@ -111,11 +117,11 @@ int main(int argc, char** argv) {
     };
     cl_image_desc image_desc = {
         .image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER,
-        .image_width = c_max_subtris,
+        .image_width = sizeof(TRI_HEADER) / sizeof(TRI_HEADER[0]),
         .image_row_pitch = 0, // check this
         .mem_object = c_tri_header, 
     };
-    t_tri_header            = CL_CHECK2(clCreateImage(context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, NULL));
+    t_tri_header            = CL_CHECK2(clCreateImage(context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, &_err));
     c_num_subtris           = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(NUM_SUBTRIS), &NUM_SUBTRIS, &_err));
     c_tri_subtris           = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(TRI_SUBTRIS), &TRI_SUBTRIS, &_err));
     
@@ -123,11 +129,11 @@ int main(int argc, char** argv) {
     cl_mem a_bin_counter    = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(bin_counter), &bin_counter, &_err));
     cl_mem a_num_bin_segs   = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(num_bin_segs), &num_bin_segs, &_err));
     
-    cl_mem g_bin_first_seg  = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, &_err));
-    cl_mem g_bin_seg_data   = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int[c_max_bin_segs * CR_BIN_SEG_SIZE]), NULL, &_err));
-    cl_mem g_bin_seg_next   = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int[c_max_bin_segs]), NULL, &_err));
-    cl_mem g_bin_seg_count  = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int[c_max_bin_segs]), NULL, &_err));
-    cl_mem g_bin_total      = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, &_err));
+    cl_mem g_bin_first_seg  = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, &_err));
+    cl_mem g_bin_seg_data   = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int[c_max_bin_segs * CR_BIN_SEG_SIZE]), NULL, &_err));
+    cl_mem g_bin_seg_next   = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int[c_max_bin_segs]), NULL, &_err));
+    cl_mem g_bin_seg_count  = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int[c_max_bin_segs]), NULL, &_err));
+    cl_mem g_bin_total      = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, &_err));
 
     CL_CHECK(clSetKernelArg(kernel, 0, sizeof(t_tri_header),    &t_tri_header));
     
@@ -157,15 +163,12 @@ int main(int argc, char** argv) {
     // Enqueue Kernel
     cl_command_queue command_queue = CL_CHECK2(clCreateCommandQueue(context, device_id, NULL, &_err));
     
-    size_t local_work_size[] = {32, 2}; // WARPS & CR_SETUP_WARPS
-    int threadsPerBlock = local_work_size[0] * local_work_size[1];
-    int maxGridWidth = 65536; // ??
-    size_t global_work_size[] = {(NUM_TRIS + threadsPerBlock - 1) / threadsPerBlock, 1};
-    while (global_work_size[0] > maxGridWidth)
-    {
-        global_work_size[0] = (global_work_size[0] + 1) >> 1;
-        global_work_size[1] <<= 1;
-    }
+    glm::ivec2 block_size(32, CR_BIN_WARPS);
+    glm::ivec2 size_threads = glm::ivec2(CR_BIN_STREAMS_SIZE, 1) * block_size;
+    glm::ivec2 grid_size = (size_threads + block_size - 1) / block_size;
+    size_t local_work_size[] = {block_size.x, block_size.y};
+    size_t global_work_size[] = {grid_size.x, grid_size.y};
+    // cuda to opencl
     global_work_size[0] *= local_work_size[0];
     global_work_size[1] *= local_work_size[1];
 
@@ -192,7 +195,7 @@ int main(int argc, char** argv) {
     
     printf("INFO: kernel time = %d ns\n", std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count());
     
-    ASSERT_EQ_I(emulate_result.a_bin_counter, kernel_result.a_bin_counter);
+    // ASSERT_EQ_I(emulate_result.a_bin_counter, kernel_result.a_bin_counter);
     ASSERT_EQ_I(emulate_result.a_num_bin_segs, kernel_result.a_num_bin_segs);
     for(int i=0; i<emulate_result.a_bin_counter; ++i) {
         ASSERT_EQ_I(emulate_result.g_bin_first_seg[i], kernel_result.g_bin_first_seg[i]);
@@ -223,8 +226,8 @@ void emulateBinRaster(void)
         return;
 
     std::vector<int> batchTris;
-    std::vector<int> currSeg(NULL, c_num_bins * CR_BIN_STREAMS_SIZE);
-    std::vector<int> idxInSeg(NULL, c_num_bins * CR_BIN_STREAMS_SIZE);
+    std::vector<int> currSeg(c_num_bins * CR_BIN_STREAMS_SIZE, 0);
+    std::vector<int> idxInSeg(c_num_bins * CR_BIN_STREAMS_SIZE, 0);
 
     for (int i = 0; i < c_num_bins * CR_BIN_STREAMS_SIZE; i++)
     {

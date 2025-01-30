@@ -55,7 +55,7 @@ kernel void bin_raster(
     // initialize output linked lists and offsets
     if (local_id < c_max_subtris)
     {
-        g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_global_id(0)] = -1;
+        g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_group_id(0)] = -1;
         s_out_ofs[local_id] = -CR_BIN_SEG_SIZE;
         s_out_total[local_id] = 0;
     }
@@ -310,7 +310,7 @@ kernel void bin_raster(
 
                     // add to linked list
                     if (s_out_ofs[local_id] < 0)
-                        g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_global_id(0)] = seg_idx;
+                        g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_group_id(0)] = seg_idx;
                     else
                         g_bin_seg_next[(s_out_ofs[local_id] - 1) >> CR_BIN_SEG_LOG2] = seg_idx;
 
