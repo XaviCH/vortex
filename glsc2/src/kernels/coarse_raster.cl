@@ -1,122 +1,6 @@
-// Constants
+#include "common/headers.cl"
 
-#define CR_MAXVIEWPORT_LOG2     11      // ViewportSize / PixelSize.
-#define CR_SUBPIXEL_LOG2        4       // PixelSize / SubpixelSize.
-
-#define CR_MAXBINS_LOG2         4       // ViewportSize / BinSize.
-#define CR_BIN_LOG2             4       // BinSize / TileSize.
-#define CR_TILE_LOG2            3       // TileSize / PixelSize.
-
-#define CR_COVER8X8_LUT_SIZE    768     // 64-bit entries.
-#define CR_FLIPBIT_FLIP_Y       2
-#define CR_FLIPBIT_FLIP_X       3
-#define CR_FLIPBIT_SWAP_XY      4
-#define CR_FLIPBIT_COMPL        5
-
-#define CR_BIN_STREAMS_LOG2     4
-#define CR_BIN_SEG_LOG2         9       // 32-bit entries.
-#define CR_TILE_SEG_LOG2        5       // 32-bit entries.
-
-#define CR_MAXSUBTRIS_LOG2      24      // Triangle structs. Dictated by CoarseRaster.
-#define CR_COARSE_QUEUE_LOG2    10      // Triangles.
-
-#define CR_SETUP_WARPS          2
-#define CR_SETUP_OPT_BLOCKS     8
-#define CR_BIN_WARPS            16
-#define CR_COARSE_WARPS         16      // Must be a power of two.
-#define CR_FINE_MAX_WARPS       20      // Absolute maximum for 48KB of shared mem.
-#define CR_FINE_OPT_WARPS       20      // Preferred value.
-
-//------------------------------------------------------------------------
-
-#define CR_MAXVIEWPORT_SIZE     (1 << CR_MAXVIEWPORT_LOG2)
-#define CR_SUBPIXEL_SIZE        (1 << CR_SUBPIXEL_LOG2)
-#define CR_SUBPIXEL_SQR         (1 << (CR_SUBPIXEL_LOG2 * 2))
-
-#define CR_MAXBINS_SIZE         (1 << CR_MAXBINS_LOG2)
-#define CR_MAXBINS_SQR          (1 << (CR_MAXBINS_LOG2 * 2))
-#define CR_BIN_SIZE             (1 << CR_BIN_LOG2)
-#define CR_BIN_SQR              (1 << (CR_BIN_LOG2 * 2))
-
-#define CR_MAXTILES_LOG2        (CR_MAXBINS_LOG2 + CR_BIN_LOG2)
-#define CR_MAXTILES_SIZE        (1 << CR_MAXTILES_LOG2)
-#define CR_MAXTILES_SQR         (1 << (CR_MAXTILES_LOG2 * 2))
-#define CR_TILE_SIZE            (1 << CR_TILE_LOG2)
-#define CR_TILE_SQR             (1 << (CR_TILE_LOG2 * 2))
-
-#define CR_BIN_STREAMS_SIZE     (1 << CR_BIN_STREAMS_LOG2)
-#define CR_BIN_SEG_SIZE         (1 << CR_BIN_SEG_LOG2)
-#define CR_TILE_SEG_SIZE        (1 << CR_TILE_SEG_LOG2)
-
-#define CR_MAXSUBTRIS_SIZE      (1 << CR_MAXSUBTRIS_LOG2)
-#define CR_COARSE_QUEUE_SIZE    (1 << CR_COARSE_QUEUE_LOG2)
-
-// Types
-
-typedef struct
-{
-    short v0x;    // Subpixels relative to viewport center. Valid if triSubtris = 1.
-    short v0y;
-    short v1x;
-    short v1y;
-    short v2x;
-    short v2y;
-
-    uint misc;   // triSubtris=1: (zmin:20, f01:4, f12:4, f20:4), triSubtris>=2: (subtriBase)
-} CRTriangleHeader;
-
-// Extensions
-
-#pragma OPENCL EXTENSION cl_khr_subgroups : enable
-#pragma OPENCL EXTENSION __opencl_c_subgroups : enable
-#pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
-
-// ISA dependancy
-
-#ifdef CUDA
-inline int      findLeadingOne      (uint v)                    { uint r; asm("bfind.u32 %0, %1;" : "=r"(r) : "r"(v)); return r; }
-inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }
-inline uint     getLaneMaskLe       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_le;" : "=r"(r)); return r; }
-
-inline uint     f32_to_u32_sat_rmi  (float a)                   { uint v; asm("cvt.rmi.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
-inline int      add_s16lo_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      add_s16hi_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16lo_s16lo     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { int v; asm("vsub.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16hi_s16hi     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h1, %2.h1;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      max_max             (int a, int b, int c)       { int v; asm("vmax.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline int      min_min             (int a, int b, int c)       { int v; asm("vmin.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline uint     add_sub             (uint a, uint b, uint c)    { uint v; asm("vsub.u32.u32.u32.add %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(c), "r"(b)); return v; }
-inline int      add_clamp_0_x       (int a, int b, int c)       { int v; asm("vadd.u32.s32.s32.sat.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-
-inline uint     get_max_sub_group_size(void) { return 32; }
-inline uint     sub_group_ballot(int p) { uint r; asm("vote.sync.ballot.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
-inline uint     sub_group_any(int p)    { uint r; asm("vote.sync.any.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
-inline uint     sub_group_all(int p)    { uint r; asm("vote.sync.all.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
-#else
-inline uint     f32_to_u32_sat_rmi  (float a)                   { return (uint)a; }
-inline int      add_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) + (b & 0xFFFF); }
-inline int      add_s16hi_s16lo     (int a, int b)              { return (a >> 16) + (b & 0xFFFF); }
-inline int      sub_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) - (b & 0xFFFF); }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { return (a >> 16) - (b & 0xFFFF); }
-inline int      sub_s16hi_s16hi     (int a, int b)              { return (a >> 16) - (b >> 16); }
-inline int      max_max             (int a, int b, int c)       { return max(a, max(b, c)); }
-inline int      min_min             (int a, int b, int c)       { return min(a, min(b, c)); }
-inline uint     add_sub             (uint a, uint b, uint c)    { return a+b-c; }
-inline int      add_clamp_0_x       (int a, int b, int c)       { return clamp(a+b,0,c); }
-inline uint     getLaneMaskLt       (void) {
-    uint mask;
-    for(uint warp = 0; warp < get_max_sub_group_size(); ++warp) mask |= 1 << warp;
-    return mask >> (get_max_sub_group_size() - get_local_id(0));
-}
-#endif
-
-inline uint idiv_fast(uint a, uint b)
-{
-    return f32_to_u32_sat_rmi(((float)a + 0.5f) / (float)b);
-}
-
-inline void sort_shared(local uint* ptr, int num_items)
+inline void sort_shared(local volatile uint* ptr, int num_items)
 {
     int thread_local_id = get_local_id(0) + get_local_id(1) * get_local_size(0);
     int range = 16;
@@ -203,96 +87,73 @@ inline void sort_shared(local uint* ptr, int num_items)
 
 //---
 
-inline int global_tile_idx(int tile_in_bin, int width_tiles)
+inline int global_tile_idx(int tile_in_bin, int c_width_tiles)
 {
     int tile_x = tile_in_bin & (CR_BIN_SIZE - 1);
     int tile_y = tile_in_bin >> CR_BIN_LOG2;
-    return tile_x + tile_y * width_tiles;
+    return tile_x + tile_y * c_width_tiles;
 }
 
 //----------------------------------------------------------------------------------------
 
 kernel void coarse_raster(
     // global atomics
-    global   int* g_num_subtris,        // = numTris
-    global   int* g_bin_counter,        // = 0
-    global   int* g_num_bin_segs,       // = 0
-    global   int* g_coarse_counter;     // = 0
-    global   int* g_num_tile_segs;      // = 0
-    global   int* g_num_active_tiles;   // = 0
-    global   int* g_fine_counter;       // = 0
+    global const int* c_bin_first_seg,    
+    global const int* c_bin_seg_data,
+    global const int* c_bin_seg_next,
+    global const int* c_bin_seg_count,
+    global const int* c_num_bin_segs,       // = 0
+    global const int* c_num_subtris,        // = numTris
+    global const CRTriangleHeader*  c_tri_header,
+
+    global int* a_coarse_counter,     // = 0
+    global int* a_num_active_tiles,   // = 0
+    global int* a_num_tile_segs,      // = 0
     
     // common params
-    private  int    p_num_tris,
-    global   void*  g_vertex_buffer,
-    private  uint   p_vertex_item_sz,
-    global   int*   g_index_buffer,
+    global int* g_active_tiles,        // CR_MAXTILES_SQR * (S32 tileIdx)
+    global int* g_tile_first_seg,       // CR_MAXTILES_SQR * (S32 seg_idx), -1 = none
+    global int* g_tile_seg_data,        // c_max_tile_segs * CR_TILE_SEG_SIZE * (S32 tri_idx)
+    global int* g_tile_seg_count,
+    global int* g_tile_seg_next,        // c_max_tile_segs * (S32 seg_idx), -1 = none
 
-    private  int    p_viewport_width,
-    private  int    p_viewport_height,
-    private  int    p_width_pixels,
-    private  int    p_height_pixels,
+    const int c_deferred_clear,
+    const int c_height_tiles,
+    const int c_max_bin_segs,
+    const int c_max_subtris,
+    const int c_max_tile_segs,
+    const int c_num_bins,
+    const int c_viewport_width,
+    const int c_viewport_height,
+    const int c_width_bins,
+    const int c_width_tiles,
 
-    private  int    p_width_bins,
-    private  int    p_height_bins,
-    private  int    p_num_bins,
-
-    private  int    p_width_tiles,
-    private  int    p_height_tiles,
-    private  int    p_num_tiles,
-
-    private  int    p_bin_batch_sz,
-
-    private  int    p_deferred_clear,
-    private  uint   p_clear_color,
-    private  uint   p_clear_depth,
-    // Setup output / bin input
-    private  int    p_max_subtris,
-    global   uchar* g_tri_subtris,
-    global   CRTriangleHeader*  g_tri_header,
-    global   void*  g_tri_data, // unused
-    private  uint   p_tri_data_item_sz, // unused
-    // Bin output / coarse input.
-    private  int    p_max_bin_segs,
-    global   int*   g_bin_first_seg,    
-    global   int*   g_bin_total,
-    global   int*   g_bin_seg_data,
-    global   int*   g_bin_seg_next,
-    global   int*   g_bin_seg_count,
-    // Coarse output / fine input.
-    private  int    p_max_tile_segs,
-    global   int*   g_active_tiles,        // CR_MAXTILES_SQR * (S32 tileIdx)
-    global   int*   g_tile_first_seg,       // CR_MAXTILES_SQR * (S32 seg_idx), -1 = none
-    global   int*   g_g_tile_seg_data,        // p_max_tile_segs * CR_TILE_SEG_SIZE * (S32 tri_idx)
-    global   int*   g_tile_seg_next,        // p_max_tile_segs * (S32 seg_idx), -1 = none
-    global   int*   g_tile_seg_count,
-    // Cuda support
-    image1d_t g_t_tri_header,
-    sampler_t p_s_tri_header
+    // Image Support
+    read_only image1d_buffer_t t_tri_header
 ) {
 
     // Common.
 
     local volatile uint s_work_counter;
-    local volatile uint* s_scan_temp          [CR_COARSE_WARPS][48];              // 3KB
+    local volatile uint s_scan_temp          [CR_COARSE_WARPS][48];              // 3KB
 
     // Input.
 
-    local volatile uint* s_bin_order           [CR_MAXBINS_SQR];                   // 1KB
-    local volatile int* s_bin_stream_curr_seg  [CR_BIN_STREAMS_SIZE];              // 0KB
-    local volatile int* s_bin_stream_first_tri [CR_BIN_STREAMS_SIZE];              // 0KB
-    local volatile int* s_tri_queue            [CR_COARSE_QUEUE_SIZE];             // 4KB
+    local volatile uint s_bin_order           [CR_MAXBINS_SQR];                   // 1KB
+    local volatile int s_bin_stream_curr_seg  [CR_BIN_STREAMS_SIZE];              // 0KB
+    local volatile int s_bin_stream_first_tri [CR_BIN_STREAMS_SIZE];              // 0KB
+    local volatile int s_tri_queue            [CR_COARSE_QUEUE_SIZE];             // 4KB
     local volatile int s_tri_queue_write_pos;
     local volatile uint s_bin_stream_selected_ofs;
     local volatile uint s_bin_stream_selected_size;
 
     // Output.
 
-    local volatile uint* s_warp_emit_mask      [CR_COARSE_WARPS][CR_BIN_SQR + 1];  // 16KB, +1 to avoid bank collisions
-    local volatile uint* s_warp_emit_prefix_sum [CR_COARSE_WARPS][CR_BIN_SQR + 1];  // 16KB, +1 to avoid bank collisions
-    local volatile uint* s_tile_emit_prefix_sum [CR_BIN_SQR + 1];                   // 1KB, zero at the beginning
-    local volatile uint* s_tile_alloc_prefix_sum[CR_BIN_SQR + 1];                   // 1KB, zero at the beginning
-    local volatile int* s_tile_stream_curr_ofs [CR_BIN_SQR];                       // 1KB
+    local volatile uint s_warp_emit_mask      [CR_COARSE_WARPS][CR_BIN_SQR + 1];  // 16KB, +1 to avoid bank collisions
+    local volatile uint s_warp_emit_prefix_sum [CR_COARSE_WARPS][CR_BIN_SQR + 1];  // 16KB, +1 to avoid bank collisions
+    local volatile uint s_tile_emit_prefix_sum [CR_BIN_SQR + 1];                   // 1KB, zero at the beginning
+    local volatile uint s_tile_alloc_prefix_sum [CR_BIN_SQR + 1];                   // 1KB, zero at the beginning
+    local volatile int s_tile_stream_curr_ofs [CR_BIN_SQR];                       // 1KB
     local volatile uint s_first_alloc_seg;
     local volatile uint s_first_active_idx;
 
@@ -301,7 +162,7 @@ kernel void coarse_raster(
     int thread_local_id  = get_local_id(0) + get_local_id(1) * 32;
     int emit_shift   = CR_BIN_LOG2 * 2 + 5; // We scan ((num_emits << emit_shift) | num_allocs) over tiles.
 
-    if (g_num_subtris > p_max_subtris || g_num_bin_segs > p_max_bin_segs)
+    if (*c_num_subtris > c_max_subtris || *c_num_bin_segs > c_max_bin_segs)
         return;
 
     // Initialize sharedmem arrays.
@@ -312,7 +173,7 @@ kernel void coarse_raster(
 
     // Sort bins in descending order of triangle count.
 
-    for (int bin_idx = thread_local_id; bin_idx < p_num_bins; bin_idx += CR_COARSE_WARPS * 32)
+    for (int bin_idx = thread_local_id; bin_idx < c_num_bins; bin_idx += CR_COARSE_WARPS * 32)
     {
         int count = 0;
         for (int i = 0; i < CR_BIN_STREAMS_SIZE; i++)
@@ -320,7 +181,7 @@ kernel void coarse_raster(
     }
 
     barrier(CLK_LOCAL_MEM_FENCE);
-    sort_shared(s_bin_order, p_num_bins);
+    sort_shared(s_bin_order, c_num_bins);
 
     // Process each bin by one block.
 
@@ -329,18 +190,18 @@ kernel void coarse_raster(
         // Pick a bin for the block.
 
         if (thread_local_id == 0)
-            s_work_counter = atomic_add(g_coarse_counter, 1);
+            s_work_counter = atomic_add(a_coarse_counter, 1);
         barrier(CLK_LOCAL_MEM_FENCE);
 
         int work_counter = s_work_counter;
-        if (work_counter >= p_num_bins)
+        if (work_counter >= c_num_bins)
         {
             break;
         }
 
         uint bin_order = s_bin_order[work_counter];
         bool bin_empty = ((~bin_order >> (CR_MAXBINS_LOG2 * 2)) == 0);
-        if (bin_empty && !p_deferred_clear)
+        if (bin_empty && !c_deferred_clear)
         {
             break;
         }
@@ -354,9 +215,9 @@ kernel void coarse_raster(
 
         if (thread_local_id < CR_BIN_STREAMS_SIZE)
         {
-            int seg_idx = g_bin_first_seg[(bin_idx << CR_BIN_STREAMS_LOG2) + thread_local_id];
+            int seg_idx = c_bin_first_seg[(bin_idx << CR_BIN_STREAMS_LOG2) + thread_local_id];
             s_bin_stream_curr_seg[thread_local_id] = seg_idx;
-            s_bin_stream_first_tri[thread_local_id] = (seg_idx == -1) ? ~0u : g_bin_seg_data[seg_idx << CR_BIN_SEG_LOG2];
+            s_bin_stream_first_tri[thread_local_id] = (seg_idx == -1) ? ~0u : c_bin_seg_data[seg_idx << CR_BIN_SEG_LOG2];
         }
 
         for (int tile_in_bin = CR_COARSE_WARPS * 32 - 1 - thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += CR_COARSE_WARPS * 32)
@@ -364,13 +225,13 @@ kernel void coarse_raster(
 
         // Initialize per-bin state.
 
-        int bin_y = idiv_fast(bin_idx, p_width_bins);
-        int bin_x = bin_idx - bin_y * p_width_bins;
-        int origin_x = (bin_x << (CR_BIN_LOG2 + tile_log)) - (p_viewport_width << (CR_SUBPIXEL_LOG2 - 1));
-        int origin_y = (bin_y << (CR_BIN_LOG2 + tile_log)) - (p_viewport_height << (CR_SUBPIXEL_LOG2 - 1));
-        int max_tile_x_in_bin = min(p_width_tiles - (bin_x << CR_BIN_LOG2), CR_BIN_SIZE) - 1;
-        int max_tile_y_in_bin = min(p_height_tiles - (bin_y << CR_BIN_LOG2), CR_BIN_SIZE) - 1;
-        int bin_tile_idx = (bin_x + bin_y * p_width_tiles) << CR_BIN_LOG2;
+        int bin_y = idiv_fast(bin_idx, c_width_bins);
+        int bin_x = bin_idx - bin_y * c_width_bins;
+        int origin_x = (bin_x << (CR_BIN_LOG2 + tile_log)) - (c_viewport_width << (CR_SUBPIXEL_LOG2 - 1));
+        int origin_y = (bin_y << (CR_BIN_LOG2 + tile_log)) - (c_viewport_height << (CR_SUBPIXEL_LOG2 - 1));
+        int max_tile_x_in_bin = min(c_width_tiles - (bin_x << CR_BIN_LOG2), CR_BIN_SIZE) - 1;
+        int max_tile_y_in_bin = min(c_height_tiles - (bin_y << CR_BIN_LOG2), CR_BIN_SIZE) - 1;
+        int bin_tile_idx = (bin_x + bin_y * c_width_tiles) << CR_BIN_LOG2;
 
 
         // Entire block: Merge input streams and process triangles.
@@ -422,12 +283,12 @@ kernel void coarse_raster(
                         s_bin_stream_selected_ofs = seg_idx << CR_BIN_SEG_LOG2;
                         if (seg_idx != -1)
                         {
-                            int seg_size = g_bin_seg_count[seg_idx];
-                            int seg_next = g_bin_seg_next[seg_idx];
+                            int seg_size = c_bin_seg_count[seg_idx];
+                            int seg_next = c_bin_seg_next[seg_idx];
                             s_bin_stream_selected_size = seg_size;
                             s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
                             s_bin_stream_curr_seg[thread_local_id] = seg_next;
-                            s_bin_stream_first_tri[thread_local_id] = (seg_next == -1) ? ~0u : g_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
+                            s_bin_stream_first_tri[thread_local_id] = (seg_next == -1) ? ~0u : c_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
                         }
                     }
                 }
@@ -447,7 +308,7 @@ kernel void coarse_raster(
 
                 for (int idx_in_seg = CR_COARSE_WARPS * 32 - 1 - thread_local_id; idx_in_seg < seg_size; idx_in_seg += CR_COARSE_WARPS * 32)
                 {
-                    int tri_idx = g_bin_seg_data[seg_ofs + idx_in_seg];
+                    int tri_idx = c_bin_seg_data[seg_ofs + idx_in_seg];
                     s_tri_queue[(tri_queue_write_pos - seg_size + idx_in_seg) & (CR_COARSE_QUEUE_SIZE - 1)] = tri_idx;
                 }
 
@@ -476,8 +337,8 @@ kernel void coarse_raster(
                 int data_idx = tri_idx >> 3;
                 int subtri_idx = tri_idx & 7;
                 if (subtri_idx != 7)
-                    data_idx = g_tri_header[data_idx].misc + subtri_idx;
-                tri_data = read_imageui(g_t_tri_header, p_s_tri_header, data_idx);
+                    data_idx = c_tri_header[data_idx].misc + subtri_idx;
+                tri_data = read_imageui(t_tri_header, data_idx);
             }
 
             // 32 triangles per warp: Record emits (= tile intersections).
@@ -693,8 +554,8 @@ kernel void coarse_raster(
 
                 if (tile_in_bin == CR_BIN_SQR - 1 && num_allocs != 0)
                 {
-                    int t = atomic_add(&g_num_tile_segs, num_allocs);
-                    s_first_alloc_seg = (t + num_allocs <= p_max_tile_segs) ? t : 0;
+                    int t = atomic_add(a_num_tile_segs, num_allocs);
+                    s_first_alloc_seg = (t + num_allocs <= c_max_tile_segs) ? t : 0;
                 }
             }
 
@@ -742,7 +603,7 @@ kernel void coarse_raster(
                     ptr = tile_ptr + 0x01 * 4; if (emit_in_bin >= *(local uint*)ptr) tile_ptr = ptr;
                 #endif
 
-                int tile_in_bin = (tile_ptr - tileBase) >> 2;
+                int tile_in_bin = (tile_ptr - tile_base) >> 2;
                 int emit_in_tile = emit_in_bin - *(local uint*)tile_ptr;
 
                 // Find warp in tile.
@@ -765,7 +626,7 @@ kernel void coarse_raster(
                 #endif
 
                 int warp_in_tile = (warp_ptr - warp_base) >> (CR_BIN_LOG2 * 2 + 2);
-                uint emit_mask = *(local uint*)(warp_ptr + warp_step + ((U8*)s_warp_emit_mask - (U8*)s_warp_emit_prefix_sum));
+                uint emit_mask = *(local uint*)(warp_ptr + warp_step + ((uchar*)s_warp_emit_mask - (uchar*)s_warp_emit_prefix_sum));
                 int emit_in_warp = emit_in_tile - *(local uint*)(warp_ptr + warp_step) + popcount(emit_mask);
 
                 // Find thread in warp.
@@ -845,9 +706,9 @@ kernel void coarse_raster(
 
                 if (alloc_lo != alloc_hi)
                 {
-                    local int* next_ptr = &g_tile_seg_next[(old_ofs - 1) >> CR_TILE_SEG_LOG2];
+                    global int* next_ptr = &g_tile_seg_next[(old_ofs - 1) >> CR_TILE_SEG_LOG2];
                     if (old_ofs < 0)
-                        next_ptr = &g_tile_first_seg[bin_tile_idx + global_tile_idx(tile_in_bin)];
+                        next_ptr = &g_tile_first_seg[bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles)];
                     *next_ptr = first_alloc_seg + alloc_lo;
 
                     new_ofs--;
@@ -874,7 +735,7 @@ kernel void coarse_raster(
         {
             int tile_x = tile_in_bin & (CR_BIN_SIZE - 1);
             int tile_y = tile_in_bin >> CR_BIN_LOG2;
-            bool force = (p_deferred_clear & tile_x <= max_tile_x_in_bin & tile_y <= max_tile_y_in_bin);
+            bool force = (c_deferred_clear && tile_x <= max_tile_x_in_bin && tile_y <= max_tile_y_in_bin); // check this
 
             int ofs = s_tile_stream_curr_ofs[tile_in_bin];
             int seg_idx = (ofs - 1) >> CR_TILE_SEG_LOG2;
@@ -885,13 +746,13 @@ kernel void coarse_raster(
             else if (force)
             {
                 s_tile_stream_curr_ofs[tile_in_bin] = 0;
-                g_tile_first_seg[bin_tile_idx + tile_x + tile_y * p_width_tiles] = -1;
+                g_tile_first_seg[bin_tile_idx + tile_x + tile_y * c_width_tiles] = -1;
             }
 
             if (seg_count != 0)
                 g_tile_seg_count[seg_idx] = seg_count;
 
-            s_scan_temp[0][(tile_in_bin >> 5) + 16] = popcount(sub_group_ballot(ofs >= 0 | force));
+            s_scan_temp[0][(tile_in_bin >> 5) + 16] = popcount(sub_group_ballot(ofs >= 0 || force)); // Check this
         }
 
         // First warp: Scan-8.
@@ -913,7 +774,7 @@ kernel void coarse_raster(
             #endif
 
             if (thread_local_id == CR_BIN_SQR / 32 - 1)
-                s_first_active_idx = atomic_add(g_num_active_tiles, sum);
+                s_first_active_idx = atomic_add(a_num_active_tiles, sum);
         }
 
         // Tile per thread: Output active tiles.
@@ -927,7 +788,7 @@ kernel void coarse_raster(
             int active_idx = s_first_active_idx;
             active_idx += s_scan_temp[0][(tile_in_bin >> 5) + 15];
             active_idx += popcount(sub_group_ballot(true) & getLaneMaskLt());
-            g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin);
+            g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
         }
 
     }
