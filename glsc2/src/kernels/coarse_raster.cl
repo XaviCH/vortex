@@ -123,8 +123,8 @@ kernel void coarse_raster(
     const int c_max_subtris,
     const int c_max_tile_segs,
     const int c_num_bins,
-    const int c_viewport_width,
     const int c_viewport_height,
+    const int c_viewport_width,
     const int c_width_bins,
     const int c_width_tiles,
 

@@ -1,6 +1,8 @@
 #include "common/headers.cl"
 
 // Bin rasterizer 
+
+// __IMAGE_SUPPORT__
 kernel void bin_raster(
     read_only image1d_buffer_t t_tri_header,
 
@@ -8,7 +10,7 @@ kernel void bin_raster(
     global const CRTriangleHeader*  c_tri_header,
     global const uchar*             c_tri_subtris, // maybe constant ??
     
-    global int*   a_bin_counter, 
+    global int*   a_bin_counter,
     global int*   a_num_bin_segs,
     
     global int*   g_bin_first_seg,
@@ -53,7 +55,7 @@ kernel void bin_raster(
         s_broadcast[local_id] = 0;
 
     // initialize output linked lists and offsets
-    if (local_id < c_max_subtris)
+    if (local_id < c_num_bins)
     {
         g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_group_id(0)] = -1;
         s_out_ofs[local_id] = -CR_BIN_SEG_SIZE;
@@ -103,24 +105,24 @@ kernel void bin_raster(
                 if (local_id < CR_BIN_WARPS) {
                     volatile uint* ptr = &s_broadcast[local_id + 16];
                     uint val = *ptr;
-                    #if (BIN_WARPS > 1)
+                    #if (CR_BIN_WARPS > 1)
                         val += ptr[-1]; *ptr = val;
                     #endif
-                    #if (BIN_WARPS > 2)
+                    #if (CR_BIN_WARPS > 2)
                         val += ptr[-2]; *ptr = val;
                     #endif
-                    #if (BIN_WARPS > 4)
+                    #if (CR_BIN_WARPS > 4)
                         val += ptr[-4]; *ptr = val;
                     #endif
-                    #if (BIN_WARPS > 8)
+                    #if (CR_BIN_WARPS > 8)
                         val += ptr[-8]; *ptr = val;
                     #endif
-                    #if (BIN_WARPS > 16)
+                    #if (CR_BIN_WARPS > 16)
                         val += ptr[-16]; *ptr = val;
                     #endif
 
                     // initially assume that we consume everything
-                    s_batch_pos = batch_pos + CR_BIN_WARPS * get_max_sub_group_size();
+                    s_batch_pos = batch_pos + CR_BIN_WARPS * 32;
                     s_buf_count = buf_count + val;
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -209,8 +211,8 @@ kernel void bin_raster(
                     } while (!won);
                 } else
                 {
-                    bool complex = (hix > lox+1 || hiy > loy+1);
-                    if (!sub_group_any(complex))
+                    bool _complex = (hix > lox+1 || hiy > loy+1);
+                    if (!sub_group_any(_complex))
                     {
                         int bin_idx = lox + c_width_bins * loy;
                         atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx], bit);
@@ -306,7 +308,7 @@ kernel void bin_raster(
                 if (over_index != -1)
                 {
                     // calculate new segment index
-                    int seg_idx = alloc_base + over_index;
+                    int seg_idx = alloc_base + over_index; // TODO: check this
 
                     // add to linked list
                     if (s_out_ofs[local_id] < 0)
