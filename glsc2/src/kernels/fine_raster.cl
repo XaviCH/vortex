@@ -1,156 +1,5 @@
-// Constants
-
-#define CR_MAXVIEWPORT_LOG2     11      // ViewportSize / PixelSize.
-#define CR_SUBPIXEL_LOG2        4       // PixelSize / SubpixelSize.
-
-#define CR_MAXBINS_LOG2         4       // ViewportSize / BinSize.
-#define CR_BIN_LOG2             4       // BinSize / TileSize.
-#define CR_TILE_LOG2            3       // TileSize / PixelSize.
-
-#define CR_COVER8X8_LUT_SIZE    768     // 64-bit entries.
-#define CR_FLIPBIT_FLIP_Y       2
-#define CR_FLIPBIT_FLIP_X       3
-#define CR_FLIPBIT_SWAP_XY      4
-#define CR_FLIPBIT_COMPL        5
-
-#define CR_BIN_STREAMS_LOG2     4
-#define CR_BIN_SEG_LOG2         9       // 32-bit entries.
-#define CR_TILE_SEG_LOG2        5       // 32-bit entries.
-
-#define CR_MAXSUBTRIS_LOG2      24      // Triangle structs. Dictated by CoarseRaster.
-#define CR_COARSE_QUEUE_LOG2    10      // Triangles.
-
-#define CR_SETUP_WARPS          2
-#define CR_SETUP_OPT_BLOCKS     8
-#define CR_BIN_WARPS            16
-#define CR_COARSE_WARPS         16      // Must be a power of two.
-#define CR_FINE_MAX_WARPS       20      // Absolute maximum for 48KB of shared mem.
-#define CR_FINE_OPT_WARPS       20      // Preferred value.
-
-//------------------------------------------------------------------------
-
-#define CR_MAXVIEWPORT_SIZE     (1 << CR_MAXVIEWPORT_LOG2)
-#define CR_SUBPIXEL_SIZE        (1 << CR_SUBPIXEL_LOG2)
-#define CR_SUBPIXEL_SQR         (1 << (CR_SUBPIXEL_LOG2 * 2))
-
-#define CR_MAXBINS_SIZE         (1 << CR_MAXBINS_LOG2)
-#define CR_MAXBINS_SQR          (1 << (CR_MAXBINS_LOG2 * 2))
-#define CR_BIN_SIZE             (1 << CR_BIN_LOG2)
-#define CR_BIN_SQR              (1 << (CR_BIN_LOG2 * 2))
-
-#define CR_MAXTILES_LOG2        (CR_MAXBINS_LOG2 + CR_BIN_LOG2)
-#define CR_MAXTILES_SIZE        (1 << CR_MAXTILES_LOG2)
-#define CR_MAXTILES_SQR         (1 << (CR_MAXTILES_LOG2 * 2))
-#define CR_TILE_SIZE            (1 << CR_TILE_LOG2)
-#define CR_TILE_SQR             (1 << (CR_TILE_LOG2 * 2))
-
-#define CR_BIN_STREAMS_SIZE     (1 << CR_BIN_STREAMS_LOG2)
-#define CR_BIN_SEG_SIZE         (1 << CR_BIN_SEG_LOG2)
-#define CR_TILE_SEG_SIZE        (1 << CR_TILE_SEG_LOG2)
-
-#define CR_MAXSUBTRIS_SIZE      (1 << CR_MAXSUBTRIS_LOG2)
-#define CR_COARSE_QUEUE_SIZE    (1 << CR_COARSE_QUEUE_LOG2)
-
-//-----------------------------------------------------------------------------
-// Types
-// GLSL compiler must set up this ones
-typedef struct
-{
-    short v0x;    // Subpixels relative to viewport center. Valid if triSubtris = 1.
-    short v0y;
-    short v1x;
-    short v1y;
-    short v2x;
-    short v2y;
-
-    uint misc;   // triSubtris=1: (zmin:20, f01:4, f12:4, f20:4), triSubtris>=2: (subtriBase)
-} CRTriangleHeader;
-
-typedef struct 
-{
-    U32 zx;     // zx * sampleX + zy * sampleY + zb = lerp(CR_DEPTH_MIN, CR_DEPTH_MAX, (clipZ / clipW + 1) / 2)
-    U32 zy;
-    U32 zb;
-    U32 zslope; // (abs(zx) + abs(zy)) * (samplesPerPixel / 2)
-
-    S32 wx;     // wx * (sampleX * 2 + 1) + wy * (sampleY * 2 + 1) + wb = minClipW / clipW * CR_BARY_MAX
-    S32 wy;
-    S32 wb;
-
-    S32 ux;     // ux * (sampleX * 2 + 1) + uy * (sampleY * 2 + 1) + ub = baryU * minClipW / clipW * CR_BARY_MAX
-    S32 uy;
-    S32 ub;
-
-    S32 vx;     // vx * (sampleX * 2 + 1) + vy * (sampleY * 2 + 1) + vb = baryV * minClipW / clipW * CR_BARY_MAX
-    S32 vy;
-    S32 vb;
-
-    U32 vi0;    // Vertex indices.
-    U32 vi1;
-    U32 vi2;
-} CRTriangleData; 
-
-// Extensions
-
-#pragma OPENCL EXTENSION cl_khr_subgroups : enable
-#pragma OPENCL EXTENSION __opencl_c_subgroups : enable
-#pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
-
-// Utility functions
-
-inline uint   getLo                   (ulong a)                 { return a & 0x00000000FFFFFFFFu; }
-inline int   getLo                   (long a)                 { return a & 0x00000000FFFFFFFF; }
-inline uint   getHi                   (ulong a)                 { return a >> 32; }
-inline int   getHi                   (long a)                 { return a >> 32; }
-inline ulong   combineLoHi             (uint lo, uint hi)        { return ((ulong)hi << 32) + (ulong)lo; }
-inline long   combineLoHi             (int lo, int hi)        { return ((long)hi << 32) + (long)lo; }
-
-// ISA dependancy
-
-#ifdef CUDA
-inline int      findLeadingOne      (uint v)                    { uint r; asm("bfind.u32 %0, %1;" : "=r"(r) : "r"(v)); return r; }
-inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }
-inline uint     getLaneMaskLe       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_le;" : "=r"(r)); return r; }
-
-inline void  add_add_carry           (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = combineLoHi(alo, ahi) + combineLoHi(blo, bhi); *rlo = getLo(r); *rhi = getHi(r); }
-inline uint     f32_to_u32_sat_rmi  (float a)                   { uint v; asm("cvt.rmi.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
-inline int      add_s16lo_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      add_s16hi_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16lo_s16lo     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { int v; asm("vsub.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16hi_s16hi     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h1, %2.h1;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      max_max             (int a, int b, int c)       { int v; asm("vmax.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline int      min_min             (int a, int b, int c)       { int v; asm("vmin.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline uint     add_sub             (uint a, uint b, uint c)    { uint v; asm("vsub.u32.u32.u32.add %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(c), "r"(b)); return v; }
-inline int      add_clamp_0_x       (int a, int b, int c)       { int v; asm("vadd.u32.s32.s32.sat.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-
-inline uint     get_max_sub_group_size(void) { return 32; }
-inline uint     sub_group_ballot(int p) { uint r; asm("vote.sync.ballot.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
-inline uint     sub_group_any(int p)    { uint r; asm("vote.sync.any.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
-inline uint     sub_group_all(int p)    { uint r; asm("vote.sync.all.b32  r,p,0xffffffff" : "=r"(r) : "=p"(p)); return r; }
-#else
-inline uint     f32_to_u32_sat_rmi  (float a)                   { return (uint)a; }
-inline int      add_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) + (b & 0xFFFF); }
-inline int      add_s16hi_s16lo     (int a, int b)              { return (a >> 16) + (b & 0xFFFF); }
-inline int      sub_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) - (b & 0xFFFF); }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { return (a >> 16) - (b & 0xFFFF); }
-inline int      sub_s16hi_s16hi     (int a, int b)              { return (a >> 16) - (b >> 16); }
-inline int      max_max             (int a, int b, int c)       { return max(a, max(b, c)); }
-inline int      min_min             (int a, int b, int c)       { return min(a, min(b, c)); }
-inline uint     add_sub             (uint a, uint b, uint c)    { return a+b-c; }
-inline int      add_clamp_0_x       (int a, int b, int c)       { return clamp(a+b,0,c); }
-inline uint     getLaneMaskLt       (void) {
-    uint mask;
-    for(uint warp = 0; warp < get_max_sub_group_size(); ++warp) mask |= 1 << warp;
-    return mask >> (get_max_sub_group_size() - get_local_id(0));
-}
-#endif
-
-inline uint idiv_fast(uint a, uint b)
-{
-    return f32_to_u32_sat_rmi(((float)a + 0.5f) / (float)b);
-}
-
+#include "glsc2/src/kernels/common/headers.cl"
+// #include "common/headers.cl"
 
 // Render flags
 #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
@@ -250,8 +99,8 @@ inline float3 compute_bary(
 inline void run_fragment_shader(
     fragment_shader_output_t* output,
     int tri_idx, int data_idx, int pixel_x, int pixel_y, uint centroid, local volatile uint* shared,
-    image1d_t t_tri_data,
-    image1d_t t_vertex_buffer,
+    image1d_buffer_t t_tri_data,
+    image1d_buffer_t t_vertex_buffer,
     )
 {
     rasterize_output_t input;
@@ -285,62 +134,6 @@ inline void run_blend_shader(
 }
 
 //------------------------------------------------------------------------
-// Utility funcs.
-//------------------------------------------------------------------------
-
-inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile const ulong* lut)
-{
-    // First half.
-
-    uint yfrac = getLo(yinit);
-    uint shape = add_clamp_0_x(getHi(yinit) + 4, 0, 11);
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    int oct = flips & ((1 << CR_FLIPBIT_FLIP_X) | (1 << CR_FLIPBIT_SWAP_XY));
-    ulong mask = *(ulong*)((uchar*)lut + oct + (shape << 5));
-
-    // Second half.
-
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    shape = add_clamp_0_x(getHi(yinit) + 4, popcount(shape & 15), 11);
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    add_add_carry(yfrac, yfrac, yinc, shape, shape, shape);
-    mask |= *(ulong*)((uchar*)lut + oct + (shape << 5) + (12 << 8));
-    return (flips >= (1 << CR_FLIPBIT_COMPL)) ? ~mask : mask;
-}
-
-inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, volatile const ulong* lut) // 52 instr
-{
-    float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
-    float  yinitScale = (float)(1 << (32 - CR_SUBPIXEL_LOG2));
-    float  yincScale  = 65536.0f * 65536.0f;
-
-    int  slctFlipY  = flips << (31 - CR_FLIPBIT_FLIP_Y);
-    int  slctFlipX  = flips << (31 - CR_FLIPBIT_FLIP_X);
-    int  slctSwapXY = flips << (31 - CR_FLIPBIT_SWAP_XY);
-
-    // Evaluate cross product.
-
-    int t = ox * dy - oy * dx;
-    float det = (float)slct(t, t - dy * (7 << CR_SUBPIXEL_LOG2), slctFlipX);
-    if (flips >= (1 << CR_FLIPBIT_COMPL))
-        det = -det;
-
-    // Represent Y as a function of X.
-
-    float xrcp  = 1.0f / fabs(slct(dx, dy, slctSwapXY));
-    float yzero = det * yinitScale * xrcp + yinitBias;
-    S64 yinit = f32_to_s64(slct(yzero, -yzero, slctFlipY));
-    U32 yinc  = f32_to_u32_sat(fabs(slct(dy, dx, slctSwapXY)) * xrcp * yincScale);
-
-    // Lookup.
-
-    return cover8x8_lookup_mask(yinit, yinc, flips, lut);
-}
-
-//------------------------------------------------------------------------
 
 inline void init_tile_z_max(uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth)
 {
@@ -367,33 +160,33 @@ inline void update_tile_z_max(uint render_mode_flags, uint* tile_z_max, bool* ti
 //------------------------------------------------------------------------
 
 inline void get_triangle(
-    int* tri_idx, int* *data_idx, uint4* tri_header, int* *segment, 
-    global const CRTriangleHeader* g_tri_header,
-    global const int* g_tile_seg_data,
-    global const int* g_tile_seg_next,
-    global const int* g_tile_seg_count,
-    image2d_t img_tri_header,
+    int* tri_idx, int* data_idx, uint4* tri_header, int* segment, 
+    global const CRTriangleHeader* c_tri_header,
+    global const int* c_tile_seg_data,
+    global const int* c_tile_seg_next,
+    global const int* c_tile_seg_count,
+    image1d_buffer_t t_tri_header
 )
 {
 
-    if (get_local_id(0) >= g_tile_seg_count[*segment])
+    if (get_local_id(0) >= c_tile_seg_count[*segment])
     {
         *tri_idx = -1;
         *data_idx = -1;
     }
     else
     {
-        int subtri_idx = g_tile_seg_data[*segment * CR_TILE_SEG_SIZE + get_local_id(0)];
+        int subtri_idx = c_tile_seg_data[*segment * CR_TILE_SEG_SIZE + get_local_id(0)];
         *tri_idx = subtri_idx >> 3;
         *data_idx = *tri_idx;
         subtri_idx &= 7;
         if (subtri_idx != 7)
-            *data_idx = g_tri_header[*tri_idx].misc + subtri_idx;
-        *tri_header = read_imageui(img_tri_header, *data_idx);
+            *data_idx = c_tri_header[*tri_idx].misc + subtri_idx;
+        *tri_header = read_imageui(t_tri_header, *data_idx);
     }
 
     // advance to next segment
-    *segment = g_tile_seg_next[*segment];
+    *segment = c_tile_seg_next[*segment];
 }
 
 //------------------------------------------------------------------------
@@ -412,10 +205,10 @@ inline bool early_z_cull(uint render_mode_flags, uint4 tri_header, uint tile_z_m
 //------------------------------------------------------------------------
 
 inline uint triangle_pixel_coverage(const int samples_log_2, const uint4 tri_header, int tile_x, int tile_y, local volatile ulong* s_cover8x8_lut, 
-    int p_viewport_width, int p_viewport_height)
+    int c_viewport_width, int c_viewport_height)
 {
-    int base_x = (tile_x << (CR_TILE_LOG2 + CR_SUBPIXEL_LOG2)) - ((p_viewport_width  - 1) << (CR_SUBPIXEL_LOG2 - 1));
-    int base_y = (tile_y << (CR_TILE_LOG2 + CR_SUBPIXEL_LOG2)) - ((p_viewport_height - 1) << (CR_SUBPIXEL_LOG2 - 1));
+    int base_x = (tile_x << (CR_TILE_LOG2 + CR_SUBPIXEL_LOG2)) - ((c_viewport_width  - 1) << (CR_SUBPIXEL_LOG2 - 1));
+    int base_y = (tile_y << (CR_TILE_LOG2 + CR_SUBPIXEL_LOG2)) - ((c_viewport_height - 1) << (CR_SUBPIXEL_LOG2 - 1));
 
     // extract S16 vertex positions while subtracting tile coordinates
     int v0x  = sub_s16lo_s16lo(tri_header.x, base_x);
@@ -512,7 +305,7 @@ inline int find_bit(uint render_mode_flags, ulong mask, int idx)
         // Counts scanlines LSB->MSB, but bits within them MSB->LSB.
         // 21 instructions.
 
-        U32 tmp = x & 0x000000ffu;
+        uint tmp = x & 0x000000ffu;
         pop = popcount(tmp);
         p   = (pop <= idx);
         if (p) tmp = x & 0x0000ff00u;
@@ -639,63 +432,40 @@ inline void execute_ROP_single_sample(
 //template <class VertexClass, class FragmentShaderClass, class BlendShaderClass, U32 RenderModeFlags>
 kernel void fine_raster_single_sample(
     // global atomics
-    global   int* g_num_subtris,        // = numTris
-    global   int* g_bin_counter,        // = 0
-    global   int* g_num_bin_segs,       // = 0
-    global   int* g_coarse_counter;     // = 0
-    global   int* g_num_tile_segs;      // = 0
-    global   int* g_num_active_tiles;   // = 0
-    global   int* g_fine_counter;       // = 0
+    global const int* c_num_subtris,
+    global const int* c_num_bin_segs,
+    global const int* c_num_tile_segs,
+    global const int* c_num_active_tiles,
+    global const int* c_fine_counter,
     
     // common params
-    private  int    p_num_tris,
-    global   void*  g_vertex_buffer,
-    private  uint   p_vertex_item_sz,
-    global   int*   g_index_buffer,
+    private const int    c_viewport_width,
+    private const int    c_viewport_height,
 
-    private  int    p_viewport_width,
-    private  int    p_viewport_height,
-    private  int    p_width_pixels,
-    private  int    p_height_pixels,
-
-    private  int    p_width_bins,
-    private  int    p_height_bins,
-    private  int    p_num_bins,
-
-    private  int    p_width_tiles,
-    private  int    p_height_tiles,
-    private  int    p_num_tiles,
-
-    private  int    p_bin_batch_sz,
-
-    private  int    p_deferred_clear,
-    private  uint   p_clear_color,
-    private  uint   p_clear_depth,
+    private  int    c_width_tiles,
+    private  int    c_deferred_clear,
+    private  uint   c_clear_color,
+    private  uint   c_clear_depth,
     // Setup output / bin input
-    private  int    p_max_subtris,
-    global   uchar* g_tri_subtris,
-    global   CRTriangleHeader*  g_tri_header,
-    global   CRTriangleData*  g_tri_data, // unused
+    private  int    c_max_subtris,
+    global const CRTriangleHeader*  c_tri_header,
     // Bin output / coarse input.
-    private  int    p_max_bin_segs,
-    global   int*   g_bin_first_seg,    
-    global   int*   g_bin_total,
-    global   int*   g_bin_seg_data,
-    global   int*   g_bin_seg_next,
-    global   int*   g_bin_seg_count,
+    private  int    c_max_bin_segs,
     // Coarse output / fine input.
-    private  int    p_max_tile_segs,
-    global   int*   g_active_tiles,        // CR_MAXTILES_SQR * (S32 tile_idx)
-    global   int*   g_tile_first_seg,       // CR_MAXTILES_SQR * (S32 seg_idx), -1 = none
-    global   int*   g_tile_seg_data,        // p_max_tile_segs * CR_TILE_SEG_SIZE * (S32 tri_idx)
-    global   int*   g_tile_seg_next,        // p_max_tile_segs * (S32 seg_idx), -1 = none
-    global   int*   g_tile_seg_count,
-    private  uint   p_render_mode_flags,
+    private  int    c_max_tile_segs,
+    global   int*   c_active_tiles,        // CR_MAXTILES_SQR * (S32 tile_idx)
+    global   int*   c_tile_first_seg,       // CR_MAXTILES_SQR * (S32 seg_idx), -1 = none
+    global   int*   c_tile_seg_data,        // c_max_tile_segs * CR_TILE_SEG_SIZE * (S32 tri_idx)
+    global   int*   c_tile_seg_next,        // c_max_tile_segs * (S32 seg_idx), -1 = none
+    global   int*   c_tile_seg_count,
+    private  uint   c_render_mode_flags,
 
-    image2d_t img_color_buffer,
-    image2d_t img_depth_buffer,
-    image1d_t t_tri_data,
-    image1d_t t_vertex_buffer,
+    // __IMAGE_SUPPORT__
+    image2d_t t_color_buffer,
+    image2d_t t_depth_buffer,
+    image1d_buffer_t t_tri_data,
+    image1d_buffer_t t_tri_header,
+    image1d_buffer_t t_vertex_buffer,
 )
 {
                                                                             // for 20 warps:
@@ -717,10 +487,10 @@ kernel void fine_raster_single_sample(
     local volatile uint*   w_triangle_frag      = &s_triangle_frag[get_local_id(1)];
     local volatile uint*   w_temp               = &s_temp[get_local_id(1)];
 
-    if (g_num_subtris > p_max_subtris || g_num_bin_segs > p_max_bin_segs || g_num_tile_segs > p_max_tile_segs)
+    if (c_num_subtris > c_max_subtris || c_num_bin_segs > c_max_bin_segs || c_num_tile_segs > c_max_tile_segs)
         return;
 
-    uint rop_lane_mask = determine_ROP_lane_mask<BlendShaderClass>(p_render_mode_flags, temp[0]);
+    uint rop_lane_mask = determine_ROP_lane_mask<BlendShaderClass>(c_render_mode_flags, temp[0]);
     temp[get_local_id(1)] = 0; // first 16 elements of temp are always zero
     cover8x8_setupLUT(s_cover8x8_lut);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -730,17 +500,17 @@ kernel void fine_raster_single_sample(
     {
         // pick a tile
         if (get_local_id(0) == 0)
-            temp[16] = atomic_add(g_fine_counter, 1);
+            temp[16] = atomic_add(c_fine_counter, 1);
         int active_idx = temp[16];
-        if (active_idx >= g_num_active_tiles)
+        if (active_idx >= c_num_active_tiles)
         {
             break;
         }
 
-        int tile_idx = g_active_tiles[active_idx];
-        int segment = g_tile_first_seg[tile_idx];
-        int tile_y = idiv_fast(tile_idx, p_width_tiles);
-        int tile_x = tile_idx - tile_y * p_width_tiles;
+        int tile_idx = c_active_tiles[active_idx];
+        int segment = c_tile_first_seg[tile_idx];
+        int tile_y = idiv_fast(tile_idx, c_width_tiles);
+        int tile_x = tile_idx - tile_y * c_width_tiles;
 
         // initialize per-tile state
         int tri_read = 0, tri_write = 0;
@@ -748,12 +518,12 @@ kernel void fine_raster_single_sample(
         w_triangle_frag[63] = 0; // "previous triangle"
 
         // deferred clear => clear tile
-        if (p_deferred_clear)
+        if (c_deferred_clear)
         {
-			w_tile_color[get_local_id(0)] = p_clear_color;
-            w_tile_depth[get_local_id(0)] = p_clear_depth;
-            w_tile_color[get_local_id(0) + 32] = p_clear_color;
-            w_tile_depth[get_local_id(0) + 32] = p_clear_depth;
+			w_tile_color[get_local_id(0)] = c_clear_color;
+            w_tile_depth[get_local_id(0)] = c_clear_depth;
+            w_tile_color[get_local_id(0) + 32] = c_clear_color;
+            w_tile_depth[get_local_id(0) + 32] = c_clear_depth;
         }
 
         // otherwise => read tile from framebuffer
@@ -761,10 +531,10 @@ kernel void fine_raster_single_sample(
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-			w_tile_color[get_local_id(0)] = read_imageui(img_color_buffer,(int2){surf_x,surf_y});
-            w_tile_depth[get_local_id(0)] = read_imageui(img_depth_buffer,(int2){surf_x,surf_y});
-            w_tile_color[get_local_id(0) + 32] = read_imageui(img_color_buffer,(int2){surf_x,surf_y+4});
-            w_tile_depth[get_local_id(0) + 32] = read_imageui(img_depth_buffer,(int2){surf_x,surf_y+4});
+			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x,surf_y});
+            w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x,surf_y});
+            w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x,surf_y+4});
+            w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x,surf_y+4});
         }
 
         uint tile_z_max;
@@ -787,16 +557,16 @@ kernel void fine_raster_single_sample(
                     int tri_idx, data_idx;
                     uint4 tri_header;
                     get_triangle(&tri_idx, &data_idx, &tri_header, &segment, 
-                        g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count, img_tri_header);
+                        c_tri_header, c_tile_seg_data, c_tile_seg_next, c_tile_seg_count, t_tri_header);
 
                     // early z cull
-                    if (tri_idx >= 0 && early_z_cull(p_render_mode_flags, tri_header, tile_z_max))
+                    if (tri_idx >= 0 && early_z_cull(c_render_mode_flags, tri_header, tile_z_max))
                         tri_idx = -1;
 
                     // determine coverage
                     ulong coverage = triangle_pixel_coverage(0, tri_header, tile_x, tile_y, s_cover8x8_lut,
-                        p_viewport_width, p_viewport_height);
-                    int pop = (tri_idx == -1) ? 0 : num_fragments(p_render_mode_flags, coverage);
+                        c_viewport_width, c_viewport_height);
+                    int pop = (tri_idx == -1) ? 0 : num_fragments(c_render_mode_flags, coverage);
 
                     // fragment count scan
                     uint frag = scan32_value(pop, temp);
@@ -840,7 +610,7 @@ kernel void fine_raster_single_sample(
                 int tri_buf_idx = (tri_read + popcount(boundary_mask & rop_lane_mask)) & 63;
                 int frag_idx = add_sub(frag_read, rop_lane_idx, w_triangle_frag[(tri_buf_idx - 1) & 63]);
                 ulong coverage = w_triangle_cov[tri_buf_idx];
-                int pixel_in_tile = find_fragment(p_render_mode_flags, coverage, frag_idx);
+                int pixel_in_tile = find_fragment(c_render_mode_flags, coverage, frag_idx);
                 int tri_idx = w_triangle_idx[tri_buf_idx];
                 int data_idx = w_tri_data_idx[tri_buf_idx];
 
@@ -851,7 +621,7 @@ kernel void fine_raster_single_sample(
                 // depth test
                 uint depth = 0;
                 bool zkill = false;
-                if ((p_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
+                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
                 {
                     uint4 zdata = read_imageui(t_tri_data, data_idx * 4);
                     depth = zdata.x * pixel_x + zdata.y * pixel_y + zdata.z;
@@ -878,7 +648,7 @@ kernel void fine_raster_single_sample(
                     if (!fragment_shader_output.discard)
                     {
 					    execute_ROP_single_sample(
-                            p_render_mode_flags,
+                            c_render_mode_flags,
                             tri_idx, pixel_x, pixel_yY, fragment_shader_output.color, depth,
                             &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile]
                         );
@@ -896,10 +666,10 @@ kernel void fine_raster_single_sample(
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            write_imageui(img_color_buffer, (int2){surf_x, surf_y}, w_tile_color[get_local_id(0)]);
-            write_imageui(img_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[get_local_id(0)]);
-            write_imageui(img_color_buffer, (int2){surf_x, surf_y + 4}, w_tile_color[get_local_id(0) + 32]);
-            write_imageui(img_depth_buffer, (int2){surf_x, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
+            write_imageui(t_color_buffer, (int2){surf_x, surf_y}, w_tile_color[get_local_id(0)]);
+            write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[get_local_id(0)]);
+            write_imageui(t_color_buffer, (int2){surf_x, surf_y + 4}, w_tile_color[get_local_id(0) + 32]);
+            write_imageui(t_depth_buffer, (int2){surf_x, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
         }
     }
 }

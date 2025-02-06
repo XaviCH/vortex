@@ -129,6 +129,7 @@ inline uint     ugetHi           (ulong a)              { return a >> 32; }
 inline int      getHi            (long a)               { return a >> 32; }
 inline ulong    ucombineLoHi     (uint lo, uint hi)     { return ((ulong)hi << 32) + (ulong)lo; }
 inline long     combineLoHi      (int lo, int hi)       { return ((long)hi << 32) + (long)lo; }
+inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = combineLoHi(alo, ahi) + combineLoHi(blo, bhi); *rlo = getLo(r); *rhi = getHi(r); }
 
 // ISA dependancy
 // #define CUDA
@@ -138,7 +139,6 @@ inline int      findLeadingOne      (uint v)                    { uint r; asm("b
 inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }
 inline uint     getLaneMaskLe       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_le;" : "=r"(r)); return r; }
 
-inline void     add_add_carry       (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = combineLoHi(alo, ahi) + combineLoHi(blo, bhi); *rlo = getLo(r); *rhi = getHi(r); }
 inline int      f32_to_s32_sat          (float a)                 { int v; asm("cvt.rni.sat.s32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
 inline uint     f32_to_u32_sat          (float a)                 { uint v; asm("cvt.rni.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
 inline uint     f32_to_u32_sat_rmi  (float a)                   { uint v; asm("cvt.rmi.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
@@ -199,6 +199,58 @@ inline uint cover8x8_selectFlips(int dx, int dy) // 10 instr
     if (abs(dx) < abs(dy))
         flips ^= (1 << CR_FLIPBIT_SWAP_XY) ^ (1 << CR_FLIPBIT_FLIP_Y);
     return flips;
+}
+
+inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile const ulong* lut)
+{
+    // First half.
+
+    uint yfrac = getLo(yinit);
+    uint shape = add_clamp_0_x(getHi(yinit) + 4, 0, 11);
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    int oct = flips & ((1 << CR_FLIPBIT_FLIP_X) | (1 << CR_FLIPBIT_SWAP_XY));
+    ulong mask = *(ulong*)((uchar*)lut + oct + (shape << 5));
+
+    // Second half.
+
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    shape = add_clamp_0_x(getHi(yinit) + 4, popcount(shape & 15), 11);
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
+    mask |= *(ulong*)((uchar*)lut + oct + (shape << 5) + (12 << 8));
+    return (flips >= (1 << CR_FLIPBIT_COMPL)) ? ~mask : mask;
+}
+
+inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, volatile const ulong* lut) // 52 instr
+{
+    float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
+    float  yinitScale = (float)(1 << (32 - CR_SUBPIXEL_LOG2));
+    float  yincScale  = 65536.0f * 65536.0f;
+
+    int  slctFlipY  = flips << (31 - CR_FLIPBIT_FLIP_Y);
+    int  slctFlipX  = flips << (31 - CR_FLIPBIT_FLIP_X);
+    int  slctSwapXY = flips << (31 - CR_FLIPBIT_SWAP_XY);
+
+    // Evaluate cross product.
+
+    int t = ox * dy - oy * dx;
+    float det = (float)slct(t, t - dy * (7 << CR_SUBPIXEL_LOG2), slctFlipX);
+    if (flips >= (1 << CR_FLIPBIT_COMPL))
+        det = -det;
+
+    // Represent Y as a function of X.
+
+    float xrcp  = 1.0f / fabs(slct(dx, dy, slctSwapXY));
+    float yzero = det * yinitScale * xrcp + yinitBias;
+    long yinit = f32_to_s64(slct(yzero, -yzero, slctFlipY));
+    uint yinc  = f32_to_u32_sat(fabs(slct(dy, dx, slctSwapXY)) * xrcp * yincScale);
+
+    // Lookup.
+
+    return cover8x8_lookup_mask(yinit, yinc, flips, lut);
 }
 
 inline uint idiv_fast(uint a, uint b)
