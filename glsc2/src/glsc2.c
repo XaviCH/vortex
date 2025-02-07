@@ -43,6 +43,8 @@ GLenum gl_error = GL_NO_ERROR;
         return;                                 \
     })    
 
+#define MIN(_A,_B) (((_A)<(_B))? (_A):(_B))
+
 /************ CONTEXT ************\
  * TODO: Create context using a context manager instead of the library 
  * 
@@ -1041,7 +1043,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
         _MODE == GL_LINE_STRIP      || \
         _MODE == GL_TRIANGLES       || \
         _MODE == GL_TRIANGLE_STRIP  || \
-        _MODE == GL_TRIANGLE_FAN    || \
+        _MODE == GL_TRIANGLE_FAN       \
     )
 
 inline uint32_t get_num_primitives(GLenum mode, uint32_t count) {
@@ -1138,7 +1140,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
 
         size_t max_num_vertices; // TODO: must be multiple of primitive, depends on memory and mode
         
-        ver_gw_size[0] = min(ver_gw_offset[0] + max_num_vertices, count);
+        ver_gw_size[0] = MIN(ver_gw_offset[0] + max_num_vertices, count);
         size_t per_ver_gw_size[0] = {ver_gw_size[0] - ver_gw_offset[0]};
 
         cl_int gl_vs_flags = 0;

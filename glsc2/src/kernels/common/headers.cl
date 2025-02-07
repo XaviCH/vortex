@@ -133,7 +133,7 @@ inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint
 
 // ISA dependancy
 // #define CUDA
-
+#define CUDA
 #ifdef CUDA
 inline int      findLeadingOne      (uint v)                    { uint r; asm("bfind.u32 %0, %1;" : "=r"(r) : "r"(v)); return r; }
 inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }
@@ -142,6 +142,7 @@ inline uint     getLaneMaskLe       (void)                      { uint r; asm("m
 inline int      f32_to_s32_sat          (float a)                 { int v; asm("cvt.rni.sat.s32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
 inline uint     f32_to_u32_sat          (float a)                 { uint v; asm("cvt.rni.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
 inline uint     f32_to_u32_sat_rmi  (float a)                   { uint v; asm("cvt.rmi.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
+inline long   f32_to_s64              (float a)                 { long v; asm("cvt.rni.s64.f32 %0, %1;" : "=l"(v) : "f"(a)); return v; }
 inline int      add_s16lo_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
 inline int      add_s16hi_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
 inline int      sub_s16lo_s16lo     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
@@ -153,6 +154,9 @@ inline uint     add_sub             (uint a, uint b, uint c)    { uint v; asm("v
 inline uint     add_add				(uint a, uint b, uint c)	{ uint v; asm("vadd.u32.u32.u32.add %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
 inline int      add_clamp_0_x       (int a, int b, int c)       { int v; asm("vadd.u32.s32.s32.sat.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
 inline uint     prmt				(uint a, uint b, uint c)    { uint v; asm("prmt.b32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
+inline uint     slct_ui             (uint a, uint b, int c)   { uint v; asm("slct.u32.s32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
+inline int      slct_i              (int a, int b, int c)   { int v; asm("slct.s32.s32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
+inline float    slct_f              (float a, float b, int c)   { float v; asm("slct.f32.s32 %0, %1, %2, %3;" : "=f"(v) : "f"(a), "f"(b), "r"(c)); return v; }
 
 inline uint     get_max_sub_group_size(void) { return 32; }
 inline uint     sub_group_ballot(int p) { uint r; asm("{ .reg .pred p; setp.ne.u32 p, %1, 0; vote.sync.ballot.b32 %0, p, 0xffffffff; }" : "=r"(r) : "r"(p)); return r; }
@@ -224,6 +228,73 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile co
     return (flips >= (1 << CR_FLIPBIT_COMPL)) ? ~mask : mask;
 }
 
+inline void cover8x8_setupLUT(volatile ulong* lut)
+{
+    for (int lutIdx = get_local_id(0) + get_local_size(0) * get_local_id(1); lutIdx < CR_COVER8X8_LUT_SIZE; lutIdx += get_local_size(0) * get_local_size(1))
+    {
+        int _half       = (lutIdx < (12 << 5)) ? 0 : 1;
+        int yint       = (lutIdx >> 5) - _half * 12 - 3;
+        uint shape      = ((lutIdx >> 2) & 7) << (31 - 2);
+        int slctSwapXY = lutIdx << (31 - 1);
+        int slctNegX   = lutIdx << (31 - 0);
+        int slctCompl  = slctSwapXY ^ slctNegX;
+
+        ulong mask = 0;
+        int xlo = _half * 4;
+        int xhi = xlo + 4;
+        for (int x = xlo; x < xhi; x++)
+        {
+            int ylo = slct_i(0, max(yint, 0), slctCompl);
+            int yhi = slct_i(min(yint, 8), 8, slctCompl);
+            for (int y = ylo; y < yhi; y++)
+            {
+                int xx = slct_i(x, y, slctSwapXY);
+                int yy = slct_i(y, x, slctSwapXY);
+                xx = slct_i(xx, 7 - xx, slctNegX);
+                mask |= (ulong)1 << (xx + yy * 8);
+            }
+            yint += shape >> 31;
+            shape <<= 1;
+        }
+        lut[lutIdx] = mask;
+    }
+}
+
+inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint flips, volatile const ulong* lut) // 54 instr
+{
+    float  halfPixel  = (float)(1 << (CR_SUBPIXEL_LOG2 - 1));
+    float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
+    float  yinitScale = (float)(1 << (32 - CR_SUBPIXEL_LOG2));
+    float  yincScale  = 65536.0f * 65536.0f;
+
+    int  slctFlipY  = flips << (31 - CR_FLIPBIT_FLIP_Y);
+    int  slctFlipX  = flips << (31 - CR_FLIPBIT_FLIP_X);
+    int  slctSwapXY = flips << (31 - CR_FLIPBIT_SWAP_XY);
+
+    // Evaluate cross product.
+
+    int t = ox * dy - oy * dx;
+    float det = (float)slct_i(t, t - dy * (7 << CR_SUBPIXEL_LOG2), slctFlipX);
+
+    float xabs = (float)abs(slct_i(dx, dy, slctSwapXY));
+    float yabs = (float)abs(slct_i(dy, dx, slctSwapXY));
+    det = det + xabs * halfPixel + yabs * halfPixel;
+
+    if (flips >= (1 << CR_FLIPBIT_COMPL))
+        det = -det;
+
+    // Represent Y as a function of X.
+
+    float xrcp  = 1.0f / xabs;
+    float yzero = det * yinitScale * xrcp + yinitBias;
+    long yinit = f32_to_s64(slct_f(yzero, -yzero, slctFlipY));
+    uint yinc  = f32_to_u32_sat(yabs * xrcp * yincScale);
+
+    // Lookup.
+
+    return cover8x8_lookup_mask(yinit, yinc, flips, lut);
+}
+
 inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, volatile const ulong* lut) // 52 instr
 {
     float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
@@ -237,16 +308,16 @@ inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, vol
     // Evaluate cross product.
 
     int t = ox * dy - oy * dx;
-    float det = (float)slct(t, t - dy * (7 << CR_SUBPIXEL_LOG2), slctFlipX);
+    float det = (float)slct_i(t, t - dy * (7 << CR_SUBPIXEL_LOG2), slctFlipX);
     if (flips >= (1 << CR_FLIPBIT_COMPL))
         det = -det;
 
     // Represent Y as a function of X.
 
-    float xrcp  = 1.0f / fabs(slct(dx, dy, slctSwapXY));
+    float xrcp  = 1.0f / (float) abs(slct_i(dx, dy, slctSwapXY));
     float yzero = det * yinitScale * xrcp + yinitBias;
-    long yinit = f32_to_s64(slct(yzero, -yzero, slctFlipY));
-    uint yinc  = f32_to_u32_sat(fabs(slct(dy, dx, slctSwapXY)) * xrcp * yincScale);
+    long yinit = f32_to_s64(slct_f(yzero, -yzero, slctFlipY));
+    uint yinc  = f32_to_u32_sat((float)abs(slct_i(dy, dx, slctSwapXY)) * xrcp * yincScale);
 
     // Lookup.
 

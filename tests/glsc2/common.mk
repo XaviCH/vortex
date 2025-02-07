@@ -27,7 +27,7 @@ OPENGLSC_PATH ?= $(realpath ..)
 
 VORTEX_RT_PATH ?= $(realpath ../../../runtime)
 VORTEX_KN_PATH ?= $(realpath ../../../kernel)
-VORTEX_GLSC_PATH ?= $(realpath ../../../openglsc)
+VORTEX_GLSC_PATH ?= $(realpath ../../../glsc2)
 VORTEX_EGL_PATH ?= $(realpath ../../../egl)
 
 FPGA_BIN_DIR ?= $(VORTEX_RT_PATH)/opae

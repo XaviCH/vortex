@@ -215,14 +215,15 @@ inline void setupTriangle(
     Triangle setup for index buffer
  */
 //template <class VertexClass>
+kernel
 //__attribute__((reqd_work_group_size(32, 2, 1)))
-kernel void triangleSetupImpl(
+void triangleSetupImpl(
     global const int* c_index_buffer, // maybe fit in constant memory
     read_only image1d_t t_vertex_buffer,
     global CRTriangleHeader* g_tri_header, 
     global CRTriangleData* g_tri_data,
     global uchar* g_tri_subtris,
-    global int* a_num_subtris, // atomic
+    global int* a_num_subtris, 
     const int c_num_tris, 
     const int c_max_subtris,
 

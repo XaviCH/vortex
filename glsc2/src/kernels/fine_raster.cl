@@ -1,10 +1,11 @@
-#include "glsc2/src/kernels/common/headers.cl"
-// #include "common/headers.cl"
+//#include "glsc2/src/kernels/common/headers.cl"
+#include "common/headers.cl"
 
 // Render flags
 #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
 #define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
 #define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
+#define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 3)
 
 // Blender data
 #define BLENDER_FUNC_ADD                     0
@@ -63,20 +64,29 @@ inline void fragment_shader(
     output->discard = false;
 }
 
+typedef struct {
+    bool needs_dst; 
+} blend_shader_input_t;
+
+typedef struct {
+    bool write_color;
+    uint color;
+} blend_shader_output_t;
+
 //------------------------------------------------------------------------
 // Shader wrappers.
 //------------------------------------------------------------------------
 
 inline float4 get_varying_at_vertex(
     int varying_idx, int vert_idx, 
-    image1d_t t_vertex_buffer
+    image1d_buffer_t t_vertex_buffer
 ) {
     return read_imagef(t_vertex_buffer, vert_idx * (sizeof(vertex_shader_output_t) / sizeof(float4)) + varying_idx + 1);
 }
 
 inline float4 interpolate_varying(
     int varying_idx, const uint3 vert_idx, const float3 bary, 
-    image1d_t t_vertex_buffer
+    image1d_buffer_t t_vertex_buffer
 ) {
     float4 v0 = get_varying_at_vertex(varying_idx, vert_idx.x, t_vertex_buffer);
     float4 v1 = get_varying_at_vertex(varying_idx, vert_idx.y, t_vertex_buffer);
@@ -84,7 +94,7 @@ inline float4 interpolate_varying(
     return v0 * bary.x + v1 * bary.y + v2 * bary.z; 
 }
 
-inline float3 compute_bary(
+inline float3 compute_barys(
     const int3* wpleq, const int3* upleq, const int3* vpleq,
     int sample_x, int sample_y)
 {
@@ -100,10 +110,9 @@ inline void run_fragment_shader(
     fragment_shader_output_t* output,
     int tri_idx, int data_idx, int pixel_x, int pixel_y, uint centroid, local volatile uint* shared,
     image1d_buffer_t t_tri_data,
-    image1d_buffer_t t_vertex_buffer,
-    )
-{
-    rasterize_output_t input;
+    image1d_buffer_t t_vertex_buffer
+) {
+    fragment_shader_input_t input;
     
     // Fetch primitive data.
     uint4 t1 = read_imageui(t_tri_data, data_idx * 4 + 1); // wx, wy, wb, ux
@@ -114,11 +123,11 @@ inline void run_fragment_shader(
     int3 wpleq = (int3){t1.x, t1.y, t1.z};
     int3 upleq = (int3){t1.w, t2.x, t2.y};
     int3 vpleq = (int3){t2.z, t2.w, t3.x};
-    int4 vert_idx = (int3){t3.y, t3.z, t3.w};
-    float3 bary = compute_bary(wpleq, upleq, vpleq, (pixel_x * 2 + 1), (pixel_y * 2 + 1));
+    uint3 vert_idx = (uint3){t3.y, t3.z, t3.w};
+    float3 bary = compute_barys(&wpleq, &upleq, &vpleq, (pixel_x * 2 + 1), (pixel_y * 2 + 1));
 
     // Transpiler dependant
-    input.color = interpolate_varying(0, &vert_idx, &bary, t_vertex_buffer);
+    input.color = interpolate_varying(0, vert_idx, bary, t_vertex_buffer).xyz;
 
     fragment_shader(&input, output);
 }
@@ -129,7 +138,7 @@ inline void run_blend_shader(
     blend_shader_input_t* input, blend_shader_output_t* output,
     int tri_idx, int pixel_x, int pixel_y, int sampleIdx, uint src, uint dst)
 {
-    output->wirte_color = true;
+    output->write_color = true;
     output->color = src;
 }
 
@@ -244,33 +253,44 @@ inline uint triangle_pixel_coverage(const int samples_log_2, const uint4 tri_hea
 
 //------------------------------------------------------------------------
 
+
+
 inline uint scan32_value(uint value, local volatile uint* temp)
 {
     temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  1], temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  2], temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  4], temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  8], temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 - 16], temp[get_local_id(0) + 16] = value;
+    value += temp[get_local_id(0) + 16 -  1]; 
+    temp[get_local_id(0) + 16] = value;
+    value += temp[get_local_id(0) + 16 -  2]; 
+    temp[get_local_id(0) + 16] = value;
+    value += temp[get_local_id(0) + 16 -  4]; 
+    temp[get_local_id(0) + 16] = value;
+    value += temp[get_local_id(0) + 16 -  8]; 
+    temp[get_local_id(0) + 16] = value;
+    value += temp[get_local_id(0) + 16 - 16]; 
+    temp[get_local_id(0) + 16] = value;
     return value;
 }
 
-inline const uint scan32_total(volatile uint* temp)
+inline uint scan32_total(local volatile uint* temp)
 {
     return temp[47];
 }
 
 //------------------------------------------------------------------------
 
-template <class BlendShaderClass>
-inline uint determine_ROP_lane_mask(uint render_mode_flags, local volatile uint* warpTemp) // mask of lanes that should process an earlier fragment than this lane
+// template <class BlendShaderClass>
+inline uint determine_ROP_lane_mask(uint c_render_mode_flags, local volatile uint* warpTemp) // mask of lanes that should process an earlier fragment than this lane
 {
     bool reverse_lanes = true;
-    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) == 0)
+    if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) == 0)
     {
-        BlendShaderClass bs;
-        if (!bs.needsDst())
+        // BlendShaderClass bs;
+        if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) == 0) {
             reverse_lanes = false;
+        }
+        // TODO: update depending on rendermode
+        // if (!bs.needsDst())
+        //     reverse_lanes = false;
     }
 
     uint mask = (reverse_lanes) ? (1u << get_local_id(0)) : ~0u;
@@ -373,14 +393,7 @@ inline int find_fragment(uint render_mode_flags, ulong coverage, int frag_idx)
 // Single-sample implementation.
 //------------------------------------------------------------------------
 
-typedef struct {
-    bool needs_dst = true; 
-} blend_shader_input_t;
 
-typedef struct {
-    bool write_color;
-    uint color;
-} blend_shader_output_t;
 
 inline void execute_ROP_single_sample(
     uint render_mode_flags,
@@ -436,7 +449,7 @@ kernel void fine_raster_single_sample(
     global const int* c_num_bin_segs,
     global const int* c_num_tile_segs,
     global const int* c_num_active_tiles,
-    global const int* c_fine_counter,
+    global int* a_fine_counter,
     
     // common params
     private const int    c_viewport_width,
@@ -461,11 +474,11 @@ kernel void fine_raster_single_sample(
     private  uint   c_render_mode_flags,
 
     // __IMAGE_SUPPORT__
-    image2d_t t_color_buffer,
-    image2d_t t_depth_buffer,
-    image1d_buffer_t t_tri_data,
-    image1d_buffer_t t_tri_header,
-    image1d_buffer_t t_vertex_buffer,
+    read_write image2d_t t_color_buffer,
+    read_write image2d_t t_depth_buffer,
+    read_only image1d_buffer_t t_tri_data,
+    read_only image1d_buffer_t t_tri_header,
+    read_only image1d_buffer_t t_vertex_buffer
 )
 {
                                                                             // for 20 warps:
@@ -479,19 +492,19 @@ kernel void fine_raster_single_sample(
     local volatile uint     s_temp              [CR_FINE_MAX_WARPS][80];          // 6.25KB
                                                                             // = 47.25KB total
     // Warp Space
-    local volatile uint*   w_tile_color         = &s_tile_color[get_local_id(1)];
-    local volatile uint*   w_tile_depth         = &s_tile_depth[get_local_id(1)];
-    local volatile uint*   w_triangle_idx       = &s_triangle_idx[get_local_id(1)];
-    local volatile uint*   w_tri_data_idx       = &s_tri_data_idx[get_local_id(1)];
-    local volatile ulong*  w_triangle_cov       = &s_triangle_cov[get_local_id(1)];
-    local volatile uint*   w_triangle_frag      = &s_triangle_frag[get_local_id(1)];
-    local volatile uint*   w_temp               = &s_temp[get_local_id(1)];
+    local volatile uint*   w_tile_color         = (local volatile uint*) &s_tile_color[get_local_id(1)];
+    local volatile uint*   w_tile_depth         = (local volatile uint*) &s_tile_depth[get_local_id(1)];
+    local volatile uint*   w_triangle_idx       = (local volatile uint*) &s_triangle_idx[get_local_id(1)];
+    local volatile uint*   w_tri_data_idx       = (local volatile uint*) &s_tri_data_idx[get_local_id(1)];
+    local volatile ulong*  w_triangle_cov       = (local volatile ulong*) &s_triangle_cov[get_local_id(1)];
+    local volatile uint*   w_triangle_frag      = (local volatile uint*) &s_triangle_frag[get_local_id(1)];
+    local volatile uint*   w_temp               = (local volatile uint*) &s_temp[get_local_id(1)];
 
-    if (c_num_subtris > c_max_subtris || c_num_bin_segs > c_max_bin_segs || c_num_tile_segs > c_max_tile_segs)
+    if (*c_num_subtris > c_max_subtris || *c_num_bin_segs > c_max_bin_segs || *c_num_tile_segs > c_max_tile_segs)
         return;
 
-    uint rop_lane_mask = determine_ROP_lane_mask<BlendShaderClass>(c_render_mode_flags, temp[0]);
-    temp[get_local_id(1)] = 0; // first 16 elements of temp are always zero
+    uint rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags, &w_temp[0]);
+    w_temp[get_local_id(1)] = 0; // first 16 elements of temp are always zero
     cover8x8_setupLUT(s_cover8x8_lut);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -500,9 +513,9 @@ kernel void fine_raster_single_sample(
     {
         // pick a tile
         if (get_local_id(0) == 0)
-            temp[16] = atomic_add(c_fine_counter, 1);
-        int active_idx = temp[16];
-        if (active_idx >= c_num_active_tiles)
+            w_temp[16] = atomic_add(a_fine_counter, 1);
+        int active_idx = w_temp[16];
+        if (active_idx >= *c_num_active_tiles)
         {
             break;
         }
@@ -531,10 +544,11 @@ kernel void fine_raster_single_sample(
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x,surf_y});
-            w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x,surf_y});
-            w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x,surf_y+4});
-            w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x,surf_y+4});
+            // TODO check this, maybe use direct access ??
+			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x,surf_y/4})[surf_y%4];
+            w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x,surf_y/2})[surf_y%2];
+            w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x,(surf_y+4)/4})[surf_y%4];
+            w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x,(surf_y+4)/2})[surf_y%2];
         }
 
         uint tile_z_max;
@@ -548,7 +562,7 @@ kernel void fine_raster_single_sample(
             if (frag_write - frag_read < 32 && segment >= 0)
             {
                 // update tile z
-                update_tile_z_max(render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, temp);
+                update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, w_temp);
 
                 // read triangles
                 do
@@ -569,9 +583,9 @@ kernel void fine_raster_single_sample(
                     int pop = (tri_idx == -1) ? 0 : num_fragments(c_render_mode_flags, coverage);
 
                     // fragment count scan
-                    uint frag = scan32_value(pop, temp);
+                    uint frag = scan32_value(pop, w_temp);
                     frag += frag_write; // frag now holds cumulative fragment count
-                    frag_write += scan32_total(temp);
+                    frag_write += scan32_total(w_temp);
 
                     // queue non-empty triangles
                     uint good_mask = sub_group_ballot(pop != 0);
@@ -593,16 +607,16 @@ kernel void fine_raster_single_sample(
                 break;
 
             // tag triangle boundaries
-            temp[get_local_id(0) + 16] = 0;
+            w_temp[get_local_id(0) + 16] = 0;
             if (tri_read + get_local_id(0) < tri_write)
             {
                 int idx = w_triangle_frag[(tri_read + get_local_id(0)) & 63] - frag_read;
                 if (idx <= 32)
-                    temp[idx + 16 - 1] = 1;
+                    w_temp[idx + 16 - 1] = 1;
             }
 
             int rop_lane_idx = popcount(rop_lane_mask);
-            uint boundary_mask = sub_group_ballot(temp[rop_lane_idx + 16]);
+            uint boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
 
             // distribute fragments
             if (rop_lane_idx < frag_write - frag_read)
@@ -637,11 +651,11 @@ kernel void fine_raster_single_sample(
                     // run fragment shader
                     fragment_shader_output_t fragment_shader_output;
                     run_fragment_shader(
-                        0, render_mode_flags,
                         &fragment_shader_output,
-                        tri_idx, data_idx, pixel_x, pixel_y, 0x11, &temp[16]
+                        tri_idx, data_idx, pixel_x, pixel_y, 0x11, &w_temp[16],
                         t_tri_data,
                         t_vertex_buffer
+                        // 0, c_render_mode_flags
                         );
 
                     // run ROP
@@ -649,7 +663,7 @@ kernel void fine_raster_single_sample(
                     {
 					    execute_ROP_single_sample(
                             c_render_mode_flags,
-                            tri_idx, pixel_x, pixel_yY, fragment_shader_output.color, depth,
+                            tri_idx, pixel_x, pixel_y, fragment_shader_output.color, depth,
                             &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile]
                         );
                     }
