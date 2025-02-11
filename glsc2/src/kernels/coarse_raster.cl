@@ -97,25 +97,25 @@ inline int global_tile_idx(int tile_in_bin, int c_width_tiles)
 //----------------------------------------------------------------------------------------
 
 kernel void coarse_raster(
-    // global atomics
-    global const int* c_bin_first_seg,    
-    global const int* c_bin_seg_data,
-    global const int* c_bin_seg_next,
-    global const int* c_bin_seg_count,
-    global const int* c_num_bin_segs,       // = 0
-    global const int* c_num_subtris,        // = numTris
-    global const CRTriangleHeader*  c_tri_header,
+    global int* a_coarse_counter,
+    global int* a_num_active_tiles,
+    global const int* a_num_bin_segs,
+    global int* a_num_tile_segs,
+    global const int* a_num_subtris,
 
-    global int* a_coarse_counter,     // = 0
-    global int* a_num_active_tiles,   // = 0
-    global int* a_num_tile_segs,      // = 0
-    
-    // common params
-    global int* g_active_tiles,        // CR_MAXTILES_SQR * (S32 tileIdx)
-    global int* g_tile_first_seg,       // CR_MAXTILES_SQR * (S32 seg_idx), -1 = none
-    global int* g_tile_seg_data,        // c_max_tile_segs * CR_TILE_SEG_SIZE * (S32 tri_idx)
+    global int* g_active_tiles,
+    global const int* g_bin_first_seg,    
+    global const int* g_bin_seg_count,
+    global const int* g_bin_seg_data,
+    global const int* g_bin_seg_next,
+    global int* g_tile_first_seg,
     global int* g_tile_seg_count,
-    global int* g_tile_seg_next,        // c_max_tile_segs * (S32 seg_idx), -1 = none
+    global int* g_tile_seg_data,
+    global int* g_tile_seg_next,
+    global const CRTriangleHeader*  g_tri_header,
+
+    // #ifdef __IMAGE_SUPPORT__
+    read_only image1d_buffer_t t_tri_header,
 
     const int c_deferred_clear,
     const int c_height_tiles,
@@ -126,10 +126,7 @@ kernel void coarse_raster(
     const int c_viewport_height,
     const int c_viewport_width,
     const int c_width_bins,
-    const int c_width_tiles,
-
-    // Image Support
-    read_only image1d_buffer_t t_tri_header
+    const int c_width_tiles
 ) {
 
     // Common.
@@ -162,7 +159,7 @@ kernel void coarse_raster(
     int thread_local_id  = get_local_id(0) + get_local_id(1) * 32;
     int emit_shift   = CR_BIN_LOG2 * 2 + 5; // We scan ((num_emits << emit_shift) | num_allocs) over tiles.
 
-    if (*c_num_subtris > c_max_subtris || *c_num_bin_segs > c_max_bin_segs)
+    if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs)
         return;
 
     // Initialize sharedmem arrays.
@@ -215,9 +212,9 @@ kernel void coarse_raster(
 
         if (thread_local_id < CR_BIN_STREAMS_SIZE)
         {
-            int seg_idx = c_bin_first_seg[(bin_idx << CR_BIN_STREAMS_LOG2) + thread_local_id];
+            int seg_idx = g_bin_first_seg[(bin_idx << CR_BIN_STREAMS_LOG2) + thread_local_id];
             s_bin_stream_curr_seg[thread_local_id] = seg_idx;
-            s_bin_stream_first_tri[thread_local_id] = (seg_idx == -1) ? ~0u : c_bin_seg_data[seg_idx << CR_BIN_SEG_LOG2];
+            s_bin_stream_first_tri[thread_local_id] = (seg_idx == -1) ? ~0u : g_bin_seg_data[seg_idx << CR_BIN_SEG_LOG2];
         }
 
         for (int tile_in_bin = CR_COARSE_WARPS * 32 - 1 - thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += CR_COARSE_WARPS * 32)
@@ -283,12 +280,12 @@ kernel void coarse_raster(
                         s_bin_stream_selected_ofs = seg_idx << CR_BIN_SEG_LOG2;
                         if (seg_idx != -1)
                         {
-                            int seg_size = c_bin_seg_count[seg_idx];
-                            int seg_next = c_bin_seg_next[seg_idx];
+                            int seg_size = g_bin_seg_count[seg_idx];
+                            int seg_next = g_bin_seg_next[seg_idx];
                             s_bin_stream_selected_size = seg_size;
                             s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
                             s_bin_stream_curr_seg[thread_local_id] = seg_next;
-                            s_bin_stream_first_tri[thread_local_id] = (seg_next == -1) ? ~0u : c_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
+                            s_bin_stream_first_tri[thread_local_id] = (seg_next == -1) ? ~0u : g_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
                         }
                     }
                 }
@@ -308,7 +305,7 @@ kernel void coarse_raster(
 
                 for (int idx_in_seg = CR_COARSE_WARPS * 32 - 1 - thread_local_id; idx_in_seg < seg_size; idx_in_seg += CR_COARSE_WARPS * 32)
                 {
-                    int tri_idx = c_bin_seg_data[seg_ofs + idx_in_seg];
+                    int tri_idx = g_bin_seg_data[seg_ofs + idx_in_seg];
                     s_tri_queue[(tri_queue_write_pos - seg_size + idx_in_seg) & (CR_COARSE_QUEUE_SIZE - 1)] = tri_idx;
                 }
 
@@ -337,7 +334,7 @@ kernel void coarse_raster(
                 int data_idx = tri_idx >> 3;
                 int subtri_idx = tri_idx & 7;
                 if (subtri_idx != 7)
-                    data_idx = c_tri_header[data_idx].misc + subtri_idx;
+                    data_idx = g_tri_header[data_idx].misc + subtri_idx;
                 tri_data = read_imageui(t_tri_header, data_idx);
             }
 

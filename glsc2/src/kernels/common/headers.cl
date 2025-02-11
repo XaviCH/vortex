@@ -132,8 +132,7 @@ inline long     combineLoHi      (int lo, int hi)       { return ((long)hi << 32
 inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = combineLoHi(alo, ahi) + combineLoHi(blo, bhi); *rlo = getLo(r); *rhi = getHi(r); }
 
 // ISA dependancy
-// #define CUDA
-#define CUDA
+//#define CUDA
 #ifdef CUDA
 inline int      findLeadingOne      (uint v)                    { uint r; asm("bfind.u32 %0, %1;" : "=r"(r) : "r"(v)); return r; }
 inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }

@@ -10,7 +10,7 @@
 #include <tests/glsc2/kernels/common.hpp>
 
 // TEST DEFAULT PARAMETERS
-char KERNEL_NAME[] = "triangleSetupImpl";
+char KERNEL_NAME[] = "triangle_setup";
 size_t BINARY_SIZE = sizeof(triangle_setup_ocl);
 const unsigned char* BINARY = triangle_setup_ocl;
 int INDEX_BUFFER[] = {0,1,2,2,1,0};
@@ -96,24 +96,24 @@ int main(int argc, char** argv) {
     cl_mem a_num_subtris = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, &_err)); // atomic
     cl_int c_viewport_width = WIDTH, c_viewport_height = HEIGHT;
 
-    cl_mem debug_return = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err)); // atomic
-            
-    CL_CHECK(clSetKernelArg(kernel, 0, sizeof(c_index_buffer),    &c_index_buffer));
-    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(t_vertex_buffer),   &t_vertex_buffer));
-    CL_CHECK(clSetKernelArg(kernel, 2, sizeof(g_tri_header),      &g_tri_header));
-    CL_CHECK(clSetKernelArg(kernel, 3, sizeof(g_tri_data),        &g_tri_data));
-    CL_CHECK(clSetKernelArg(kernel, 4, sizeof(g_tri_subtris),     &g_tri_subtris));
-    CL_CHECK(clSetKernelArg(kernel, 5, sizeof(a_num_subtris),     &a_num_subtris));
-    CL_CHECK(clSetKernelArg(kernel, 6, sizeof(c_num_tris),        &c_num_tris));
-    CL_CHECK(clSetKernelArg(kernel, 7, sizeof(c_max_subtris),     &c_max_subtris));
+    // cl_mem debug_return = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err)); // atomic
 
-    CL_CHECK(clSetKernelArg(kernel, 8, sizeof(vertex_size),       &vertex_size));
-    CL_CHECK(clSetKernelArg(kernel, 9, sizeof(c_viewport_width),       &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, 10, sizeof(c_viewport_height),       &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, 11, sizeof(samples_log2),       &samples_log2));
-    CL_CHECK(clSetKernelArg(kernel, 12, sizeof(render_mode_flags),       &render_mode_flags));
+    uint32_t counter = 0;
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_subtris),     &a_num_subtris));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_index_buffer),    &c_index_buffer));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),      &g_tri_header));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_data),        &g_tri_data));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_subtris),     &g_tri_subtris));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),   &t_vertex_buffer));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_num_tris),        &c_num_tris));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),     &c_max_subtris));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(render_mode_flags),       &render_mode_flags));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(samples_log2),       &samples_log2));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(vertex_size),       &vertex_size));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),       &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),       &c_viewport_width));
     
-    CL_CHECK(clSetKernelArg(kernel, 13, sizeof(debug_return),       &debug_return));
+    // CL_CHECK(clSetKernelArg(kernel, 13, sizeof(debug_return),       &debug_return));
 
     cl_command_queue command_queue = CL_CHECK2(clCreateCommandQueue(context, device_id, NULL, &_err));
     
@@ -144,8 +144,8 @@ int main(int argc, char** argv) {
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_tri_subtris, CL_TRUE, 0, sizeof(cl_uchar[c_max_subtris]), kernel_result.tri_subtris, 0, NULL, NULL));
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_tri_header, CL_TRUE, 0, sizeof(CRTriangleHeader[c_max_subtris]), kernel_result.tri_header, 0, NULL, NULL));
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_tri_data, CL_TRUE, 0, sizeof(CRTriangleData[c_max_subtris]), kernel_result.tri_data, 0, NULL, NULL));
-    CL_CHECK(clEnqueueReadBuffer(command_queue, debug_return, CL_TRUE, 0, sizeof(int[3]), result_debug_return, 0, NULL, NULL));
-    printf("DEBUG: return thread point: (%d,%d,%d)\n",result_debug_return[0], result_debug_return[1], result_debug_return[2]);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_return, CL_TRUE, 0, sizeof(int[3]), result_debug_return, 0, NULL, NULL));
+    // printf("DEBUG: return thread point: (%d,%d,%d)\n",result_debug_return[0], result_debug_return[1], result_debug_return[2]);
     
     emulateTriangleSetup(); 
     

@@ -170,32 +170,32 @@ inline void update_tile_z_max(uint render_mode_flags, uint* tile_z_max, bool* ti
 
 inline void get_triangle(
     int* tri_idx, int* data_idx, uint4* tri_header, int* segment, 
-    global const CRTriangleHeader* c_tri_header,
-    global const int* c_tile_seg_data,
-    global const int* c_tile_seg_next,
-    global const int* c_tile_seg_count,
+    global const CRTriangleHeader* g_tri_header,
+    global const int* g_tile_seg_data,
+    global const int* g_tile_seg_next,
+    global const int* g_tile_seg_count,
     image1d_buffer_t t_tri_header
 )
 {
 
-    if (get_local_id(0) >= c_tile_seg_count[*segment])
+    if (get_local_id(0) >= g_tile_seg_count[*segment])
     {
         *tri_idx = -1;
         *data_idx = -1;
     }
     else
     {
-        int subtri_idx = c_tile_seg_data[*segment * CR_TILE_SEG_SIZE + get_local_id(0)];
+        int subtri_idx = g_tile_seg_data[*segment * CR_TILE_SEG_SIZE + get_local_id(0)];
         *tri_idx = subtri_idx >> 3;
         *data_idx = *tri_idx;
         subtri_idx &= 7;
         if (subtri_idx != 7)
-            *data_idx = c_tri_header[*tri_idx].misc + subtri_idx;
+            *data_idx = g_tri_header[*tri_idx].misc + subtri_idx;
         *tri_header = read_imageui(t_tri_header, *data_idx);
     }
 
     // advance to next segment
-    *segment = c_tile_seg_next[*segment];
+    *segment = g_tile_seg_next[*segment];
 }
 
 //------------------------------------------------------------------------
@@ -444,41 +444,36 @@ inline void execute_ROP_single_sample(
 
 //template <class VertexClass, class FragmentShaderClass, class BlendShaderClass, U32 RenderModeFlags>
 kernel void fine_raster_single_sample(
-    // global atomics
-    global const int* c_num_subtris,
-    global const int* c_num_bin_segs,
-    global const int* c_num_tile_segs,
-    global const int* c_num_active_tiles,
     global int* a_fine_counter,
+    global const int* a_num_active_tiles,
+    global const int* a_num_bin_segs,
+    global const int* a_num_subtris,
+    global const int* a_num_tile_segs,
     
-    // common params
-    private const int    c_viewport_width,
-    private const int    c_viewport_height,
+    global const int* g_active_tiles,
+    global const int* g_tile_first_seg,
+    global const int* g_tile_seg_count,
+    global const int* g_tile_seg_data,
+    global const int* g_tile_seg_next,
+    global const CRTriangleHeader* g_tri_header,
 
-    private  int    c_width_tiles,
-    private  int    c_deferred_clear,
-    private  uint   c_clear_color,
-    private  uint   c_clear_depth,
-    // Setup output / bin input
-    private  int    c_max_subtris,
-    global const CRTriangleHeader*  c_tri_header,
-    // Bin output / coarse input.
-    private  int    c_max_bin_segs,
-    // Coarse output / fine input.
-    private  int    c_max_tile_segs,
-    global   int*   c_active_tiles,        // CR_MAXTILES_SQR * (S32 tile_idx)
-    global   int*   c_tile_first_seg,       // CR_MAXTILES_SQR * (S32 seg_idx), -1 = none
-    global   int*   c_tile_seg_data,        // c_max_tile_segs * CR_TILE_SEG_SIZE * (S32 tri_idx)
-    global   int*   c_tile_seg_next,        // c_max_tile_segs * (S32 seg_idx), -1 = none
-    global   int*   c_tile_seg_count,
-    private  uint   c_render_mode_flags,
-
-    // __IMAGE_SUPPORT__
+    // #ifdef __IMAGE_SUPPORT__
     read_write image2d_t t_color_buffer,
     read_write image2d_t t_depth_buffer,
     read_only image1d_buffer_t t_tri_data,
     read_only image1d_buffer_t t_tri_header,
-    read_only image1d_buffer_t t_vertex_buffer
+    read_only image1d_buffer_t t_vertex_buffer,
+
+    const uint   c_clear_color,
+    const uint   c_clear_depth,
+    const int    c_deferred_clear,
+    const int    c_max_bin_segs,
+    const int    c_max_subtris,
+    const int    c_max_tile_segs,
+    const uint   c_render_mode_flags,
+    const int    c_viewport_height,
+    const int    c_viewport_width,
+    const int    c_width_tiles
 )
 {
                                                                             // for 20 warps:
@@ -500,7 +495,7 @@ kernel void fine_raster_single_sample(
     local volatile uint*   w_triangle_frag      = (local volatile uint*) &s_triangle_frag[get_local_id(1)];
     local volatile uint*   w_temp               = (local volatile uint*) &s_temp[get_local_id(1)];
 
-    if (*c_num_subtris > c_max_subtris || *c_num_bin_segs > c_max_bin_segs || *c_num_tile_segs > c_max_tile_segs)
+    if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs || *a_num_tile_segs > c_max_tile_segs)
         return;
 
     uint rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags, &w_temp[0]);
@@ -515,13 +510,13 @@ kernel void fine_raster_single_sample(
         if (get_local_id(0) == 0)
             w_temp[16] = atomic_add(a_fine_counter, 1);
         int active_idx = w_temp[16];
-        if (active_idx >= *c_num_active_tiles)
+        if (active_idx >= *a_num_active_tiles)
         {
             break;
         }
 
-        int tile_idx = c_active_tiles[active_idx];
-        int segment = c_tile_first_seg[tile_idx];
+        int tile_idx = g_active_tiles[active_idx];
+        int segment = g_tile_first_seg[tile_idx];
         int tile_y = idiv_fast(tile_idx, c_width_tiles);
         int tile_x = tile_idx - tile_y * c_width_tiles;
 
@@ -571,7 +566,7 @@ kernel void fine_raster_single_sample(
                     int tri_idx, data_idx;
                     uint4 tri_header;
                     get_triangle(&tri_idx, &data_idx, &tri_header, &segment, 
-                        c_tri_header, c_tile_seg_data, c_tile_seg_next, c_tile_seg_count, t_tri_header);
+                        g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count, t_tri_header);
 
                     // early z cull
                     if (tri_idx >= 0 && early_z_cull(c_render_mode_flags, tri_header, tile_z_max))

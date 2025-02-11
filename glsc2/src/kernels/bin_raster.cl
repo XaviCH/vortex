@@ -2,32 +2,31 @@
 
 // Bin rasterizer 
 
-// __IMAGE_SUPPORT__
 kernel void bin_raster(
+    global int* a_bin_counter,
+    global int* a_num_bin_segs,
+    global const int* a_num_subtris,
+
+    global int* g_bin_first_seg,
+    global int* g_bin_seg_count,
+    global int* g_bin_seg_data,
+    global int* g_bin_seg_next,
+    global int* g_bin_total,
+    global const CRTriangleHeader* g_tri_header,
+    global const uchar* g_tri_subtris,
+    
+    // #ifdef __IMAGE_SUPPORT__
     read_only image1d_buffer_t t_tri_header,
 
-    global const int*               c_num_subtris,
-    global const CRTriangleHeader*  c_tri_header,
-    global const uchar*             c_tri_subtris, // maybe constant ??
-    
-    global int*   a_bin_counter,
-    global int*   a_num_bin_segs,
-    
-    global int*   g_bin_first_seg,
-    global int*   g_bin_seg_data,
-    global int*   g_bin_seg_next,
-    global int*   g_bin_seg_count,
-    global int*   g_bin_total,
-
-    private int   c_bin_batch_sz,
-    private int   c_height_bins,
-    private int   c_max_bin_segs,
-    private int   c_max_subtris,
-    private int   c_num_bins,
-    private int   c_num_tris,
-    private int   c_viewport_height,
-    private int   c_viewport_width,
-    private int   c_width_bins
+    private const int c_bin_batch_sz,
+    private const int c_height_bins,
+    private const int c_max_bin_segs,
+    private const int c_max_subtris,
+    private const int c_num_bins,
+    private const int c_num_tris,
+    private const int c_viewport_height,
+    private const int c_viewport_width,
+    private const int c_width_bins
 ) {
 
     // Local space
@@ -43,7 +42,7 @@ kernel void bin_raster(
     local volatile uint s_over_total;
     local volatile uint s_alloc_base;
     
-    if (*c_num_subtris > c_max_subtris) 
+    if (*a_num_subtris > c_max_subtris) 
         return;
 
     // Private space
@@ -89,7 +88,7 @@ kernel void bin_raster(
                 int tri_idx = batch_pos + local_id;
                 int num = 0;
                 if (tri_idx < batch_end) 
-                    num = c_tri_subtris[tri_idx];
+                    num = g_tri_subtris[tri_idx];
 
                 // TODO: cumulative sum of subtriangles within each warp
                 uint my_idx = popcount(sub_group_ballot(num & 1) & getLaneMaskLt());
@@ -174,7 +173,7 @@ kernel void bin_raster(
                 int data_idx = tri_idx >> 3;
                 int subtri_idx = tri_idx & 7;
                 if (subtri_idx != 7)
-                    data_idx = c_tri_header[data_idx].misc + subtri_idx;
+                    data_idx = g_tri_header[data_idx].misc + subtri_idx;
 
                 // read triangle
 
