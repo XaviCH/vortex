@@ -1,4 +1,22 @@
+//#include "glsc2/src/kernels/common/headers.cl"
 #include "common/headers.cl"
+
+// Debug definitions
+#ifdef CONF_DEBUG_KERNEL
+typedef struct {
+    int over_total;
+} global_bin_raster_debug_t;
+
+typedef struct {
+    int over_total;
+} local_bin_raster_debug_t;
+
+typedef struct {
+    uint my_idx;
+    uint l_broadcast;
+    uint4 tri_data;
+} warp_bin_raster_debug_t;
+#endif
 
 // Bin rasterizer 
 
@@ -27,6 +45,12 @@ kernel void bin_raster(
     private const int c_viewport_height,
     private const int c_viewport_width,
     private const int c_width_bins
+
+    #ifdef CONF_DEBUG_KERNEL
+    , global warp_bin_raster_debug_t* g_w_debug // sz == 32
+    //, global local_bin_raster_debug_t* g_l_debug // sz == CR_BIN_WARPS
+    //, global global_bin_raster_debug_t* g_g_debug // 
+    #endif
 ) {
 
     // Local space
@@ -62,8 +86,7 @@ kernel void bin_raster(
     }
 
     // repeat until done
-    while (true) {
-
+    for (;;) {
         // get batch
         if (local_id == 0)
             s_batch_pos = atomic_add(a_bin_counter,c_bin_batch_sz);
@@ -87,22 +110,33 @@ kernel void bin_raster(
                 // Get subtriangle count
                 int tri_idx = batch_pos + local_id;
                 int num = 0;
-                if (tri_idx < batch_end) 
+                if (tri_idx < batch_end)
                     num = g_tri_subtris[tri_idx];
 
-                // TODO: cumulative sum of subtriangles within each warp
+                // cumulative sum of subtriangles within each warp
                 uint my_idx = popcount(sub_group_ballot(num & 1) & getLaneMaskLt());
                 if (sub_group_any(num > 1))
                 {
                     my_idx += popcount(sub_group_ballot(num & 2) & getLaneMaskLt()) * 2;
                     my_idx += popcount(sub_group_ballot(num & 4) & getLaneMaskLt()) * 4;
                 }
-                s_broadcast[get_local_id(1) + 16] = my_idx + num;
+                if (get_local_id(0) == get_local_size(0)-1) // Addded to force last warp thread to write
+                    s_broadcast[get_local_id(1) + 16] = my_idx + num;
                 barrier(CLK_LOCAL_MEM_FENCE);
 
+                DEBUG(
+                    if (local_id < 16) {
+                        g_w_debug[get_local_id(0)].my_idx = my_idx;
+                        g_w_debug[get_local_id(0)].l_broadcast = s_broadcast[get_local_id(1) + 16];
+                    }
+                
+                )
+
+                // TODO: This part relies on sync warp instructions and local memory consistency,
+                // this could not be waranty, maybe it would require fences.
                 // cumulative sum of per-warp subtriangle counts
                 if (local_id < CR_BIN_WARPS) {
-                    volatile uint* ptr = &s_broadcast[local_id + 16];
+                    local volatile uint* ptr = &s_broadcast[local_id + 16];
                     uint val = *ptr;
                     #if (CR_BIN_WARPS > 1)
                         val += ptr[-1]; *ptr = val;
@@ -122,9 +156,17 @@ kernel void bin_raster(
 
                     // initially assume that we consume everything
                     s_batch_pos = batch_pos + CR_BIN_WARPS * 32;
-                    s_buf_count = buf_count + val;
+                    if (local_id == CR_BIN_WARPS-1) // Addded to force last warp thread to write
+                        s_buf_count = buf_count + val;
                 }
                 barrier(CLK_LOCAL_MEM_FENCE);
+
+                DEBUG(
+                    if (local_id < 16) {
+                        g_w_debug[get_local_id(0)].my_idx = s_batch_pos;
+                        g_w_debug[get_local_id(0)].l_broadcast = s_buf_count;
+                    }
+                )
 
                 // skip if no subtriangles
                 if (num) {
@@ -134,7 +176,7 @@ kernel void bin_raster(
                     if (pos + num <= FW_ARRAY_SIZE(s_tri_buf))
                     {
                         pos += buf_index; // adjust for current start position
-                        pos &= FW_ARRAY_SIZE(s_tri_buf)-1;
+                        pos &= FW_ARRAY_SIZE(s_tri_buf)-1; // does the ring operation
                         if (num == 1)
                             s_tri_buf[pos] = tri_idx * 8 + 7; // single triangle
                         else {
@@ -180,6 +222,14 @@ kernel void bin_raster(
                 tri_data = read_imageui(t_tri_header, data_idx);
             }
 
+            DEBUG(
+                if (local_id < 16) {
+                    g_w_debug[get_local_id(0)].tri_data = tri_data;
+                }
+                
+            )
+            
+            // setup bounding box and edge functions, and rasterize
             int lox, loy, hix, hiy;
             if (local_id < buf_count) {
                 int v0x = add_s16lo_s16lo(tri_data.x, c_viewport_width  * (CR_SUBPIXEL_SIZE >> 1));
@@ -193,10 +243,10 @@ kernel void bin_raster(
                 loy = add_clamp_0_x((v0y + min_min(d01y, 0, d02y)) >> bin_log, 0, c_height_bins - 1);
                 hix = add_clamp_0_x((v0x + max_max(d01x, 0, d02x)) >> bin_log, 0, c_width_bins  - 1);
                 hiy = add_clamp_0_x((v0y + max_max(d01y, 0, d02y)) >> bin_log, 0, c_height_bins - 1);
-
+                uint activemask = sub_group_activemask();
                 uint bit = 1 << get_local_id(0);
                 bool multi = (hix != lox || hiy != loy);
-                if (!sub_group_any(multi))
+                if (!sub_group_masked_any(multi, activemask))
                 {
                     int bin_idx = lox + c_width_bins * loy;
                     bool won;
@@ -205,13 +255,14 @@ kernel void bin_raster(
                         s_broadcast[get_local_id(1) + 16] = bin_idx;
                         int winner = s_broadcast[get_local_id(1) + 16];
                         won = (bin_idx == winner);
-                        uint mask = sub_group_ballot(won);
+                        uint inner_activemask = sub_group_activemask();
+                        uint mask = sub_group_masked_ballot(won, inner_activemask);
                         s_out_mask[get_local_id(1)][winner] = mask;
                     } while (!won);
                 } else
                 {
                     bool _complex = (hix > lox+1 || hiy > loy+1);
-                    if (!sub_group_any(_complex))
+                    if (!sub_group_masked_any(_complex, activemask))
                     {
                         int bin_idx = lox + c_width_bins * loy;
                         atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx], bit);
@@ -278,9 +329,9 @@ kernel void bin_raster(
                 int ofs = s_out_ofs[local_id];
                 if (((ofs - 1) >> CR_BIN_SEG_LOG2) != (((ofs - 1) + total) >> CR_BIN_SEG_LOG2))
                 {
-                    uint mask = sub_group_ballot(true);
+                    uint mask = sub_group_activemask();
                     over_index = popcount(mask & getLaneMaskLt());
-                    if (over_index == 0)
+                    if (over_index == 0) // WARNING TODO: Ordering of assing may affect the result  
                         s_broadcast[get_local_id(1) + 16] = atomic_add((local uint*)&s_over_total, popcount(mask));
                     over_index += s_broadcast[get_local_id(1) + 16];
                     s_over_index[local_id] = over_index;
@@ -307,7 +358,7 @@ kernel void bin_raster(
                 if (over_index != -1)
                 {
                     // calculate new segment index
-                    int seg_idx = alloc_base + over_index; // TODO: check this
+                    int seg_idx = alloc_base + over_index;
 
                     // add to linked list
                     if (s_out_ofs[local_id] < 0)
