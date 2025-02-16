@@ -73,6 +73,14 @@
 
 //-----------------------------------------------------------------------------
 
+#define CONF_DEBUG_KERNEL
+#ifdef CONF_DEBUG_KERNEL
+#define DEBUG(...) __VA_ARGS__
+#else
+#define DEBUG(...)
+#endif
+
+// ----
 typedef struct
 {
     short v0x;    // Subpixels relative to viewport center. Valid if triSubtris = 1.
@@ -158,9 +166,13 @@ inline int      slct_i              (int a, int b, int c)   { int v; asm("slct.s
 inline float    slct_f              (float a, float b, int c)   { float v; asm("slct.f32.s32 %0, %1, %2, %3;" : "=f"(v) : "f"(a), "f"(b), "r"(c)); return v; }
 
 inline uint     get_max_sub_group_size(void) { return 32; }
-inline uint     sub_group_ballot(int p) { uint r; asm("{ .reg .pred p; setp.ne.u32 p, %1, 0; vote.sync.ballot.b32 %0, p, 0xffffffff; }" : "=r"(r) : "r"(p)); return r; }
-inline uint     sub_group_any(int p)    { uint r; asm("{ .reg .pred pi, po; setp.ne.u32 pi, %1, 0; vote.sync.any.pred  po, pi, 0xffffffff; selp.u32 %0, 0, 1, po; }" : "=r"(r) : "r"(p)); return r; }
-inline uint     sub_group_all(int p)    { uint r; asm("{ .reg .pred pi, po; setp.ne.u32 pi, %1, 0; vote.sync.all.pred  po, pi, 0xffffffff; selp.u32 %0, 0, 1, po; }" : "=r"(r) : "r"(p)); return r; }
+uint     sub_group_ballot(int p) { uint r; asm volatile("{ .reg .pred p; setp.ne.u32 p, %1, 0; vote.sync.ballot.b32 %0, p, 0xffffffff; }" : "=r"(r) : "r"(p)); return r; }
+uint     sub_group_masked_ballot(int p, uint mask) { uint r; asm volatile("{ .reg .pred p; setp.ne.u32 p, %1, 0; vote.sync.ballot.b32 %0, p, %2; }" : "=r"(r) : "r"(p), "r"(mask)); return r; }
+uint     sub_group_any(int p)                        { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.any.pred  pi, pi, 0xffffffff; selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p)); return r; }
+uint     sub_group_masked_any(int p, uint mask)      { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.any.pred  pi, pi, %2;         selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p), "r"(mask)); return r; }
+uint     sub_group_all(int p)                        { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.all.pred  pi, pi, 0xffffffff; selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p)); return r; }
+uint     sub_group_masked_all(int p, uint mask)      { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.all.pred  pi, pi, %2;         selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p), "r"(mask)); return r; }
+uint     sub_group_activemask()    { uint r; asm volatile("activemask.b32 %0;" : "=r"(r)); return r; }
 #else
 inline int      f32_to_s32_sat      (float a)                   { return (int)a; }
 inline uint     f32_to_u32_sat_rmi  (float a)                   { return (uint)a; }
@@ -391,7 +403,6 @@ inline int clipPolygonWithPlane(float* baryOut, const float* baryIn, int numIn, 
     }
     return (numOut >> 1);
 }
-
 //------------------------------------------------------------------------
 // bary = &Vec2f[9] (output)
 // v0 = &Vec4f(clipPos0)
@@ -400,7 +411,7 @@ inline int clipPolygonWithPlane(float* baryOut, const float* baryIn, int numIn, 
 // d1 = &Vec4f(clipPos1 - clipPos0)
 // d2 = &Vec4f(clipPos2 - clipPos0)
 
-inline int clipTriangleWithFrustum(local float* bary, const float* v0, const float* v1, const float* v2, const float* d1, const float* d2)
+inline int clipTriangleWithFrustum(float* bary, const float* v0, const float* v1, const float* v2, const float* d1, const float* d2)
 {
     int num = 3;
     bary[0] = 0.0f, bary[1] = 0.0f;
