@@ -73,7 +73,7 @@
 
 //-----------------------------------------------------------------------------
 
-#define CONF_DEBUG_KERNEL
+// #define CONF_DEBUG_KERNEL
 #ifdef CONF_DEBUG_KERNEL
 #define DEBUG(...) __VA_ARGS__
 #else
@@ -199,6 +199,7 @@ inline uint     getLaneMaskLt       (void) {
 #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
 #define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
 #define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
+#define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 2)
 
 // UTILS
 

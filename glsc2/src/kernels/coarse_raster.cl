@@ -1,5 +1,22 @@
 #include "common/headers.cl"
 
+// Debug definitions
+#ifdef CONF_DEBUG_KERNEL
+typedef struct {
+    int over_total;
+} global_coarse_raster_debug_t;
+
+typedef struct {
+    int over_total;
+} local_coarse_raster_debug_t;
+
+typedef struct {
+    uint my_idx;
+    uint l_broadcast;
+    uint4 tri_data;
+} warp_coarse_raster_debug_t;
+#endif
+
 inline void sort_shared(local volatile uint* ptr, int num_items)
 {
     int thread_local_id = get_local_id(0) + get_local_id(1) * get_local_size(0);
@@ -108,6 +125,7 @@ kernel void coarse_raster(
     global const int* g_bin_seg_count,
     global const int* g_bin_seg_data,
     global const int* g_bin_seg_next,
+    global const int* g_bin_total,
     global int* g_tile_first_seg,
     global int* g_tile_seg_count,
     global int* g_tile_seg_data,
@@ -127,14 +145,15 @@ kernel void coarse_raster(
     const int c_viewport_width,
     const int c_width_bins,
     const int c_width_tiles
+    #ifdef CONF_DEBUG_KERNEL
+    , global global_coarse_raster_debug_t* g_g_debug // 
+    , global local_coarse_raster_debug_t* g_l_debug // sz == CR_COARSE_WARPS
+    , global warp_coarse_raster_debug_t* g_w_debug // sz == 32
+    #endif
 ) {
-
-    // Common.
-
+    
     local volatile uint s_work_counter;
     local volatile uint s_scan_temp          [CR_COARSE_WARPS][48];              // 3KB
-
-    // Input.
 
     local volatile uint s_bin_order           [CR_MAXBINS_SQR];                   // 1KB
     local volatile int s_bin_stream_curr_seg  [CR_BIN_STREAMS_SIZE];              // 0KB
@@ -143,8 +162,6 @@ kernel void coarse_raster(
     local volatile int s_tri_queue_write_pos;
     local volatile uint s_bin_stream_selected_ofs;
     local volatile uint s_bin_stream_selected_size;
-
-    // Output.
 
     local volatile uint s_warp_emit_mask      [CR_COARSE_WARPS][CR_BIN_SQR + 1];  // 16KB, +1 to avoid bank collisions
     local volatile uint s_warp_emit_prefix_sum [CR_COARSE_WARPS][CR_BIN_SQR + 1];  // 16KB, +1 to avoid bank collisions
@@ -174,6 +191,7 @@ kernel void coarse_raster(
     {
         int count = 0;
         for (int i = 0; i < CR_BIN_STREAMS_SIZE; i++)
+            count += g_bin_total[(bin_idx << CR_BIN_STREAMS_LOG2) + i];
         s_bin_order[bin_idx] = (~count << (CR_MAXBINS_LOG2 * 2)) | bin_idx;
     }
 
@@ -282,6 +300,7 @@ kernel void coarse_raster(
                         {
                             int seg_size = g_bin_seg_count[seg_idx];
                             int seg_next = g_bin_seg_next[seg_idx];
+                            // TODO: Multiple thread write, maybe only biggest??
                             s_bin_stream_selected_size = seg_size;
                             s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
                             s_bin_stream_curr_seg[thread_local_id] = seg_next;
@@ -433,7 +452,7 @@ kernel void coarse_raster(
                                 for (int x = wlox; x <= hix; x++)
                                 {
                                     if (x < lox) continue;
-                                    *(local uint*)curr_ptr = sub_group_ballot(b01 >= 0 && b02 >= 0 && b12 >= 0);
+                                    *(local uint*)curr_ptr = sub_group_masked_ballot(b01 >= 0 && b02 >= 0 && b12 >= 0, sub_group_activemask());
                                     curr_ptr += 4, b01 -= d01y, b02 += d02y, b12 -= d12y;
                                 }
                                 curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x;
@@ -777,6 +796,7 @@ kernel void coarse_raster(
         // Tile per thread: Output active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);
+        DEBUG();
         for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += CR_COARSE_WARPS * 32)
         {
             if (s_tile_stream_curr_ofs[tile_in_bin] < 0)
@@ -784,7 +804,7 @@ kernel void coarse_raster(
 
             int active_idx = s_first_active_idx;
             active_idx += s_scan_temp[0][(tile_in_bin >> 5) + 15];
-            active_idx += popcount(sub_group_ballot(true) & getLaneMaskLt());
+            active_idx += popcount(sub_group_activemask() & getLaneMaskLt());
             g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
         }
 

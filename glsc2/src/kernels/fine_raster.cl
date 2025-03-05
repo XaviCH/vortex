@@ -2,10 +2,10 @@
 #include "common/headers.cl"
 
 // Render flags
-#define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
-#define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
-#define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
-#define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 3)
+// #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
+// #define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
+// #define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
+// #define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 3)
 
 // Blender data
 #define BLENDER_FUNC_ADD                     0
@@ -128,7 +128,7 @@ inline void run_fragment_shader(
 
     // Transpiler dependant
     input.color = interpolate_varying(0, vert_idx, bary, t_vertex_buffer).xyz;
-
+    input.color = (float3) {1,1,1};
     fragment_shader(&input, output);
 }
 
@@ -540,10 +540,10 @@ kernel void fine_raster_single_sample(
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
             // TODO check this, maybe use direct access ??
-			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x,surf_y/4})[surf_y%4];
-            w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x,surf_y/2})[surf_y%2];
-            w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x,(surf_y+4)/4})[surf_y%4];
-            w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x,(surf_y+4)/2})[surf_y%2];
+			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
+            w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
+            w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
+            w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
         }
 
         uint tile_z_max;
@@ -551,7 +551,7 @@ kernel void fine_raster_single_sample(
         init_tile_z_max(&tile_z_max, &tile_z_upd, w_tile_depth);
 
         // process fragments
-        for(;;)
+        for(;false;)
         {
             // need to queue more fragments?
             if (frag_write - frag_read < 32 && segment >= 0)
@@ -675,10 +675,11 @@ kernel void fine_raster_single_sample(
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            write_imageui(t_color_buffer, (int2){surf_x, surf_y}, w_tile_color[get_local_id(0)]);
-            write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[get_local_id(0)]);
-            write_imageui(t_color_buffer, (int2){surf_x, surf_y + 4}, w_tile_color[get_local_id(0) + 32]);
-            write_imageui(t_depth_buffer, (int2){surf_x, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
+            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, (uint4){255, 255, 255, 255}); // w_tile_color[get_local_id(0)]);
+            write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
+            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, (uint4){255, 255, 255, 255}); // w_tile_color[get_local_id(0) + 32]);
+            write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
         }
+        
     }
 }
