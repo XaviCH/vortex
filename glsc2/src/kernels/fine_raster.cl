@@ -62,6 +62,11 @@ inline void fragment_shader(
 ) {
     output->gl_FragColor = (float4){input->color, 1.f};
     output->discard = false;
+    output->color = 
+        ((int)(output->gl_FragColor.x * 255) << 8*0) |
+        (255 << 8*1) |
+        ((int)(output->gl_FragColor.z * 255) << 8*2) |
+        ((int)(output->gl_FragColor.w * 255) << 8*3);
 }
 
 typedef struct {
@@ -402,7 +407,7 @@ inline void execute_ROP_single_sample(
 {
     blend_shader_input_t blend_shader_input;
     blend_shader_output_t blend_shader_output;
-
+    blend_shader_input.needs_dst = false;
     int rounds = 0;
 
     if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
@@ -509,6 +514,7 @@ kernel void fine_raster_single_sample(
         // pick a tile
         if (get_local_id(0) == 0)
             w_temp[16] = atomic_add(a_fine_counter, 1);
+        barrier(CLK_LOCAL_MEM_FENCE); // added for unexpected behaviour
         int active_idx = w_temp[16];
         if (active_idx >= *a_num_active_tiles)
         {
@@ -551,14 +557,15 @@ kernel void fine_raster_single_sample(
         init_tile_z_max(&tile_z_max, &tile_z_upd, w_tile_depth);
 
         // process fragments
-        for(;false;)
+        for(;;)
         {
             // need to queue more fragments?
+            
             if (frag_write - frag_read < 32 && segment >= 0)
             {
                 // update tile z
                 update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, w_temp);
-
+                
                 // read triangles
                 do
                 {
@@ -573,8 +580,7 @@ kernel void fine_raster_single_sample(
                         tri_idx = -1;
 
                     // determine coverage
-                    ulong coverage = triangle_pixel_coverage(0, tri_header, tile_x, tile_y, s_cover8x8_lut,
-                        c_viewport_width, c_viewport_height);
+                    ulong coverage = triangle_pixel_coverage(0, tri_header, tile_x, tile_y, s_cover8x8_lut, c_viewport_width, c_viewport_height);
                     int pop = (tri_idx == -1) ? 0 : num_fragments(c_render_mode_flags, coverage);
 
                     // fragment count scan
@@ -583,7 +589,7 @@ kernel void fine_raster_single_sample(
                     frag_write += scan32_total(w_temp);
 
                     // queue non-empty triangles
-                    uint good_mask = sub_group_ballot(pop != 0);
+                    uint good_mask = sub_group_masked_ballot(pop != 0, sub_group_activemask());
                     if (pop != 0)
                     {
                         int idx = (tri_write + popcount(good_mask & getLaneMaskLt())) & 63;
@@ -600,7 +606,7 @@ kernel void fine_raster_single_sample(
             // end of segment?
             if (frag_read == frag_write)
                 break;
-
+            
             // tag triangle boundaries
             w_temp[get_local_id(0) + 16] = 0;
             if (tri_read + get_local_id(0) < tri_write)
@@ -610,16 +616,17 @@ kernel void fine_raster_single_sample(
                     w_temp[idx + 16 - 1] = 1;
             }
 
+            
             int rop_lane_idx = popcount(rop_lane_mask);
-            uint boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
-
+            uint boundary_mask = sub_group_masked_ballot(w_temp[rop_lane_idx + 16], sub_group_activemask());
             // distribute fragments
+            
             if (rop_lane_idx < frag_write - frag_read)
             {
                 int tri_buf_idx = (tri_read + popcount(boundary_mask & rop_lane_mask)) & 63;
                 int frag_idx = add_sub(frag_read, rop_lane_idx, w_triangle_frag[(tri_buf_idx - 1) & 63]);
                 ulong coverage = w_triangle_cov[tri_buf_idx];
-                int pixel_in_tile = find_fragment(c_render_mode_flags, coverage, frag_idx);
+                int pixel_in_tile = find_fragment(c_render_mode_flags, coverage, frag_idx) % 64;
                 int tri_idx = w_triangle_idx[tri_buf_idx];
                 int data_idx = w_tri_data_idx[tri_buf_idx];
 
@@ -640,7 +647,7 @@ kernel void fine_raster_single_sample(
                     else if (old_depth == tile_z_max)
                         tile_z_upd = true; // we are replacing previous zmax => need to update
                 }
-
+                
                 if (!zkill)
                 {
                     // run fragment shader
@@ -652,7 +659,7 @@ kernel void fine_raster_single_sample(
                         t_vertex_buffer
                         // 0, c_render_mode_flags
                         );
-
+                    
                     // run ROP
                     if (!fragment_shader_output.discard)
                     {
@@ -664,7 +671,7 @@ kernel void fine_raster_single_sample(
                     }
                 }
             }
-
+            
             // update counters
             frag_read = min(frag_read + 32, frag_write);
             tri_read += popcount(boundary_mask);
@@ -675,9 +682,21 @@ kernel void fine_raster_single_sample(
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, (uint4){255, 255, 255, 255}); // w_tile_color[get_local_id(0)]);
+            uint4 tile_color_0 = {
+                (w_tile_color[get_local_id(0)] >> 8*0) & 0xFF,
+                (w_tile_color[get_local_id(0)] >> 8*1) & 0xFF,
+                (w_tile_color[get_local_id(0)] >> 8*2) & 0xFF,
+                (w_tile_color[get_local_id(0)] >> 8*3) & 0xFF,
+            };
+            uint4 tile_color_1 = {
+                (w_tile_color[get_local_id(0) + 32] >> 8*0) & 0xFF,
+                (w_tile_color[get_local_id(0) + 32] >> 8*1) & 0xFF,
+                (w_tile_color[get_local_id(0) + 32] >> 8*2) & 0xFF,
+                (w_tile_color[get_local_id(0) + 32] >> 8*3) & 0xFF,
+            };
+            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, tile_color_0); // w_tile_color[get_local_id(0)]);
             write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
-            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, (uint4){255, 255, 255, 255}); // w_tile_color[get_local_id(0) + 32]);
+            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, tile_color_1); // w_tile_color[get_local_id(0) + 32]);
             write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
         }
         

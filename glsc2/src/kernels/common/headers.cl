@@ -135,9 +135,9 @@ inline uint     ugetLo           (ulong a)              { return a & 0x00000000F
 inline int      getLo            (long a)               { return a & 0x00000000FFFFFFFF; }
 inline uint     ugetHi           (ulong a)              { return a >> 32; }
 inline int      getHi            (long a)               { return a >> 32; }
-inline ulong    ucombineLoHi     (uint lo, uint hi)     { return ((ulong)hi << 32) + (ulong)lo; }
-inline long     combineLoHi      (int lo, int hi)       { return ((long)hi << 32) + (long)lo; }
-inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = combineLoHi(alo, ahi) + combineLoHi(blo, bhi); *rlo = getLo(r); *rhi = getHi(r); }
+inline ulong    ucombineLoHi     (uint lo, uint hi)     { return ((ulong)hi << 32) | (ulong)lo; }
+inline long     combineLoHi      (int lo, int hi)       { return ((long)hi << 32) | (long)lo; }
+inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = ucombineLoHi(alo, ahi) + ucombineLoHi(blo, bhi); *rlo = ugetLo(r); *rhi = ugetHi(r); }
 
 // ISA dependancy
 //#define CUDA
