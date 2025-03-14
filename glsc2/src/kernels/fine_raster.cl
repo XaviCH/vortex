@@ -53,6 +53,7 @@ typedef struct {
 } fragment_shader_input_t;
 
 typedef struct {
+    float4 pos;
     float4 color;
 } vertex_shader_output_t;
 
@@ -64,7 +65,7 @@ inline void fragment_shader(
     output->discard = false;
     output->color = 
         ((int)(output->gl_FragColor.x * 255) << 8*0) |
-        (255 << 8*1) |
+        ((int)(output->gl_FragColor.y * 255) << 8*1) |
         ((int)(output->gl_FragColor.z * 255) << 8*2) |
         ((int)(output->gl_FragColor.w * 255) << 8*3);
 }
@@ -133,11 +134,18 @@ inline void run_fragment_shader(
 
     // Transpiler dependant
     input.color = interpolate_varying(0, vert_idx, bary, t_vertex_buffer).xyz;
-    input.color = (float3) {1,1,1};
+    // input.color = (float3) {1,1,1};
     fragment_shader(&input, output);
 }
 
 //------------------------------------------------------------------------
+
+inline bool bs_needs_dst(uint c_render_mode_flags, uint c_blender_op) {
+    if (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) {
+        return c_blender_op;
+    }
+    return false; 
+}
 
 inline void run_blend_shader(
     blend_shader_input_t* input, blend_shader_output_t* output,
@@ -155,18 +163,19 @@ inline void init_tile_z_max(uint* tile_z_max, bool* tile_z_upd, local volatile u
     *tile_z_upd = (min(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]) < *tile_z_max);
 }
 
-inline void update_tile_z_max(uint render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth, local volatile uint* temp)
+inline void update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth) // , local volatile uint* temp)
 {
-    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
+    if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
     {
         uint z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        temp[get_local_id(0) + 16] = z;
-        z = max(z, temp[get_local_id(0) + 16 -  1]); temp[get_local_id(0) + 16] = z;
-        z = max(z, temp[get_local_id(0) + 16 -  2]); temp[get_local_id(0) + 16] = z;
-        z = max(z, temp[get_local_id(0) + 16 -  4]); temp[get_local_id(0) + 16] = z;
-        z = max(z, temp[get_local_id(0) + 16 -  8]); temp[get_local_id(0) + 16] = z;
-        z = max(z, temp[get_local_id(0) + 16 - 16]); temp[get_local_id(0) + 16] = z;
-        *tile_z_max = temp[47];
+        // temp[get_local_id(0) + 16] = z;
+        // z = max(z, temp[get_local_id(0) + 16 -  1]); temp[get_local_id(0) + 16] = z;
+        // z = max(z, temp[get_local_id(0) + 16 -  2]); temp[get_local_id(0) + 16] = z;
+        // z = max(z, temp[get_local_id(0) + 16 -  4]); temp[get_local_id(0) + 16] = z;
+        // z = max(z, temp[get_local_id(0) + 16 -  8]); temp[get_local_id(0) + 16] = z;
+        // z = max(z, temp[get_local_id(0) + 16 - 16]); temp[get_local_id(0) + 16] = z;
+        // *tile_z_max = temp[47];
+        *tile_z_max = sub_group_reduce_max_ui(z);
         *tile_z_upd = false;
     }
 }
@@ -284,36 +293,34 @@ inline uint scan32_total(local volatile uint* temp)
 //------------------------------------------------------------------------
 
 // template <class BlendShaderClass>
-inline uint determine_ROP_lane_mask(uint c_render_mode_flags, local volatile uint* warpTemp) // mask of lanes that should process an earlier fragment than this lane
+inline uint determine_ROP_lane_mask(uint c_render_mode_flags) //, local volatile uint* warp_temp) mask of lanes that should process an earlier fragment than this lane
 {
     bool reverse_lanes = true;
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) == 0)
     {
-        // BlendShaderClass bs;
-        if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) == 0) {
+        if (!bs_needs_dst(c_render_mode_flags, 0))
             reverse_lanes = false;
-        }
-        // TODO: update depending on rendermode
-        // if (!bs.needsDst())
-        //     reverse_lanes = false;
     }
 
-    uint mask = (reverse_lanes) ? (1u << get_local_id(0)) : ~0u;
-    do
-    {
-        *warpTemp = get_local_id(0);
-        mask ^= 1u << *warpTemp;
-    }
-    while (*warpTemp != get_local_id(0));
-    return mask;
+    // TODO: Analyze this behaviour 
+    // uint mask = (reverse_lanes) ? (1u << get_local_id(0)) : ~0u;
+    // do
+    // {
+    //     *warp_temp = get_local_id(0);
+    //     mask ^= 1u << *warp_temp;
+    // }
+    // while (*warp_temp != get_local_id(0));
+    // return mask;
+
+    return reverse_lanes ? getLaneMaskLt() : ~getLaneMaskLe();
 }
 
 inline int find_bit(uint render_mode_flags, ulong mask, int idx)
 {
-    uint x = getLo(mask);
+    uint x = ugetLo(mask);
     int  pop = popcount(x);
     bool p   = (pop <= idx);
-    if (p) x = getHi(mask);
+    if (p) x = ugetHi(mask);
     if (p) idx -= pop;
     int bit = p ? 32 : 0;
 
@@ -323,48 +330,13 @@ inline int find_bit(uint render_mode_flags, ulong mask, int idx)
     if (p) bit += 16;
     if (p) idx -= pop;
 
-    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_QUADS) == 0)
-    {
-        // Optimized variant.
-        // Assumes that scanlines do not contain holes, and doesn't thus support quad rendering.
-        // Counts scanlines LSB->MSB, but bits within them MSB->LSB.
-        // 21 instructions.
+    uint tmp = x & 0x000000ffu;
+    pop = popcount(tmp);
+    p   = (pop <= idx);
+    if (p) tmp = x & 0x0000ff00u;
+    if (p) idx -= pop;
 
-        uint tmp = x & 0x000000ffu;
-        pop = popcount(tmp);
-        p   = (pop <= idx);
-        if (p) tmp = x & 0x0000ff00u;
-        if (p) idx -= pop;
-
-        return findLeadingOne(tmp) + bit - idx;
-    }
-    else
-    {
-        // Generic variant. Counts bits LSB->MSB.
-        // 33 instructions.
-
-        pop = popcount(x & 0x000000ffu);
-        p   = (pop <= idx);
-        if (p) x >>= 8;
-        if (p) bit += 8;
-        if (p) idx -= pop;
-
-        pop = popcount(x & 0x0000000fu);
-        p   = (pop <= idx);
-        if (p) x >>= 4;
-        if (p) bit += 4;
-        if (p) idx -= pop;
-
-        pop = popcount(x & 0x00000003u);
-        p   = (pop <= idx);
-        if (p) x >>= 2;
-        if (p) bit += 2;
-        if (p) idx -= pop;
-
-        if (idx >= (x & 1))
-            bit++;
-        return bit;
-    }
+    return findLeadingOne(tmp) + bit - idx;
 }
 
 inline ulong quad_coverage(ulong mask)
@@ -503,19 +475,23 @@ kernel void fine_raster_single_sample(
     if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs || *a_num_tile_segs > c_max_tile_segs)
         return;
 
-    uint rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags, &w_temp[0]);
-    w_temp[get_local_id(1)] = 0; // first 16 elements of temp are always zero
+    uint rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags); //, &w_temp[0]); TODO: solved??, erase local mem
+    w_temp[get_local_id(1)] = 0; // first 16 elements of temp are always zero, TODO: carefull with size, depends on thread size y
     cover8x8_setupLUT(s_cover8x8_lut);
     barrier(CLK_LOCAL_MEM_FENCE);
 
     // loop over tiles
     for (;;)
     {
-        // pick a tile
+        // each warp pick a tile
+        int active_idx;
         if (get_local_id(0) == 0)
-            w_temp[16] = atomic_add(a_fine_counter, 1);
-        barrier(CLK_LOCAL_MEM_FENCE); // added for unexpected behaviour
-        int active_idx = w_temp[16];
+            active_idx = atomic_add(a_fine_counter, 1);
+
+        active_idx = sub_group_broadcast_ui(active_idx, 0);
+        // barrier(CLK_LOCAL_MEM_FENCE); // added for unexpected behaviour
+        // sub_group_barrier();
+        // int active_idx = w_temp[16];
         if (active_idx >= *a_num_active_tiles)
         {
             break;
@@ -545,7 +521,7 @@ kernel void fine_raster_single_sample(
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            // TODO check this, maybe use direct access ??
+            // TODO now only one component is access
 			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
             w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
             w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
@@ -555,7 +531,9 @@ kernel void fine_raster_single_sample(
         uint tile_z_max;
         bool tile_z_upd;
         init_tile_z_max(&tile_z_max, &tile_z_upd, w_tile_depth);
-
+        //w_tile_color[get_local_id(0)] = 0xFFFFFFFFu;
+        //w_tile_color[get_local_id(0) + 32] = 0xFFFFFFFFu;
+        
         // process fragments
         for(;;)
         {
@@ -564,7 +542,7 @@ kernel void fine_raster_single_sample(
             if (frag_write - frag_read < 32 && segment >= 0)
             {
                 // update tile z
-                update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, w_temp);
+                update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth); // , w_temp);
                 
                 // read triangles
                 do
@@ -584,12 +562,13 @@ kernel void fine_raster_single_sample(
                     int pop = (tri_idx == -1) ? 0 : num_fragments(c_render_mode_flags, coverage);
 
                     // fragment count scan
-                    uint frag = scan32_value(pop, w_temp);
+                    uint frag = sub_group_scan_inclusive_add_ui(pop); // scan32_value(pop, w_temp);
+                    uint temp_frag = frag;
                     frag += frag_write; // frag now holds cumulative fragment count
-                    frag_write += scan32_total(w_temp);
+                    frag_write += sub_group_broadcast_ui(temp_frag, 31); // scan32_total(w_temp);
 
                     // queue non-empty triangles
-                    uint good_mask = sub_group_masked_ballot(pop != 0, sub_group_activemask());
+                    uint good_mask = sub_group_ballot(pop != 0);
                     if (pop != 0)
                     {
                         int idx = (tri_write + popcount(good_mask & getLaneMaskLt())) & 63;
@@ -615,10 +594,11 @@ kernel void fine_raster_single_sample(
                 if (idx <= 32)
                     w_temp[idx + 16 - 1] = 1;
             }
-
             
+            //sub_group_barrier();
+
             int rop_lane_idx = popcount(rop_lane_mask);
-            uint boundary_mask = sub_group_masked_ballot(w_temp[rop_lane_idx + 16], sub_group_activemask());
+            uint boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
             // distribute fragments
             
             if (rop_lane_idx < frag_write - frag_read)
@@ -626,7 +606,7 @@ kernel void fine_raster_single_sample(
                 int tri_buf_idx = (tri_read + popcount(boundary_mask & rop_lane_mask)) & 63;
                 int frag_idx = add_sub(frag_read, rop_lane_idx, w_triangle_frag[(tri_buf_idx - 1) & 63]);
                 ulong coverage = w_triangle_cov[tri_buf_idx];
-                int pixel_in_tile = find_fragment(c_render_mode_flags, coverage, frag_idx) % 64;
+                int pixel_in_tile = find_fragment(c_render_mode_flags, coverage, frag_idx);
                 int tri_idx = w_triangle_idx[tri_buf_idx];
                 int data_idx = w_tri_data_idx[tri_buf_idx];
 

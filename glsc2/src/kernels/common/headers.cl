@@ -123,7 +123,65 @@ typedef struct
 #pragma OPENCL EXTENSION cl_khr_subgroups : enable
 #endif
 #ifdef __opencl_c_subgroups
-#pragma OPENCL EXTENSION __opencl_c_subgroups : enable
+    #pragma OPENCL EXTENSION __opencl_c_subgroups : enable
+#else
+    #ifdef CUDA
+    inline uint sub_group_scan_inclusive_add_ui (uint x) {
+        uint r;
+        asm volatile(
+            ".reg .b32 Ry, Rx;"
+            "shfl.sync.up.b32  Ry, %1, 0x1, 0x0, 0xffffffff;"
+            "add.u32             Rx, Ry, %1;"
+            "shfl.sync.up.b32  Ry, Rx, 0x2, 0x0, 0xffffffff;"
+            "add.u32             Rx, Ry, Rx;"
+            "shfl.sync.up.b32  Ry, Rx, 0x4, 0x0, 0xffffffff;"
+            "add.u32             Rx, Ry, Rx;"
+            "shfl.sync.up.b32  Ry, Rx, 0x8, 0x0, 0xffffffff;"
+            "add.u32             Rx, Ry, Rx;"
+            "shfl.sync.up.b32  Ry, Rx, 0x10,0x0, 0xffffffff;"
+            "add.u32             %0, Ry, Rx;" 
+            : "=r"(r) : "r"(x));
+        return r;
+    }
+
+    inline uint sub_group_scan_inclusive_max_ui (uint x) {
+        uint r;
+        asm volatile(
+            ".reg .b32 Ry, Rx;"
+            "shfl.sync.up.b32  Ry, %1, 0x1, 0x0, 0xffffffff;"
+            "max.u32             Rx, Ry, %1;"
+            "shfl.sync.up.b32  Ry, Rx, 0x2, 0x0, 0xffffffff;"
+            "max.u32             Rx, Ry, Rx;"
+            "shfl.sync.up.b32  Ry, Rx, 0x4, 0x0, 0xffffffff;"
+            "max.u32             Rx, Ry, Rx;"
+            "shfl.sync.up.b32  Ry, Rx, 0x8, 0x0, 0xffffffff;"
+            "max.u32             Rx, Ry, Rx;"
+            "shfl.sync.up.b32  Ry, Rx, 0x10,0x0, 0xffffffff;"
+            "max.u32             %0, Ry, Rx;" 
+            : "=r"(r) : "r"(x));
+        return r;
+    }
+
+    inline uint sub_group_broadcast_ui (uint x, uint sub_group_local_id) {
+        uint r;
+        asm volatile(
+            "shfl.sync.idx.b32  %0, %1, %2, 0x1f, 0xffffffff;"
+            : "=r"(r) : "r"(x), "r"(sub_group_local_id));
+        return r;
+    }
+
+    inline void sub_group_barrier() {
+        asm volatile("bar.warp.sync 0xffffffff;");
+    }
+
+    inline uint sub_group_reduce_max_ui (uint x) {
+        uint r;
+        asm volatile(
+            "redux.sync.max.u32 %0, %1, 0xffffffff;"
+            : "=r"(r) : "r"(x));
+        return r;
+    }
+    #endif
 #endif
 #ifdef cl_khr_subgroup_ballot
 #pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
