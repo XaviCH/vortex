@@ -227,7 +227,7 @@ inline bool early_z_cull(uint render_mode_flags, uint4 tri_header, uint tile_z_m
 
 //------------------------------------------------------------------------
 
-inline uint triangle_pixel_coverage(const int samples_log_2, const uint4 tri_header, int tile_x, int tile_y, local volatile ulong* s_cover8x8_lut, 
+inline ulong triangle_pixel_coverage(const int samples_log_2, const uint4 tri_header, int tile_x, int tile_y, local volatile ulong* s_cover8x8_lut, 
     int c_viewport_width, int c_viewport_height)
 {
     int base_x = (tile_x << (CR_TILE_LOG2 + CR_SUBPIXEL_LOG2)) - ((c_viewport_width  - 1) << (CR_SUBPIXEL_LOG2 - 1));

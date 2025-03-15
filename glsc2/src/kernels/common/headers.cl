@@ -279,8 +279,8 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile co
 {
     // First half.
 
-    uint yfrac = getLo(yinit);
-    uint shape = add_clamp_0_x(getHi(yinit) + 4, 0, 11);
+    uint yfrac = ugetLo(yinit);
+    uint shape = add_clamp_0_x(ugetHi(yinit) + 4, 0, 11);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
@@ -290,7 +290,7 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile co
     // Second half.
 
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
-    shape = add_clamp_0_x(getHi(yinit) + 4, popcount(shape & 15), 11);
+    shape = add_clamp_0_x(ugetHi(yinit) + 4, popcount(shape & 15), 11);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
