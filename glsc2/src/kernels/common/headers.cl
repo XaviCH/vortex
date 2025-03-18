@@ -129,17 +129,21 @@ typedef struct
     inline uint sub_group_scan_inclusive_add_ui (uint x) {
         uint r;
         asm volatile(
-            ".reg .b32 Ry, Rx;"
-            "shfl.sync.up.b32  Ry, %1, 0x1, 0x0, 0xffffffff;"
-            "add.u32             Rx, Ry, %1;"
-            "shfl.sync.up.b32  Ry, Rx, 0x2, 0x0, 0xffffffff;"
-            "add.u32             Rx, Ry, Rx;"
-            "shfl.sync.up.b32  Ry, Rx, 0x4, 0x0, 0xffffffff;"
-            "add.u32             Rx, Ry, Rx;"
-            "shfl.sync.up.b32  Ry, Rx, 0x8, 0x0, 0xffffffff;"
-            "add.u32             Rx, Ry, Rx;"
-            "shfl.sync.up.b32  Ry, Rx, 0x10,0x0, 0xffffffff;"
-            "add.u32             %0, Ry, Rx;" 
+            "{"
+            ".reg .pred p;"
+            ".reg .b32 dst;"
+            "mov.b32 %0, %1;"
+            "shfl.sync.up.b32  dst|p, %0, 0x1, 0x0, 0xffffffff;"
+            "@p add.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x2, 0x0, 0xffffffff;"
+            "@p add.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x4, 0x0, 0xffffffff;"
+            "@p add.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x8, 0x0, 0xffffffff;"
+            "@p add.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x10,0x0, 0xffffffff;"
+            "@p add.u32        %0, dst, %0;"
+            "}"
             : "=r"(r) : "r"(x));
         return r;
     }
@@ -147,6 +151,7 @@ typedef struct
     inline uint sub_group_scan_inclusive_max_ui (uint x) {
         uint r;
         asm volatile(
+            "{"
             ".reg .b32 Ry, Rx;"
             "shfl.sync.up.b32  Ry, %1, 0x1, 0x0, 0xffffffff;"
             "max.u32             Rx, Ry, %1;"
@@ -157,7 +162,8 @@ typedef struct
             "shfl.sync.up.b32  Ry, Rx, 0x8, 0x0, 0xffffffff;"
             "max.u32             Rx, Ry, Rx;"
             "shfl.sync.up.b32  Ry, Rx, 0x10,0x0, 0xffffffff;"
-            "max.u32             %0, Ry, Rx;" 
+            "max.u32             %0, Ry, Rx;"
+            "}"
             : "=r"(r) : "r"(x));
         return r;
     }
@@ -167,6 +173,14 @@ typedef struct
         asm volatile(
             "shfl.sync.idx.b32  %0, %1, %2, 0x1f, 0xffffffff;"
             : "=r"(r) : "r"(x), "r"(sub_group_local_id));
+        return r;
+    }
+
+    inline uint sub_group_masked_broadcast_ui (uint x, uint sub_group_local_id, uint mask) {
+        uint r;
+        asm volatile(
+            "shfl.sync.idx.b32  %0, %1, %2, 0x1f, %3;"
+            : "=r"(r) : "r"(x), "r"(sub_group_local_id), "r"(mask));
         return r;
     }
 
@@ -244,11 +258,8 @@ inline int      min_min             (int a, int b, int c)       { return min(a, 
 inline uint     add_sub             (uint a, uint b, uint c)    { return a+b-c; }
 inline uint     add_add             (uint a, uint b, uint c)    { return a+b+c; }
 inline int      add_clamp_0_x       (int a, int b, int c)       { return clamp(a+b,0,c); }
-inline uint     getLaneMaskLt       (void) {
-    uint mask;
-    for(uint warp = 0; warp < get_max_sub_group_size(); ++warp) mask |= 1 << warp;
-    return mask >> (get_max_sub_group_size() - get_local_id(0));
-}
+inline uint     getLaneMaskLt       (void)                      { return (1 << get_local_id(0)) - 1; }
+inline uint     getLaneMaskLe       (void)                      { return (2 << get_local_id(0)) - 1; }
 #endif
 
 

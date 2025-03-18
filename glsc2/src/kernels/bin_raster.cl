@@ -4,6 +4,14 @@
 #include "glsc2/src/kernels/common/headers.cl"
 #endif
 
+// Configuration
+#define CONF_WARP_SIZE_LOG2 5
+#define CONF_BR_WARPS_LOG2 4
+// Architecture
+#define CONF_WARP_SIZE (1 << CONF_WARP_SIZE_LOG2)
+// Bin rasterizer 
+#define CONF_BR_WARPS (1 << CONF_BR_WARPS_LOG2)
+
 // Debug definitions
 #ifdef CONF_DEBUG_KERNEL
 typedef struct {
@@ -21,19 +29,16 @@ typedef struct {
 } warp_bin_raster_debug_t;
 #endif
 
-// Bin rasterizer 
-#define CONF_BIN_RASTER_LOCAL_SIZE_LOG2     6
-#define CONF_BIN_RASTER_LOCAL_SIZE          (1 << CONF_BIN_RASTER_LOCAL_SIZE_LOG2)
-#define CONF_WARP_SIZE 32
 
-uint local_scan_inclusive_ui(uint value, local volatile uint* l_temp) {
+
+uint local_scan_inclusive_add_ui(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[local_id];
     *ptr = value;
     #pragma unroll
-    for(int i=0; i<CONF_BIN_RASTER_LOCAL_SIZE_LOG2; ++i) {
+    for(int i=0; i<CONF_WARP_SIZE_LOG2 + CONF_BR_WARPS_LOG2; ++i) {
         barrier(CLK_LOCAL_MEM_FENCE);
-        if (local_id >= 1 << 0) {
+        if (local_id >= 1 << i) {
             value += ptr[-(1 << i)];    
             *ptr = value;   
         }
@@ -51,7 +56,7 @@ kernel
 //#ifndef CONF_SUB_GROUP_ENABLED
 //__attribute__((reqd_work_group_size(CONF_BIN_RASTER_LOCAL_SIZE, 1, 1)))
 //#else
-__attribute__((reqd_work_group_size(CONF_WARP_SIZE, CR_BIN_WARPS, 1)))
+__attribute__((reqd_work_group_size(CONF_WARP_SIZE, CONF_BR_WARPS, 1)))
 //#endif
 #endif
 void bin_raster(
@@ -102,7 +107,7 @@ void bin_raster(
     local volatile uint s_alloc_base;
 
     #ifndef CONF_WARP_ENABLED
-    local volatile uint l_temp [CONF_BIN_RASTER_LOCAL_SIZE];
+    local volatile uint l_temp [CONF_WARP_SIZE*CONF_BR_WARPS];
     #endif
     
     if (*a_num_subtris > c_max_subtris) 
@@ -157,13 +162,13 @@ void bin_raster(
                 uint scan_exc_num;
                 #ifndef CONF_SUB_GROUP_ENABLED
                 {
-                    uint scan_inc_num = local_scan_inclusive_ui(num, l_temp);
+                    uint scan_inc_num = local_scan_inclusive_add_ui(num, l_temp);
                     scan_exc_num = scan_inc_num - num;
                 }
                 #else
                 {
                     // sub-groups implementation
-                    uint scan_inc_num = sub_group_scan_inclusive_ui(num);
+                    uint scan_inc_num = sub_group_scan_inclusive_add_ui(num);
                     // broadcast sub group scan inclusive to +1 offset sub group.
                     if (get_local_id(0) == get_local_size(0)-1) {
                         uint scan_exc_ofs = ((get_local_id(1)+1) & (get_local_size(1)-1)) + get_local_size(1); 
@@ -173,10 +178,15 @@ void bin_raster(
                     
                     // This only works if local_size / sub_group_size <= sub_group_size.
                     // TODO: Generalize it.
-                    if (local_id < get_local_size(1)) {
-                        uint sub_group_scan_exc_num = s_broadcast[local_id+get_local_size(1)];
-                        uint local_scan_exc_num = sub_group_scan_inclusive_ui(sub_group_scan_exc_num);
-                        s_broadcast[local_id+get_local_size(1)] = local_scan_exc_num;
+                    if (local_id < get_local_size(0)) {
+                        uint sub_group_scan_exc_num;
+                        if (local_id < CONF_BR_WARPS) 
+                            sub_group_scan_exc_num = s_broadcast[local_id+get_local_size(1)];
+                        else
+                            sub_group_scan_exc_num = 0;
+                        uint local_scan_exc_num = sub_group_scan_inclusive_add_ui(sub_group_scan_exc_num);
+                        if (local_id < CONF_BR_WARPS) 
+                            s_broadcast[local_id+get_local_size(1)] = local_scan_exc_num;
                     }
                     barrier(CLK_LOCAL_MEM_FENCE);
                     
@@ -188,45 +198,6 @@ void bin_raster(
                     s_buf_count = buf_count + scan_exc_num + num;
                 barrier(CLK_LOCAL_MEM_FENCE);
 
-                /*
-                uint my_idx = popcount(sub_group_ballot(num & 1) & getLaneMaskLt());
-                if (sub_group_any(num > 1))
-                {
-                    my_idx += popcount(sub_group_ballot(num & 2) & getLaneMaskLt()) * 2;
-                    my_idx += popcount(sub_group_ballot(num & 4) & getLaneMaskLt()) * 4;
-                }
-                if (get_local_id(0) == get_local_size(0)-1) // Addded to force last warp thread to write
-                    s_broadcast[get_local_id(1) + 16] = my_idx + num;
-                barrier(CLK_LOCAL_MEM_FENCE);
-
-                // cumulative sum of per-warp subtriangle counts
-                if (local_id < CR_BIN_WARPS) {
-                    local volatile uint* ptr = &s_broadcast[local_id + 16];
-                    uint val = *ptr;
-                    #if (CR_BIN_WARPS > 1)
-                        val += ptr[-1]; *ptr = val;
-                    #endif
-                    #if (CR_BIN_WARPS > 2)
-                        val += ptr[-2]; *ptr = val;
-                    #endif
-                    #if (CR_BIN_WARPS > 4)
-                        val += ptr[-4]; *ptr = val;
-                    #endif
-                    #if (CR_BIN_WARPS > 8)
-                        val += ptr[-8]; *ptr = val;
-                    #endif
-                    #if (CR_BIN_WARPS > 16)
-                        val += ptr[-16]; *ptr = val;
-                    #endif
-
-                    // initially assume that we consume everything
-                    s_batch_pos = batch_pos + CR_BIN_WARPS * 32;
-                    if (local_id == CR_BIN_WARPS-1) // Addded to force last warp thread to write
-                        s_buf_count = buf_count + val;
-                }
-                barrier(CLK_LOCAL_MEM_FENCE);
-                #endif
-                */
                 // skip if no subtriangles
                 if (num) {
                     uint pos = buf_count + scan_exc_num; // my_idx + s_broadcast[get_local_id(1) + 16 - 1];
@@ -374,6 +345,8 @@ void bin_raster(
             barrier(CLK_LOCAL_MEM_FENCE);
 
             int over_index = -1;
+            // Sync for non-warp relies on local_liner_size <= c_num_bins 
+            // TODO: Generalize
             if (local_id < c_num_bins)
             {
                 local uchar* src_ptr = (local uchar*)&s_out_mask[0][local_id];
@@ -389,11 +362,28 @@ void bin_raster(
 
                 // overflow => request a new segment
                 int ofs = s_out_ofs[local_id];
-                if (((ofs - 1) >> CR_BIN_SEG_LOG2) != (((ofs - 1) + total) >> CR_BIN_SEG_LOG2))
+                bool overflow = ((ofs - 1) >> CR_BIN_SEG_LOG2) != (((ofs - 1) + total) >> CR_BIN_SEG_LOG2);
+                #ifdef CONF_SUB_GROUP_ENABLED
+                if (overflow)
+                #endif
                 {
-                    uint mask = sub_group_activemask();
+                    uint mask;
+                    #ifdef CONF_SUB_GROUP_ENABLED
+                    {
+                        // TODO: this code relies on 32 bit warps mask
+                        mask = sub_group_activemask();
+                    }
+                    #else 
+                    {
+                        l_temp[get_local_id(1)] = 0;
+                        barrier(CLK_LOCAL_MEM_FENCE); // TODO: Maybe this is not necesary???
+                        atomic_or(&l_temp[get_local_id(1)], 1 << get_local_id(0));
+                        barrier(CLK_LOCAL_MEM_FENCE);
+                        mask = l_temp[get_local_id(1)];
+                    }
+                    #endif
                     over_index = popcount(mask & getLaneMaskLt());
-                    if (over_index == 0) // WARNING TODO: Ordering of assing may affect the result  
+                    if (over_index == 0)  
                         s_broadcast[get_local_id(1) + 16] = atomic_add((local uint*)&s_over_total, popcount(mask));
                     over_index += s_broadcast[get_local_id(1) + 16];
                     s_over_index[local_id] = over_index;
