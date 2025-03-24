@@ -73,6 +73,94 @@
 
 //-----------------------------------------------------------------------------
 
+// Architecture
+#define CONF_WARP_SIZE_LOG2 5
+#define CONF_CR_WARPS_LOG2 4
+#define CONF_LOCAL_SIZE_LOG2 (CONF_WARP_SIZE_LOG2 + CONF_CR_WARPS_LOG2)
+#define CONF_WARP_SIZE (1 << CONF_WARP_SIZE_LOG2)
+#define CONF_CR_WARPS (1 << CONF_CR_WARPS_LOG2)
+
+inline size_t get_local_linear_id() {
+    return get_local_id(0) + get_local_id(1) * get_local_size(0) + get_local_id(2) * get_local_size(1) * get_local_size(0);
+}
+
+inline size_t get_local_linear_size() {
+    return get_local_size(0) * get_local_size(1) * get_local_size(2);
+}
+
+uint local_scan_inclusive_add_ui(uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_id(0) + get_local_id(1)*get_local_size(0);
+    local volatile uint* ptr = &l_temp[local_id];
+    *ptr = value;
+    #pragma unroll
+    for(int i=0; i<CONF_LOCAL_SIZE_LOG2; ++i) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= 1 << i) {
+            value += ptr[-(1 << i)];
+            *ptr = value;   
+        }
+    }
+    return value;
+}
+
+inline uint local_scan_inclusive_min_ui(uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_linear_id();
+    local volatile uint* ptr = &l_temp[local_id];
+    *ptr = value;
+    #pragma unroll
+    for(int i=1; i<get_local_linear_size(); i=i*2) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= i) {
+            value = min(value, ptr[-i]);    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+
+inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
+    local_scan_inclusive_min_ui(value, l_temp);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    return l_temp[get_local_linear_size()-1];
+}
+
+inline uint local_scan_inclusive_add_1dim_ui(uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_id(0);
+    local volatile uint* ptr = &l_temp[get_local_linear_id()];
+    *ptr = value;
+    #pragma unroll
+    for(int i=0; i<get_local_size(0); ++i) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= 1 << i) {
+            value += ptr[-(1 << i)];    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+
+inline uint local_scan_inclusive_or_1dim_ui(uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_id(0);
+    local volatile uint* ptr = &l_temp[get_local_linear_id()];
+    *ptr = value;
+    #pragma unroll
+    for(int i=0; i<get_local_size(0); ++i) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= 1 << i) {
+            value |= ptr[-(1 << i)];    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+
+inline uint local_reduce_or_1dim_ui(uint value, local volatile uint* l_temp) {
+    local_scan_inclusive_or_1dim_ui(value, l_temp);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    size_t sub_group_id = get_local_linear_id() / get_local_size(0); 
+    return l_temp[(sub_group_id+1) * get_local_size(0) - 1];
+}
+
 // #define CONF_DEBUG_KERNEL
 #ifdef CONF_DEBUG_KERNEL
 #define DEBUG(...) __VA_ARGS__
@@ -148,6 +236,28 @@ typedef struct
         return r;
     }
 
+    inline uint sub_group_scan_inclusive_min_ui (uint x) {
+        uint r;
+        asm volatile(
+            "{"
+            ".reg .pred p;"
+            ".reg .b32 dst;"
+            "mov.b32 %0, %1;"
+            "shfl.sync.up.b32  dst|p, %0, 0x1, 0x0, 0xffffffff;"
+            "@p min.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x2, 0x0, 0xffffffff;"
+            "@p min.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x4, 0x0, 0xffffffff;"
+            "@p min.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x8, 0x0, 0xffffffff;"
+            "@p min.u32        %0, dst, %0;"
+            "shfl.sync.up.b32  dst|p, %0, 0x10,0x0, 0xffffffff;"
+            "@p min.u32        %0, dst, %0;"
+            "}"
+            : "=r"(r) : "r"(x));
+        return r;
+    }
+
     inline uint sub_group_scan_inclusive_max_ui (uint x) {
         uint r;
         asm volatile(
@@ -192,6 +302,22 @@ typedef struct
         uint r;
         asm volatile(
             "redux.sync.max.u32 %0, %1, 0xffffffff;"
+            : "=r"(r) : "r"(x));
+        return r;
+    }
+
+    inline uint sub_group_reduce_min_ui (uint x) {
+        uint r;
+        asm volatile(
+            "redux.sync.min.u32 %0, %1, 0xffffffff;"
+            : "=r"(r) : "r"(x));
+        return r;
+    }
+
+    inline uint sub_group_reduce_or_ui (uint x) {
+        uint r;
+        asm volatile(
+            "redux.sync.or.b32 %0, %1, 0xffffffff;"
             : "=r"(r) : "r"(x));
         return r;
     }

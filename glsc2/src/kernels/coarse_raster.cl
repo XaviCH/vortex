@@ -1,4 +1,11 @@
+#ifdef __COMPILER_RELATIVE_PATH__ 
 #include "common/headers.cl"
+#else
+#include "glsc2/src/kernels/common/headers.cl"
+#endif
+
+// #define CONF_CR_WARPS_LOG2 4
+// #define CONF_LOCAL_SIZE_LOG2 (CONF_WARP_SIZE_LOG2 + CONF_CR_WARPS_LOG2)
 
 // Debug definitions
 #ifdef CONF_DEBUG_KERNEL
@@ -113,7 +120,9 @@ inline int global_tile_idx(int tile_in_bin, int c_width_tiles)
 
 //----------------------------------------------------------------------------------------
 
-kernel void coarse_raster(
+kernel 
+__attribute__((reqd_work_group_size(CONF_WARP_SIZE, CONF_CR_WARPS, 1)))
+void coarse_raster(
     global int* a_coarse_counter,
     global int* a_num_active_tiles,
     global const int* a_num_bin_segs,
@@ -170,6 +179,10 @@ kernel void coarse_raster(
     local volatile int s_tile_stream_curr_ofs [CR_BIN_SQR];                       // 1KB
     local volatile uint s_first_alloc_seg;
     local volatile uint s_first_active_idx;
+
+    #ifndef CONF_SUB_GROUP_ENABLED
+    local volatile uint l_temp [CR_COARSE_WARPS*32];
+    #endif
 
     // Private
     int tile_log     = CR_TILE_LOG2 + CR_SUBPIXEL_LOG2;
@@ -265,34 +278,26 @@ kernel void coarse_raster(
             {
                 // First warp: Choose the segment with the lowest initial triangle index.
 
-                if (thread_local_id < CR_BIN_STREAMS_SIZE)
+                // if (thread_local_id < CR_BIN_STREAMS_SIZE)
+                #ifdef CONF_SUB_GROUP_ENABLED
+                // this works only if CR_BIN_STRAMS_SIZE <= CONF_WARP_SIZE
+                if (thread_local_id < get_local_size(0))
+                #endif
                 {
                     // Find the stream with the lowest triangle index.
 
-                    uint first_tri = s_bin_stream_first_tri[thread_local_id];
-                    uint t = first_tri;
-                    local volatile uint* p = &s_scan_temp[0][thread_local_id + 16];
+                    uint first_tri = 0xFFFFFFFFu;
+                    if (thread_local_id < CR_BIN_STREAMS_SIZE)
+                        first_tri = s_bin_stream_first_tri[thread_local_id];
 
-                    #if (CR_BIN_STREAMS_SIZE > 1)
-                        p[0] = t, t = min(t, p[-1]);
+                    uint min_frist_tri;
+                    #ifdef CONF_SUB_GROUP_ENABLED
+                    min_frist_tri = sub_group_reduce_min_ui(first_tri);
+                    #else
+                    min_frist_tri = local_reduce_min_ui(first_tri, l_temp);
                     #endif
-                    #if (CR_BIN_STREAMS_SIZE > 2)
-                        p[0] = t, t = min(t, p[-2]);
-                    #endif
-                    #if (CR_BIN_STREAMS_SIZE > 4)
-                        p[0] = t, t = min(t, p[-4]);
-                    #endif
-                    #if (CR_BIN_STREAMS_SIZE > 8)
-                        p[0] = t, t = min(t, p[-8]);
-                    #endif
-                    #if (CR_BIN_STREAMS_SIZE > 16)
-                        p[0] = t, t = min(t, p[-16]);
-                    #endif
-                    p[0] = t;
 
-                    // Consume and broadcast.
-
-                    if (s_scan_temp[0][CR_BIN_STREAMS_SIZE - 1 + 16] == first_tri)
+                    if (min_frist_tri == first_tri && thread_local_id < CR_BIN_STREAMS_SIZE)
                     {
                         int seg_idx = s_bin_stream_curr_seg[thread_local_id];
                         s_bin_stream_selected_ofs = seg_idx << CR_BIN_SEG_LOG2;
@@ -300,7 +305,6 @@ kernel void coarse_raster(
                         {
                             int seg_size = g_bin_seg_count[seg_idx];
                             int seg_next = g_bin_seg_next[seg_idx];
-                            // TODO: Multiple thread write, maybe only biggest??
                             s_bin_stream_selected_size = seg_size;
                             s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
                             s_bin_stream_curr_seg[thread_local_id] = seg_next;
@@ -308,7 +312,6 @@ kernel void coarse_raster(
                         }
                     }
                 }
-
                 // No more segments => break.
 
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -358,8 +361,9 @@ kernel void coarse_raster(
             }
 
             // 32 triangles per warp: Record emits (= tile intersections).
-
+            #ifdef CONF_SUB_GROUP_ENABLED
             if (sub_group_any(tri_idx != -1))
+            #endif
             {
                 int v0x = sub_s16lo_s16lo(tri_data.x, origin_x);
                 int v0y = sub_s16hi_s16lo(tri_data.x, origin_y);
@@ -385,7 +389,7 @@ kernel void coarse_raster(
                 uint mask_bit = 1 << get_local_id(0);
 
                 // Case A: All AABBs are small => record the full AABB using atomics.
-
+                #ifdef CONF_SUB_GROUP_ENABLED
                 if (sub_group_all(sizex <= 2 && sizey <= 2))
                 {
 
@@ -399,6 +403,7 @@ kernel void coarse_raster(
 
                 }
                 else
+                #endif
                 {
                     // Compute warp-AABB (scan-32).
 
@@ -406,13 +411,18 @@ kernel void coarse_raster(
                     if (tri_idx == -1)
                         aabb_mask = 0;
 
-                    local volatile uint* p = &s_scan_temp[get_local_id(1)][get_local_id(0) + 16];
-                    p[0] = aabb_mask, aabb_mask |= p[-1];
-                    p[0] = aabb_mask, aabb_mask |= p[-2];
-                    p[0] = aabb_mask, aabb_mask |= p[-4];
-                    p[0] = aabb_mask, aabb_mask |= p[-8];
-                    p[0] = aabb_mask, aabb_mask |= p[-16];
-                    p[0] = aabb_mask, aabb_mask = s_scan_temp[get_local_id(1)][47];
+                    #ifdef CONF_SUB_GROUP_ENABLED
+                    aabb_mask = sub_group_reduce_or_ui(aabb_mask);
+                    #else
+                    aabb_mask = local_reduce_or_1dim_ui(aabb_mask, l_temp);
+                    #endif
+                    // local volatile uint* p = &s_scan_temp[get_local_id(1)][get_local_id(0) + 16];
+                    // p[0] = aabb_mask, aabb_mask |= p[-1];
+                    // p[0] = aabb_mask, aabb_mask |= p[-2];
+                    // p[0] = aabb_mask, aabb_mask |= p[-4];
+                    // p[0] = aabb_mask, aabb_mask |= p[-8];
+                    // p[0] = aabb_mask, aabb_mask |= p[-16];
+                    // p[0] = aabb_mask, aabb_mask = s_scan_temp[get_local_id(1)][47];
 
                     uint mask_x = aabb_mask & 0xFFFF;
                     uint mask_y = aabb_mask >> 16;
@@ -441,7 +451,7 @@ kernel void coarse_raster(
                     d12x += sizex * d12y;
 
                     // Case B: Warp-AABB is not much larger than largest AABB => Check tiles in warp-AABB, record using ballots.
-
+                    #ifdef CONF_SUB_GROUP_ENABLED
                     if (sub_group_any(warea * 4 <= area * 8))
                     {
                         if (tri_idx != -1)
@@ -463,6 +473,7 @@ kernel void coarse_raster(
                     // Case C: General case => Check tiles in AABB, record using atomics.
 
                     else
+                    #endif
                     {
 
                         if (tri_idx != -1)
@@ -491,47 +502,74 @@ kernel void coarse_raster(
             //------------------------------------------------------------------------
 
             // Tile per thread: Initialize prefix sums.
-
+            // TODO: this only works if CR_BIN_SQR is divisible by get_local_size(0)
+            #ifdef CONF_SUB_GROUP_ENABLED
             for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += CR_COARSE_WARPS * 32)
+            #else
+            for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
+            #endif
             {
                 // Compute prefix sum of emits over warps.
+                #ifndef CONF_SUB_GROUP_ENABLED
+                int tile_in_bin = tile_in_bin_chunk + thread_local_id;
+                #endif
 
-                local uchar* src_ptr = (local uchar*)&s_warp_emit_mask[0][tile_in_bin];
-                local uchar* dst_ptr = (local uchar*)&s_warp_emit_prefix_sum[0][tile_in_bin];
-                int tile_emits = 0;
-                for (int i = 0; i < CR_COARSE_WARPS; i++)
+                local uchar *src_ptr, *dst_ptr;
+                local volatile uint* p;
+                int tile_emits, tile_allocs;
+                #ifndef CONF_SUB_GROUP_ENABLED
+                if (tile_in_bin < CR_BIN_SQR)
+                #endif
                 {
-                    tile_emits += popcount(*(uint*)src_ptr);
-                    *(uint*)dst_ptr = tile_emits;
-                    src_ptr += (CR_BIN_SQR + 1) * 4;
-                    dst_ptr += (CR_BIN_SQR + 1) * 4;
+                    src_ptr = (local uchar*)&s_warp_emit_mask[0][tile_in_bin];
+                    dst_ptr = (local uchar*)&s_warp_emit_prefix_sum[0][tile_in_bin];
+                    tile_emits = 0;
+                    for (int i = 0; i < CR_COARSE_WARPS; i++)
+                    {
+                        tile_emits += popcount(*(uint*)src_ptr);
+                        *(uint*)dst_ptr = tile_emits;
+                        src_ptr += (CR_BIN_SQR + 1) * 4;
+                        dst_ptr += (CR_BIN_SQR + 1) * 4;
+                    }
+
+                    // Determine the number of segments to allocate.
+
+                    int space_left = -s_tile_stream_curr_ofs[tile_in_bin] & (CR_TILE_SEG_SIZE - 1);
+                    tile_allocs = (tile_emits - space_left + CR_TILE_SEG_SIZE - 1) >> CR_TILE_SEG_LOG2;
+                    p = &s_tile_emit_prefix_sum[tile_in_bin + 1];
                 }
 
-                // Determine the number of segments to allocate.
-
-                int space_left = -s_tile_stream_curr_ofs[tile_in_bin] & (CR_TILE_SEG_SIZE - 1);
-                int tile_allocs = (tile_emits - space_left + CR_TILE_SEG_SIZE - 1) >> CR_TILE_SEG_LOG2;
-                local volatile uint* p = &s_tile_emit_prefix_sum[tile_in_bin + 1];
-
+                #ifdef CONF_SUB_GROUP_ENABLED
                 // All counters within the warp are small => compute prefix sum using ballot.
-
                 if (!sub_group_any(tile_emits >= 2))
                 {
                     uint m = getLaneMaskLe();
                     *p = (popcount(sub_group_ballot(tile_emits & 1) & m) << emit_shift) | popcount(sub_group_ballot(tile_allocs & 1) & m);
                 }
-
                 // Otherwise => scan-32 within the warp.
-
                 else
+                #endif
                 {
                     uint sum = (tile_emits << emit_shift) | tile_allocs;
-                    *p = sum; if (get_local_id(0) >= 1)  sum += p[-1];
-                    *p = sum; if (get_local_id(0) >= 2)  sum += p[-2];
-                    *p = sum; if (get_local_id(0) >= 4)  sum += p[-4];
-                    *p = sum; if (get_local_id(0) >= 8)  sum += p[-8];
-                    *p = sum; if (get_local_id(0) >= 16) sum += p[-16];
-                    *p = sum;
+                    uint scan_sum;
+                    #ifdef CONF_SUB_GROUP_ENABLED
+                    scan_sum = sub_group_scan_inclusive_add_ui(sum);
+                    #else
+                    scan_sum = local_scan_inclusive_add_1dim_ui(sum, l_temp);
+                    #endif
+
+                    #ifndef CONF_SUB_GROUP_ENABLED
+                    if (tile_in_bin < CR_BIN_SQR)
+                    #endif
+                    {
+                        *p = scan_sum;
+                    }
+                    // *p = sum; if (get_local_id(0) >= 1)  sum += p[-1];
+                    // *p = sum; if (get_local_id(0) >= 2)  sum += p[-2];
+                    // *p = sum; if (get_local_id(0) >= 4)  sum += p[-4];
+                    // *p = sum; if (get_local_id(0) >= 8)  sum += p[-8];
+                    // *p = sum; if (get_local_id(0) >= 16) sum += p[-16];
+                    // *p = sum;
                 }
             }
 
@@ -539,20 +577,34 @@ kernel void coarse_raster(
 
             barrier(CLK_LOCAL_MEM_FENCE);
 
-            if (thread_local_id < CR_BIN_SQR / 32)
+            //if (thread_local_id < CR_BIN_SQR / 32)
+            // TODO this is only valid if CR_BIN_SQR / 32 < sub_group_size() 
+            #ifdef CONF_SUB_GROUP_ENABLED
+            if (thread_local_id < get_local_size(0))
+            #endif
             {
-                int sum = s_tile_emit_prefix_sum[(thread_local_id << 5) + 32];
-                local volatile uint* p = &s_scan_temp[0][thread_local_id + 16];
-                p[0] = sum;
-                #if (CR_BIN_SQR > 1 * 32)
-                    sum += p[-1], p[0] = sum;
+                int sum = 0;
+                if (thread_local_id < CR_BIN_SQR / 32)
+                    sum = s_tile_emit_prefix_sum[(thread_local_id << 5) + 32];
+                int scan_sum;
+                #ifdef CONF_SUB_GROUP_ENABLED
+                scan_sum = sub_group_scan_inclusive_add_ui(sum);
+                #else
+                scan_sum = local_scan_inclusive_add_1dim_ui(sum, l_temp);
                 #endif
-                #if (CR_BIN_SQR > 2 * 32)
-                    sum += p[-2], p[0] = sum;
-                #endif
-                #if (CR_BIN_SQR > 4 * 32)
-                    sum += p[-4], p[0] = sum;
-                #endif
+                if (thread_local_id < CR_BIN_SQR / 32)
+                    s_scan_temp[0][thread_local_id + 16] = scan_sum;
+                // local volatile uint* p = &s_scan_temp[0][thread_local_id + 16];
+                // p[0] = sum;
+                // #if (CR_BIN_SQR > 1 * 32)
+                //     sum += p[-1], p[0] = sum;
+                // #endif
+                // #if (CR_BIN_SQR > 2 * 32)
+                //     sum += p[-2], p[0] = sum;
+                // #endif
+                // #if (CR_BIN_SQR > 4 * 32)
+                //     sum += p[-4], p[0] = sum;
+                // #endif
             }
 
             barrier(CLK_LOCAL_MEM_FENCE);
@@ -711,7 +763,7 @@ kernel void coarse_raster(
             }
 
             // Tile per thread: Fix previous segment's next-pointer and update s_tile_stream_curr_ofs.
-
+            // TODO: rm this sync, maybe unecessary ??
             barrier(CLK_LOCAL_MEM_FENCE);
             for (int tile_in_bin = CR_COARSE_WARPS * 32 - 1 - thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += CR_COARSE_WARPS * 32)
             {
@@ -775,18 +827,40 @@ kernel void coarse_raster(
         // One thread: Allocate space for active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);
-        if (thread_local_id < CR_BIN_SQR / 32)
+        // #ifdef CONF_SUB_GROUP_ENABLED
+        // if (thread_local_id < get_local_size(0))
+        // #endif
         {
             local volatile uint* p = &s_scan_temp[0][thread_local_id + 16];
-            uint sum = p[0];
+            uint sum = 0;
+            if (thread_local_id < CR_BIN_SQR / 32) {
+                // s_scan_temp[0][thread_local_id + 8] = 0;
+                sum = s_scan_temp[0][thread_local_id + 16];
+            }
+            // uint scan_sum;
+            // #ifdef CONF_SUB_GROUP_ENABLED
+            // #else
+            //     scan_sum = local_scan_inclusive_add_1dim_ui(sum, l_temp);
+            // #endif
+            // sum = sub_group_scan_inclusive_add_ui(sum);
+            
             #if (CR_BIN_SQR > 1 * 32)
+            if (thread_local_id < CR_BIN_SQR / 32) {
                 sum += p[-1], p[0] = sum;
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             #if (CR_BIN_SQR > 2 * 32)
+            if (thread_local_id < CR_BIN_SQR / 32) {
                 sum += p[-2], p[0] = sum;
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             #if (CR_BIN_SQR > 4 * 32)
+            if (thread_local_id < CR_BIN_SQR / 32) {
                 sum += p[-4], p[0] = sum;
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
             #endif
 
             if (thread_local_id == CR_BIN_SQR / 32 - 1)
@@ -796,16 +870,51 @@ kernel void coarse_raster(
         // Tile per thread: Output active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);
-        DEBUG();
+        #ifdef CONF_SUB_GROUP_ENABLED
         for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += CR_COARSE_WARPS * 32)
+        #else
+        for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
+        #endif
         {
-            if (s_tile_stream_curr_ofs[tile_in_bin] < 0)
+            #ifndef CONF_SUB_GROUP_ENABLED
+            int tile_in_bin = tile_in_bin_chunk + thread_local_id;
+            bool enable = tile_in_bin < CR_BIN_SQR;
+            #endif
+
+            bool pass = 1;
+            #ifndef CONF_SUB_GROUP_ENABLED
+            if (enable)
+            #endif
+            {
+                pass = s_tile_stream_curr_ofs[tile_in_bin] < 0;
+            }
+
+            #ifdef CONF_SUB_GROUP_ENABLED
+            if (pass)
                 continue;
+            #endif
 
             int active_idx = s_first_active_idx;
-            active_idx += s_scan_temp[0][(tile_in_bin >> 5) + 15];
-            active_idx += popcount(sub_group_activemask() & getLaneMaskLt());
-            g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
+            #ifndef CONF_SUB_GROUP_ENABLED
+            if (!pass)
+            #endif
+            {
+                active_idx += s_scan_temp[0][(tile_in_bin >> 5) + 15];
+            }
+
+            uint activemask;
+            #ifdef CONF_SUB_GROUP_ENABLED
+            activemask = sub_group_activemask();
+            #else
+            activemask = local_reduce_or_1dim_ui((pass ? 0 : 1) << get_local_id(0), l_temp);
+            #endif
+            active_idx += popcount(activemask & getLaneMaskLt());
+            #ifndef CONF_SUB_GROUP_ENABLED
+            if (!pass)
+            #endif
+            {
+                g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
+            }
         }
 
     }
