@@ -31,20 +31,20 @@ typedef struct {
 
 
 
-uint local_scan_inclusive_add_ui(uint value, local volatile uint* l_temp) {
-    uint local_id = get_local_id(0);
-    local volatile uint* ptr = &l_temp[local_id];
-    *ptr = value;
-    #pragma unroll
-    for(int i=0; i<CONF_WARP_SIZE_LOG2 + CONF_BR_WARPS_LOG2; ++i) {
-        barrier(CLK_LOCAL_MEM_FENCE);
-        if (local_id >= 1 << i) {
-            value += ptr[-(1 << i)];    
-            *ptr = value;   
-        }
-    }
-    return value;
-}
+// uint local_scan_inclusive_add_ui(uint value, local volatile uint* l_temp) {
+//     uint local_id = get_local_id(0);
+//     local volatile uint* ptr = &l_temp[local_id];
+//     *ptr = value;
+//     #pragma unroll
+//     for(int i=0; i<CONF_WARP_SIZE_LOG2 + CONF_BR_WARPS_LOG2; ++i) {
+//         barrier(CLK_LOCAL_MEM_FENCE);
+//         if (local_id >= 1 << i) {
+//             value += ptr[-(1 << i)];    
+//             *ptr = value;   
+//         }
+//     }
+//     return value;
+// }
 
 
 /**
@@ -251,7 +251,8 @@ void bin_raster(
                 #ifdef __IMAGE_SUPPORT__
                 tri_data = read_imageui(t_tri_header, data_idx);
                 #else
-                tri_data = * ((global uint4*) &g_tri_header[data_idx]);
+                tri_data = *(((global uint4*) g_tri_header) + data_idx); 
+                // * ((global uint4*) &g_tri_header[data_idx]);
                 #endif
             }
             

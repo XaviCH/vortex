@@ -141,8 +141,9 @@ void coarse_raster(
     global int* g_tile_seg_next,
     global const CRTriangleHeader*  g_tri_header,
 
-    // #ifdef __IMAGE_SUPPORT__
+    #ifdef __IMAGE_SUPPORT__
     read_only image1d_buffer_t t_tri_header,
+    #endif
 
     const int c_deferred_clear,
     const int c_height_tiles,
@@ -357,7 +358,11 @@ void coarse_raster(
                 int subtri_idx = tri_idx & 7;
                 if (subtri_idx != 7)
                     data_idx = g_tri_header[data_idx].misc + subtri_idx;
+                #ifdef __IMAGE_SUPPORT__
                 tri_data = read_imageui(t_tri_header, data_idx);
+                #else
+                tri_data = *(((global uint4*) g_tri_header) + data_idx); 
+                #endif
             }
 
             // 32 triangles per warp: Record emits (= tile intersections).
