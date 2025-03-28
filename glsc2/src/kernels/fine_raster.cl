@@ -1,5 +1,8 @@
-//#include "glsc2/src/kernels/common/headers.cl"
+#ifdef __COMPILER_RELATIVE_PATH__
 #include "common/headers.cl"
+#else
+#include "glsc2/src/kernels/common/headers.cl"
+#endif
 
 // Render flags
 // #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
@@ -488,61 +491,103 @@ kernel void fine_raster_single_sample(
         if (get_local_id(0) == 0)
             active_idx = atomic_add(a_fine_counter, 1);
 
-        active_idx = sub_group_broadcast_ui(active_idx, 0);
-        // barrier(CLK_LOCAL_MEM_FENCE); // added for unexpected behaviour
-        // sub_group_barrier();
-        // int active_idx = w_temp[16];
-        if (active_idx >= *a_num_active_tiles)
+        #ifdef CONF_SUB_GROUP_ENABLED
         {
-            break;
+            active_idx = sub_group_broadcast_ui(active_idx, 0);
         }
+        #else
+        {
+            if (get_local_id(0) == 0) 
+                w_temp[16] = active_idx;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            active_idx = w_temp[16];
+        }
+        #endif
 
-        int tile_idx = g_active_tiles[active_idx];
-        int segment = g_tile_first_seg[tile_idx];
-        int tile_y = idiv_fast(tile_idx, c_width_tiles);
-        int tile_x = tile_idx - tile_y * c_width_tiles;
+        bool is_not_active = active_idx >= *a_num_active_tiles;
+        #ifdef CONF_SUB_GROUP_ENABLED
+        {
+            if (is_not_active)
+                break;
+        }
+        #else
+        {
+            if (local_reduce_and_2dim_ui(is_not_active, s_temp))
+                break;
+        }
+        #endif
+
+        int tile_idx, segment, tile_y, tile_x;
+        #ifndef CONF_SUB_GROUP_ENABLED
+        if (!is_not_active)
+        #endif
+        {
+            tile_idx = g_active_tiles[active_idx];
+            segment = g_tile_first_seg[tile_idx];
+            tile_y = idiv_fast(tile_idx, c_width_tiles);
+            tile_x = tile_idx - tile_y * c_width_tiles;
+        }
 
         // initialize per-tile state
         int tri_read = 0, tri_write = 0;
         int frag_read = 0, frag_write = 0;
         w_triangle_frag[63] = 0; // "previous triangle"
 
-        // deferred clear => clear tile
-        if (c_deferred_clear)
+        #ifndef CONF_SUB_GROUP_ENABLED
+        if (!is_not_active)
+        #endif
         {
-			w_tile_color[get_local_id(0)] = c_clear_color;
-            w_tile_depth[get_local_id(0)] = c_clear_depth;
-            w_tile_color[get_local_id(0) + 32] = c_clear_color;
-            w_tile_depth[get_local_id(0) + 32] = c_clear_depth;
-        }
+            // deferred clear => clear tile
+            if (c_deferred_clear)
+            {
+                w_tile_color[get_local_id(0)] = c_clear_color;
+                w_tile_depth[get_local_id(0)] = c_clear_depth;
+                w_tile_color[get_local_id(0) + 32] = c_clear_color;
+                w_tile_depth[get_local_id(0) + 32] = c_clear_depth;
+            }
 
-        // otherwise => read tile from framebuffer
-        else
-        {
-            int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
-            int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            // TODO now only one component is access
-			w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
-            w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
-            w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
-            w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
+            // otherwise => read tile from framebuffer
+            else
+            {
+                int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
+                int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
+                // TODO now only one component is access
+                w_tile_color[get_local_id(0)] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
+                w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y})[surf_x%4];
+                w_tile_color[get_local_id(0) + 32] = read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
+                w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4})[surf_x%4];
+            }
         }
 
         uint tile_z_max;
         bool tile_z_upd;
         init_tile_z_max(&tile_z_max, &tile_z_upd, w_tile_depth);
-        //w_tile_color[get_local_id(0)] = 0xFFFFFFFFu;
-        //w_tile_color[get_local_id(0) + 32] = 0xFFFFFFFFu;
         
         // process fragments
         for(;;)
         {
             // need to queue more fragments?
+            bool need_fragments = frag_write - frag_read < 32 && segment >= 0;
+
+            bool local_need_fragments = 0;
+            #ifndef CONF_SUB_GROUP_ENABLED
+            {
+                need_fragments = need_fragments && !is_not_active;
+                local_need_fragments = local_reduce_or_ui(need_fragments, s_temp);
+            }
+            #endif
             
-            if (frag_write - frag_read < 32 && segment >= 0)
+            // This is done to allow 1dim comunication between local group
+            if (need_fragments || local_need_fragments)
             {
                 // update tile z
-                update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth); // , w_temp);
+
+                #ifndef CONF_SUB_GROUP_ENABLED
+                if (need_fragments)
+                #endif
+                {
+                    update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth); // , w_temp);
+                }
                 
                 // read triangles
                 do
@@ -550,57 +595,120 @@ kernel void fine_raster_single_sample(
                     // read triangle index and data, advance to next segment
                     int tri_idx, data_idx;
                     uint4 tri_header;
-                    get_triangle(&tri_idx, &data_idx, &tri_header, &segment, 
-                        g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count, t_tri_header);
+                    #ifndef CONF_SUB_GROUP_ENABLED
+                    if (need_fragments)
+                    #endif
+                    {
+                        get_triangle(&tri_idx, &data_idx, &tri_header, &segment, 
+                            g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count, t_tri_header);
 
-                    // early z cull
-                    if (tri_idx >= 0 && early_z_cull(c_render_mode_flags, tri_header, tile_z_max))
-                        tri_idx = -1;
+                        // early z cull
+                        if (tri_idx >= 0 && early_z_cull(c_render_mode_flags, tri_header, tile_z_max))
+                            tri_idx = -1;
+                    }
 
                     // determine coverage
-                    ulong coverage = triangle_pixel_coverage(0, tri_header, tile_x, tile_y, s_cover8x8_lut, c_viewport_width, c_viewport_height);
-                    int pop = (tri_idx == -1) ? 0 : num_fragments(c_render_mode_flags, coverage);
+                    ulong coverage;
+                    int pop;
+                    #ifndef CONF_SUB_GROUP_ENABLED
+                    if (need_fragments)
+                    #endif
+                    {
+                        coverage = triangle_pixel_coverage(0, tri_header, tile_x, tile_y, s_cover8x8_lut, c_viewport_width, c_viewport_height);
+                        pop = (tri_idx == -1) ? 0 : num_fragments(c_render_mode_flags, coverage);
+                    }
 
                     // fragment count scan
-                    uint frag = sub_group_scan_inclusive_add_ui(pop); // scan32_value(pop, w_temp);
-                    uint temp_frag = frag;
-                    frag += frag_write; // frag now holds cumulative fragment count
-                    frag_write += sub_group_broadcast_ui(temp_frag, 31); // scan32_total(w_temp);
+                    uint frag;
+                    // #ifdef CONF_SUB_GROUP_ENABLED
+                    {
+                        frag = sub_group_scan_inclusive_add_ui(pop); // scan32_value(pop, w_temp);
+                        uint temp_frag = frag;
+                        frag += frag_write; // frag now holds cumulative fragment count
+                        frag_write += sub_group_broadcast_ui(temp_frag, get_local_size(0) - 1); // scan32_total(w_temp);
+                    }
+                    // #else
+                    // {
+                    //     frag = local_scan_inclusive_add_1dim_ui(pop, s_temp);
+                    //     barrier(CLK_LOCAL_MEM_FENCE);
+                    //     frag += frag_write; // frag now holds cumulative fragment count
+                    //     size_t sub_group_id = get_local_linear_id() / get_local_size(0);
+                    //     size_t last_sub_group_member = (sub_group_id+1) * get_local_size(0) - 1;
+                    //     if (need_fragments)
+                    //         frag_write += *((local volatile uint*)s_temp + last_sub_group_member);
+                    // }
+                    // #endif
 
                     // queue non-empty triangles
-                    uint good_mask = sub_group_ballot(pop != 0);
-                    if (pop != 0)
+                    uint good_mask;
+                    // #ifdef CONF_SUB_GROUP_ENABLED
+                    good_mask = sub_group_ballot(pop != 0);
+                    // #else
+                    // good_mask = local_reduce_or_1dim_ui((pop != 0) << get_local_id(0), s_temp);
+                    // #endif
+
+                    #ifndef CONF_SUB_GROUP_ENABLED
+                    if (need_fragments)
+                    #endif
                     {
-                        int idx = (tri_write + popcount(good_mask & getLaneMaskLt())) & 63;
-                        w_triangle_idx  [idx] = tri_idx;
-                        w_tri_data_idx  [idx] = data_idx;
-                        w_triangle_frag [idx] = frag;
-                        w_triangle_cov  [idx] = coverage;
+                        if (pop != 0)
+                        {
+                            int idx = (tri_write + popcount(good_mask & getLaneMaskLt())) & 63;
+                            w_triangle_idx  [idx] = tri_idx;
+                            w_tri_data_idx  [idx] = data_idx;
+                            w_triangle_frag [idx] = frag;
+                            w_triangle_cov  [idx] = coverage;
+                        }
+                        tri_write += popcount(good_mask);
                     }
-                    tri_write += popcount(good_mask);
+
+                    need_fragments = frag_write - frag_read < 32 && segment >= 0;
+                    #ifndef CONF_SUB_GROUP_ENABLED
+                    need_fragments = need_fragments && !is_not_active;
+                    local_need_fragments = local_reduce_or_ui(need_fragments, s_temp);
+                    #endif
                 }
-                while (frag_write - frag_read < 32 && segment >= 0);
+                while (need_fragments || local_need_fragments);
             }
 
             // end of segment?
-            if (frag_read == frag_write)
+            bool end_of_segment = frag_read == frag_write;
+            bool local_end_of_segment = 1;
+            #ifndef CONF_SUB_GROUP_ENABLED
+            end_of_segment = end_of_segment || is_not_active;
+            local_end_of_segment = local_reduce_and_ui(end_of_segment ? 1 : 0, s_temp);
+            #endif
+            if (end_of_segment && local_end_of_segment)
                 break;
             
             // tag triangle boundaries
-            w_temp[get_local_id(0) + 16] = 0;
-            if (tri_read + get_local_id(0) < tri_write)
+            #ifndef CONF_SUB_GROUP_ENABLED
+            if (!end_of_segment)
+            #endif
             {
-                int idx = w_triangle_frag[(tri_read + get_local_id(0)) & 63] - frag_read;
-                if (idx <= 32)
-                    w_temp[idx + 16 - 1] = 1;
+                w_temp[get_local_id(0) + 16] = 0;
+                if (tri_read + get_local_id(0) < tri_write)
+                {
+                    int idx = w_triangle_frag[(tri_read + get_local_id(0)) & 63] - frag_read;
+                    if (idx <= 32)
+                        w_temp[idx + 16 - 1] = 1;
+                }
             }
             
             //sub_group_barrier();
 
             int rop_lane_idx = popcount(rop_lane_mask);
-            uint boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
+            uint boundary_mask;
+            // #ifdef CONF_SUB_GROUP_ENABLED
+            boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
+            // #else
+            // boundary_mask = local_reduce_or_1dim_ui((w_temp[rop_lane_idx + 16] ? 1 : 0) << get_local_id(0), s_temp);
+            // #endif
             // distribute fragments
             
+            #ifndef CONF_SUB_GROUP_ENABLED
+            if (!end_of_segment)
+            #endif
             if (rop_lane_idx < frag_write - frag_read)
             {
                 int tri_buf_idx = (tri_read + popcount(boundary_mask & rop_lane_mask)) & 63;
@@ -658,7 +766,9 @@ kernel void fine_raster_single_sample(
         }
 
         // Write tile back to the framebuffer.
-
+        #ifndef CONF_SUB_GROUP_ENABLED
+        if (!is_not_active)
+        #endif
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
