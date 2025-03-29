@@ -147,7 +147,7 @@ inline uint local_scan_inclusive_and_2dim_ui(uint value, local volatile uint* l_
     for(int i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
-            value &= ptr[-i];    
+            value = value & ptr[-i];    
             *ptr = value;
         }
     }
@@ -165,10 +165,10 @@ inline uint local_scan_inclusive_or_1dim_ui(uint value, local volatile uint* l_t
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
     *ptr = value;
     #pragma unroll
-    for(int i=0; i<get_local_size(0); ++i) {
+    for(int i=1; i<get_local_size(0); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
-        if (local_id >= 1 << i) {
-            value |= ptr[-(1 << i)];    
+        if (local_id >= i) {
+            value = value | ptr[-i];    
             *ptr = value;
         }
     }
@@ -178,8 +178,7 @@ inline uint local_scan_inclusive_or_1dim_ui(uint value, local volatile uint* l_t
 inline uint local_reduce_or_1dim_ui(uint value, local volatile uint* l_temp) {
     local_scan_inclusive_or_1dim_ui(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
-    size_t sub_group_id = get_local_id(1);
-    return l_temp[(sub_group_id+1) * get_local_size(0) - 1];
+    return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
 }
 
 inline uint local_scan_inclusive_or_ui(uint value, local volatile uint* l_temp) {
@@ -190,7 +189,7 @@ inline uint local_scan_inclusive_or_ui(uint value, local volatile uint* l_temp) 
     for(int i=1; i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
-            value |= ptr[-i];    
+            value = value | ptr[-i];    
             *ptr = value;
         }
     }

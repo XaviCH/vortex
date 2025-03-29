@@ -512,7 +512,7 @@ kernel void fine_raster_single_sample(
         }
         #else
         {
-            if (local_reduce_and_2dim_ui(is_not_active, s_temp))
+            if (local_reduce_and_ui(is_not_active ? 1 : 0, s_temp))
                 break;
         }
         #endif
@@ -620,32 +620,32 @@ kernel void fine_raster_single_sample(
 
                     // fragment count scan
                     uint frag;
-                    // #ifdef CONF_SUB_GROUP_ENABLED
+                    #ifdef CONF_SUB_GROUP_ENABLED
                     {
                         frag = sub_group_scan_inclusive_add_ui(pop); // scan32_value(pop, w_temp);
                         uint temp_frag = frag;
                         frag += frag_write; // frag now holds cumulative fragment count
                         frag_write += sub_group_broadcast_ui(temp_frag, get_local_size(0) - 1); // scan32_total(w_temp);
                     }
-                    // #else
-                    // {
-                    //     frag = local_scan_inclusive_add_1dim_ui(pop, s_temp);
-                    //     barrier(CLK_LOCAL_MEM_FENCE);
-                    //     frag += frag_write; // frag now holds cumulative fragment count
-                    //     size_t sub_group_id = get_local_linear_id() / get_local_size(0);
-                    //     size_t last_sub_group_member = (sub_group_id+1) * get_local_size(0) - 1;
-                    //     if (need_fragments)
-                    //         frag_write += *((local volatile uint*)s_temp + last_sub_group_member);
-                    // }
-                    // #endif
+                    #else
+                    {
+                        frag = local_scan_inclusive_add_1dim_ui(pop, s_temp);
+                        barrier(CLK_LOCAL_MEM_FENCE);
+                        frag += frag_write; // frag now holds cumulative fragment count
+                        size_t sub_group_id = get_local_linear_id() / get_local_size(0);
+                        size_t last_sub_group_member = (sub_group_id+1) * get_local_size(0) - 1;
+                        if (need_fragments)
+                            frag_write += *((local volatile uint*)s_temp + last_sub_group_member);
+                    }
+                    #endif
 
                     // queue non-empty triangles
                     uint good_mask;
-                    // #ifdef CONF_SUB_GROUP_ENABLED
+                    #ifdef CONF_SUB_GROUP_ENABLED
                     good_mask = sub_group_ballot(pop != 0);
-                    // #else
-                    // good_mask = local_reduce_or_1dim_ui((pop != 0) << get_local_id(0), s_temp);
-                    // #endif
+                    #else
+                    good_mask = local_reduce_or_1dim_ui((pop != 0) << get_local_id(0), s_temp);
+                    #endif
 
                     #ifndef CONF_SUB_GROUP_ENABLED
                     if (need_fragments)
@@ -699,11 +699,13 @@ kernel void fine_raster_single_sample(
 
             int rop_lane_idx = popcount(rop_lane_mask);
             uint boundary_mask;
-            // #ifdef CONF_SUB_GROUP_ENABLED
+            #ifdef CONF_SUB_GROUP_ENABLED
+            // TODO subgroup barrier w_temp
             boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
-            // #else
-            // boundary_mask = local_reduce_or_1dim_ui((w_temp[rop_lane_idx + 16] ? 1 : 0) << get_local_id(0), s_temp);
-            // #endif
+            #else
+            barrier(CLK_LOCAL_MEM_FENCE);
+            boundary_mask = local_reduce_or_1dim_ui((w_temp[rop_lane_idx + 16] ? 1 : 0) << get_local_id(0), s_temp);
+            #endif
             // distribute fragments
             
             #ifndef CONF_SUB_GROUP_ENABLED
