@@ -181,6 +181,27 @@ inline uint local_reduce_or_1dim_ui(uint value, local volatile uint* l_temp) {
     return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
 }
 
+inline uint local_scan_inclusive_max_1dim_ui(uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_id(0);
+    local volatile uint* ptr = &l_temp[get_local_linear_id()];
+    *ptr = value;
+    #pragma unroll
+    for(int i=1; i<get_local_size(0); i=i*2) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= i) {
+            value = max(value, ptr[-i]);    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+
+inline uint local_reduce_max_1dim_ui(uint value, local volatile uint* l_temp) {
+    local_scan_inclusive_max_1dim_ui(value, l_temp);
+    barrier(CLK_LOCAL_MEM_FENCE);
+    return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
+}
+
 inline uint local_scan_inclusive_or_ui(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
