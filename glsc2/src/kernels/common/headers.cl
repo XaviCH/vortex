@@ -477,7 +477,8 @@ inline uint     getLaneMaskLe       (void)                      { return (2 << g
 #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
 #define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
 #define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
-#define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 2)
+#define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 3)
+#define RENDER_MODE_FLAG_ENABLE_CULLFACE    (1 << 4)
 
 // UTILS
 
