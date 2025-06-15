@@ -1,33 +1,7 @@
-/*
- *  Copyright (c) 2009-2011, NVIDIA Corporation
- *  All rights reserved.
- *
- *  Redistribution and use in source and binary forms, with or without
- *  modification, are permitted provided that the following conditions are met:
- *      * Redistributions of source code must retain the above copyright
- *        notice, this list of conditions and the following disclaimer.
- *      * Redistributions in binary form must reproduce the above copyright
- *        notice, this list of conditions and the following disclaimer in the
- *        documentation and/or other materials provided with the distribution.
- *      * Neither the name of NVIDIA Corporation nor the
- *        names of its contributors may be used to endorse or promote products
- *        derived from this software without specific prior written permission.
- *
- *  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- *  ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- *  WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- *  DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
- *  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- *  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- *  ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- *  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- *  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+#ifndef CONSTANTS_H
+#define CONSTANTS_H
 
-#pragma once
-
-//defs
+//
 
 #define FW_U32_MAX          (0xFFFFFFFFu)
 #define FW_S32_MIN          (~0x7FFFFFFF)
@@ -41,13 +15,14 @@
 #define FW_F64_MAX          (1.7976931348623158e+308)
 #define FW_PI               (3.14159265358979323846f)
 
+#define FW_ARRAY_SIZE(X)    ((int)(sizeof(X) / sizeof((X)[0])))
 
 //------------------------------------------------------------------------
 
-#define CR_MAXVIEWPORT_LOG2     11      // ViewportSize / PixelSize.
-#define CR_SUBPIXEL_LOG2        4       // PixelSize / SubpixelSize.
+#define CR_MAXVIEWPORT_LOG2     11      // ViewportSize / PixelSize. Max value for any viewport axis
+#define CR_SUBPIXEL_LOG2        4       // PixelSize / SubpixelSize. ??
 
-#define CR_MAXBINS_LOG2         4       // ViewportSize / BinSize.
+#define CR_MAXBINS_LOG2         4       // ViewportSize / BinSize. Divide the viewport on x bins
 #define CR_BIN_LOG2             4       // BinSize / TileSize.
 #define CR_TILE_LOG2            3       // TileSize / PixelSize.
 
@@ -64,7 +39,6 @@
 #define CR_MAXSUBTRIS_LOG2      24      // Triangle structs. Dictated by CoarseRaster.
 #define CR_COARSE_QUEUE_LOG2    10      // Triangles.
 
-#define CR_SETUP_WARPS          2
 #define CR_SETUP_OPT_BLOCKS     8
 #define CR_BIN_WARPS            16
 #define CR_COARSE_WARPS         16      // Must be a power of two.
@@ -112,6 +86,12 @@
 //------------------------------------------------------------------------
 
 // Render flags
-#define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
-#define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
-#define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
+#define RENDER_MODE_FLAG_ENABLE_QUADS        (1 << 0)
+#define RENDER_MODE_FLAG_ENABLE_DEPTH        (1 << 1)
+#define RENDER_MODE_FLAG_ENABLE_LERP         (1 << 2)
+#define RENDER_MODE_FLAG_ENABLE_BLENDER      (1 << 3)
+#define RENDER_MODE_FLAG_ENABLE_CULL_FRONT   (1 << 4)
+#define RENDER_MODE_FLAG_ENABLE_CULL_BACK    (1 << 5)
+#define RENDER_MODE_FLAG_ENABLE_STENCIL      (1 << 6)
+
+#endif

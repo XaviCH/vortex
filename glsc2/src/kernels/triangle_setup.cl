@@ -1,9 +1,12 @@
 #ifdef __COMPILER_RELATIVE_PATH__
-#include "common/headers.cl"
+#include "common.cl"
 #else
-#include "glsc2/src/kernels/common/headers.cl"
+#include "glsc2/src/kernels/common.cl"
 #endif
 
+/**
+    Calculate window positions of points and limit box
+ */
 inline void snapTriangle(
     float4 v0, float4 v1, float4 v2, 
     int2* p0, int2* p1, int2* p2, float3* rcpW, int2* lo, int2* hi,
@@ -20,15 +23,10 @@ inline void snapTriangle(
     *hi = (int2)(max_max(p0->x, p1->x, p2->x), max_max(p0->y, p1->y, p2->y));
 }
 
-//------------------------------------------------------------------------
-// 0 = Visible.
-// 1 = Backfacing.
-// 2 = Between pixels.
 
-#define CULL_FRONT                          (1 << 0)
-#define CULL_BACK                           (1 << 1)
-#define CULL_FRONT_AND_BACK                 (CULL_FRONT | CULL_BACK)
-
+/**
+    Cull checking
+ */
 inline int prepareTriangle(
     int2 p0, int2 p1, int2 p2, int2 lo, int2 hi,
     int2* d1, int2* d2, int* area, 
@@ -196,18 +194,21 @@ inline void setupTriangle(
 
 //------------------------------------------------------------------------
 
-
-inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, uint c_render_mode_flags, uint c_cull_face) {
+/**
+    Depending on the mode, flip the triangle.
+    Swap v0 and v2.
+ */
+inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, uint c_render_mode_flags) {
     float2 d1 = (float2)(v1->x - v0->x, v1->y - v0->y);
     float2 d2 = (float2)(v2->x - v0->x, v2->y - v0->y);
     float area = d1.x * d2.y - d1.y * d2.x;
     // int area = cross((float2)(v1->x - v0->x, v1->y - v0->y), (float2)(v2->x - v0->x, v2->y - v0->y));
     bool need_to_flip = 
         (area < 0 && (
-            (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_CULLFACE) == 0 || (c_cull_face & CULL_BACK) == 0
+            (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_CULL_BACK) == 0
         )) ||
         (area > 0 && (
-            (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_CULLFACE) != 0 && (c_cull_face & CULL_FRONT) != 0
+            (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_CULL_FRONT) != 0
         ));
 
     if (need_to_flip) {
@@ -222,11 +223,12 @@ inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, uint c_
 }
 
 /**
-    1 dim kernel. 
-    Size is expected to be equal of number of triangles, greater size would not break the kernel 
+    Size is expected to be equal of number of triangles, greater size would not break the kernel
+    Each thread process a triangle, 
+    total size expected to be equal to the total size of triangles to be processed.
 */
 kernel
-//__attribute__((reqd_work_group_size(1, 1, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SUBGROUP_THREADS, CONF_SETUP_SUBGROUPS, 1)))
 void triangle_setup(
     global int* a_num_subtris,
 
@@ -235,13 +237,12 @@ void triangle_setup(
     global CRTriangleData* g_tri_data,
     global uchar* g_tri_subtris,
 
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_SETUP_IMAGE_ENABLED
     read_only image1d_buffer_t t_vertex_buffer,
     #else
     global const float4* g_vertex_buffer,
     #endif 
 
-    const int c_cull_face,
     const int c_num_tris, 
     const int c_max_subtris,
     const uint c_render_mode_flags,
@@ -251,10 +252,14 @@ void triangle_setup(
     const int c_viewport_width
 )
 {
-    local float s_bary[CR_SETUP_WARPS * 32][18]; // TODO: WARP DEPENDANT
-    local float* bary = s_bary[get_local_id(0) + get_local_id(1) * 32];
-    // TODO: Maybe local memory is faster than private
-    //private float bary[18];
+    // Store bary buffer in local mem if fits 
+
+    #ifdef CONF_SETUP_LOCAL_MEM_ENABLED
+    local float s_bary[CONF_SETUP_SUBGROUPS * DEVICE_SUBGROUP_THREADS][18];
+    local float* bary = s_bary[get_local_linear_id()];
+    #else
+    private float bary[18];
+    #endif
 
     int2 p0, p1, p2, lo, hi, d1, d2;
     float3 rcpW;
@@ -262,19 +267,19 @@ void triangle_setup(
 
     // Pick a task.
 
-    int taskIdx = get_global_id(0); // get_local_id(0) + 32 * (get_local_id(1) + CR_SETUP_WARPS * (get_group_id(0) + get_num_groups(0) * get_group_id(1)));
+    int task_idx = get_global_linear_id(); // get_local_id(0) + 32 * (get_local_id(1) + CR_SETUP_WARPS * (get_group_id(0) + get_num_groups(0) * get_group_id(1)));
     
-    if (taskIdx >= c_num_tris)
+    if (task_idx >= c_num_tris)
         return;
 
     // Read vertices.
     
-    global const int* index_buffer = g_index_buffer + taskIdx*3;
-    int3 vidx = {*index_buffer, *(index_buffer+1), *(index_buffer+2)}; // int3 is an int4 in opencl check
+    global const int* index_buffer = g_index_buffer + task_idx*3;
+    int3 vidx = {*index_buffer, *(index_buffer+1), *(index_buffer+2)}; // int3 is an int4 in Opencl check
     int stride = c_vertex_size / sizeof(float4);
 
-    float4 v0, v1, v2; // gl_Position must be in first position
-    #ifdef __IMAGE_SUPPORT__
+    float4 v0, v1, v2;
+    #ifdef CONF_SETUP_IMAGE_ENABLED
     v0 = read_imagef(t_vertex_buffer, vidx.x * stride);
     v1 = read_imagef(t_vertex_buffer, vidx.y * stride);
     v2 = read_imagef(t_vertex_buffer, vidx.z * stride);
@@ -295,13 +300,13 @@ void triangle_setup(
             (v0.w < +v0.z && v1.w < +v1.z && v2.w < +v2.z) |
             (v0.w < -v0.z && v1.w < -v1.z && v2.w < -v2.z))
         {
-            g_tri_subtris[taskIdx] = 0; 
+            g_tri_subtris[task_idx] = 0; 
             return;
         }
     }
 
     // Flip triangle depending on culling mode
-    flipTriangle(&vidx, &v0, &v1, &v2, c_render_mode_flags, c_cull_face);
+    flipTriangle(&vidx, &v0, &v1, &v2, c_render_mode_flags);
 
     // Inside depth range => try to snap vertices.
     if (v0.w >= fabs(v0.z) && v1.w >= fabs(v1.z) && v2.w >= fabs(v2.z))
@@ -319,11 +324,11 @@ void triangle_setup(
         if (loxy >= -32768 && hixy <= 32767 && hixy - loxy <= aabbLimit)
         {
             int res = prepareTriangle(p0, p1, p2, lo, hi, &d1, &d2, &area, c_viewport_width, c_viewport_height, c_samples_log2);
-            g_tri_subtris[taskIdx] = (res == 0) ? 1 : 0;
+            g_tri_subtris[task_idx] = (res == 0) ? 1 : 0;
 
             if (res == 0)
                 setupTriangle(
-                    &g_tri_header[taskIdx], &g_tri_data[taskIdx], vidx,
+                    &g_tri_header[task_idx], &g_tri_data[task_idx], vidx,
                     v0, v1, v2,
                     (float2)(0.0f, 0.0f),
                     (float2)(1.0f, 0.0f),
@@ -369,15 +374,15 @@ void triangle_setup(
         v1 = v2;
     }
 
-    g_tri_subtris[taskIdx] = numSubtris;
+    g_tri_subtris[task_idx] = numSubtris;
 
     // Multiple subtriangles => allocate.
 
-    int subtriBase = taskIdx;
+    int subtriBase = task_idx;
     if (numSubtris > 1)
     {
         subtriBase = atomic_add(a_num_subtris, numSubtris);
-        g_tri_header[taskIdx].misc = subtriBase;
+        g_tri_header[task_idx].misc = subtriBase;
         if (subtriBase + numSubtris > c_max_subtris)
             numVerts = 0;
     }

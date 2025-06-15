@@ -1,16 +1,8 @@
-#ifdef __COMPILER_RELATIVE_PATH__ 
-#include "common/headers.cl"
+#ifdef __COMPILER_RELATIVE_PATH__
+#include "common.cl"
 #else
-#include "glsc2/src/kernels/common/headers.cl"
+#include "glsc2/src/kernels/common.cl"
 #endif
-
-// Configuration
-#define CONF_WARP_SIZE_LOG2 5
-#define CONF_BR_WARPS_LOG2 4
-// Architecture
-#define CONF_WARP_SIZE (1 << CONF_WARP_SIZE_LOG2)
-// Bin rasterizer 
-#define CONF_BR_WARPS (1 << CONF_BR_WARPS_LOG2)
 
 // Debug definitions
 #ifdef CONF_DEBUG_KERNEL
@@ -30,35 +22,13 @@ typedef struct {
 #endif
 
 
-
-// uint local_scan_inclusive_add_ui(uint value, local volatile uint* l_temp) {
-//     uint local_id = get_local_id(0);
-//     local volatile uint* ptr = &l_temp[local_id];
-//     *ptr = value;
-//     #pragma unroll
-//     for(int i=0; i<CONF_WARP_SIZE_LOG2 + CONF_BR_WARPS_LOG2; ++i) {
-//         barrier(CLK_LOCAL_MEM_FENCE);
-//         if (local_id >= 1 << i) {
-//             value += ptr[-(1 << i)];    
-//             *ptr = value;   
-//         }
-//     }
-//     return value;
-// }
-
-
 /**
-    2 dim kernel 
-    TODO: maybe could be done 1 dim, but would need to change a lot the kernel
+    Processed triangles are going to be stored in bins, depending if they fall inside.
+    Each CTA has their full set of bins. Each CTA would batch a different set of triangles
+    to test each bin. 
  */
 kernel
-#ifndef CONF_BIN_RASTER_RANDOM_SIZE
-//#ifndef CONF_SUB_GROUP_ENABLED
-//__attribute__((reqd_work_group_size(CONF_BIN_RASTER_LOCAL_SIZE, 1, 1)))
-//#else
-__attribute__((reqd_work_group_size(CONF_WARP_SIZE, CONF_BR_WARPS, 1)))
-//#endif
-#endif
+__attribute__((reqd_work_group_size(DEVICE_SUBGROUP_THREADS, CONF_BIN_SUB_GROUPS, 1)))
 void bin_raster(
     global int* a_bin_counter,
     global int* a_num_bin_segs,
@@ -72,7 +42,7 @@ void bin_raster(
     global const CRTriangleHeader* g_tri_header,
     global const uchar* g_tri_subtris,
     
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_BIN_IMAGE_ENABLED
     read_only image1d_buffer_t t_tri_header,
     #endif
 
@@ -88,39 +58,38 @@ void bin_raster(
 
     #ifdef CONF_DEBUG_KERNEL
     , global warp_bin_raster_debug_t* g_w_debug // sz == 32
-    //, global local_bin_raster_debug_t* g_l_debug // sz == CR_BIN_WARPS
+    //, global local_bin_raster_debug_t* g_l_debug // sz == CONF_BIN_SUB_GROUPS
     //, global global_bin_raster_debug_t* g_g_debug // 
     #endif
 ) {
 
     // Local space
-    local volatile uint s_broadcast   [CR_BIN_WARPS + 16];
     local volatile int  s_out_ofs     [CR_MAXBINS_SQR];
     local volatile int  s_out_total   [CR_MAXBINS_SQR];
     local volatile int  s_over_index  [CR_MAXBINS_SQR];
-    local volatile int  s_out_mask    [CR_BIN_WARPS][CR_MAXBINS_SQR + 1]; // +1 to avoid bank collisions
-    local volatile int  s_out_count   [CR_BIN_WARPS][CR_MAXBINS_SQR + 1]; // +1 to avoid bank collisions
-    local volatile int  s_tri_buf     [CR_BIN_WARPS*32*4];                // triangle ring buffer
+    // TODO: s_out_mask relies on 32 sub group size, change for a more OpenCL friendly code.
+    local volatile int  s_out_mask    [CONF_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
+    local volatile int  s_out_count   [CONF_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
+    local volatile int  s_tri_buf     [CONF_BIN_SUB_GROUPS*DEVICE_SUBGROUP_THREADS*4];  // triangle ring buffer
+
     local volatile uint s_batch_pos;
     local volatile uint s_buf_count;
     local volatile uint s_over_total;
     local volatile uint s_alloc_base;
 
-    #ifndef CONF_WARP_ENABLED
-    local volatile uint l_temp [CONF_WARP_SIZE*CONF_BR_WARPS];
+    #ifdef CONF_BIN_SUB_GROUP_ENABLED
+    local volatile uint l_temp [CONF_BIN_SUB_GROUPS];
+    #else 
+    local volatile uint l_temp [DEVICE_SUBGROUP_THREADS*CONF_BIN_SUB_GROUPS];
     #endif
-    
+
     if (*a_num_subtris > c_max_subtris) 
         return;
 
     // Private space
-    int local_id = get_local_id(0) + get_local_id(1) * get_local_size(0);
+    int local_id = get_local_linear_id();
     uint local_size = get_local_size(0) * get_local_size(1);
     int batch_pos = 0;
-
-    // first 16 elements of s_broadcast are always zero
-    if (local_id < 16)
-        s_broadcast[local_id] = 0;
 
     // initialize output linked lists and offsets
     if (local_id < c_num_bins)
@@ -147,52 +116,21 @@ void bin_raster(
         int buf_count = 0;
         int batch_end = min(batch_pos + c_bin_batch_sz, c_num_tris);
 
-        // Loop over batch
+        // loop over batch
         do {
             
+            // fill the s_tri_buf with tri_idx[31:3] + sub_tri_idx[2:0]  
             while (buf_count < local_size && batch_pos < batch_end) {
                 
-                // Get subtriangle count
+                // get subtriangle count
                 int tri_idx = batch_pos + local_id;
                 int num = 0;
                 if (tri_idx < batch_end)
                     num = g_tri_subtris[tri_idx];
 
-                // cumulative sum of subtriangles within each warp
-                uint scan_exc_num;
-                #ifndef CONF_SUB_GROUP_ENABLED
-                {
-                    uint scan_inc_num = local_scan_inclusive_add_ui(num, l_temp);
-                    scan_exc_num = scan_inc_num - num;
-                }
-                #else
-                {
-                    // sub-groups implementation
-                    uint scan_inc_num = sub_group_scan_inclusive_add_ui(num);
-                    // broadcast sub group scan inclusive to +1 offset sub group.
-                    if (get_local_id(0) == get_local_size(0)-1) {
-                        uint scan_exc_ofs = ((get_local_id(1)+1) & (get_local_size(1)-1)) + get_local_size(1); 
-                        s_broadcast[scan_exc_ofs] = scan_inc_num * (get_local_id(1) != get_local_size(1)-1);
-                    }
-                    barrier(CLK_LOCAL_MEM_FENCE);
-                    
-                    // This only works if local_size / sub_group_size <= sub_group_size.
-                    // TODO: Generalize it.
-                    if (local_id < get_local_size(0)) {
-                        uint sub_group_scan_exc_num;
-                        if (local_id < CONF_BR_WARPS) 
-                            sub_group_scan_exc_num = s_broadcast[local_id+get_local_size(1)];
-                        else
-                            sub_group_scan_exc_num = 0;
-                        uint local_scan_exc_num = sub_group_scan_inclusive_add_ui(sub_group_scan_exc_num);
-                        if (local_id < CONF_BR_WARPS) 
-                            s_broadcast[local_id+get_local_size(1)] = local_scan_exc_num;
-                    }
-                    barrier(CLK_LOCAL_MEM_FENCE);
-                    
-                    scan_exc_num = s_broadcast[get_local_id(1)+get_local_size(1)] + scan_inc_num - num;
-                }
-                #endif
+                // cumulative sum of subtriangles within each subgroup
+                uint scan_exc_num = local_scan_inclusive_add_ui(num, l_temp) - num;
+
                 s_batch_pos = batch_pos + local_size;
                 if (local_id == local_size-1)
                     s_buf_count = buf_count + scan_exc_num + num;
@@ -200,7 +138,7 @@ void bin_raster(
 
                 // skip if no subtriangles
                 if (num) {
-                    uint pos = buf_count + scan_exc_num; // my_idx + s_broadcast[get_local_id(1) + 16 - 1];
+                    uint pos = buf_count + scan_exc_num;
 
                     // only write if entire triangle fits
                     if (pos + num <= FW_ARRAY_SIZE(s_tri_buf))
@@ -208,10 +146,10 @@ void bin_raster(
                         pos += buf_index; // adjust for current start position
                         pos &= FW_ARRAY_SIZE(s_tri_buf)-1; // does the ring operation
                         if (num == 1)
-                            s_tri_buf[pos] = tri_idx * 8 + 7; // single triangle
+                            s_tri_buf[pos] = (tri_idx << 3) | 0x7u; // single triangle
                         else {
                             for (int i=0; i < num; i++) {
-                                s_tri_buf[pos] = tri_idx * 8 + i;
+                                s_tri_buf[pos] = (tri_idx << 3) | i;
                                 pos++;
                                 pos &= FW_ARRAY_SIZE(s_tri_buf)-1;
                             }
@@ -229,7 +167,8 @@ void bin_raster(
                 buf_count = s_buf_count;
             }
 
-            // make every warp clear its output buffers
+            // TODO: maybe move it to another part, here just creates noise
+            // clear its output buffers
             for (int i=get_local_id(0); i < c_num_bins; i += get_local_size(0))
                 s_out_mask[get_local_id(1)][i] = 0;
 
@@ -248,11 +187,10 @@ void bin_raster(
                     data_idx = g_tri_header[data_idx].misc + subtri_idx;
 
                 // read triangle
-                #ifdef __IMAGE_SUPPORT__
+                #ifdef CONF_BIN_IMAGE_ENABLED
                 tri_data = read_imageui(t_tri_header, data_idx);
                 #else
                 tri_data = *(((global uint4*) g_tri_header) + data_idx); 
-                // * ((global uint4*) &g_tri_header[data_idx]);
                 #endif
             }
             
@@ -271,16 +209,17 @@ void bin_raster(
                 loy = add_clamp_0_x((v0y + min_min(d01y, 0, d02y)) >> bin_log, 0, c_height_bins - 1);
                 hix = add_clamp_0_x((v0x + max_max(d01x, 0, d02x)) >> bin_log, 0, c_width_bins  - 1);
                 hiy = add_clamp_0_x((v0y + max_max(d01y, 0, d02y)) >> bin_log, 0, c_height_bins - 1);
+
                 // triangle lies between hix & hiy & lox & loy
                 uint bit = 1 << get_local_id(0);
-                #ifdef CONF_SUB_GROUP_ENABLED
+
+                #ifdef CONF_BIN_SUB_GROUP_ENABLED
                 uint activemask = sub_group_activemask();
                 bool multi = (hix != lox || hiy != loy);
                 if (sub_group_masked_any(multi, activemask)) {
                     bool _complex = (hix > lox+1 || hiy > loy+1);
                     if (sub_group_masked_any(_complex, activemask))
                 #endif
-                    // TODO: No optimization for sub group disable kernel 
                     {
                         int d12x = d02x - d01x, d12y = d02y - d01y;
                         v0x -= lox << bin_log, v0y -= loy << bin_log;
@@ -313,7 +252,7 @@ void bin_raster(
                         }
                         while (currPtr != endPtr);
                     }
-                #ifdef CONF_SUB_GROUP_ENABLED
+                #ifdef CONF_BIN_SUB_GROUP_ENABLED
                     else {
                         int bin_idx = lox + c_width_bins * loy;
                         atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx], bit);
@@ -323,18 +262,12 @@ void bin_raster(
                     }
                 } else {
                     int bin_idx = lox + c_width_bins * loy;
-                    bool won;
-                    do
-                    {
-                        // s_broadcast[get_local_id(1) + 16] = bin_idx;
-                        // int winner = s_broadcast[get_local_id(1) + 16];
-                        int winner = sub_group_masked_broadcast_ui(bin_idx, findLeadingOne(activemask), activemask);
-                        won = (bin_idx == winner);
-                        //uint inner_activemask = sub_group_activemask();
-                        uint mask = sub_group_masked_ballot(won, activemask);
-                        activemask &= ~mask;
-                        s_out_mask[get_local_id(1)][winner] = mask;
-                    } while (!won);
+                    int tmp_idx;
+                    do {
+                        int tmp_idx = sub_group_broadcast_first_ui(bin_idx);
+                        s_out_mask[get_sub_group_local_id()][tmp_idx] = sub_group_ballot(bin_idx == tmp_idx);
+                    } while(bin_idx != tmp_idx);
+                    
                 }
                 #endif
             }
@@ -346,49 +279,46 @@ void bin_raster(
             barrier(CLK_LOCAL_MEM_FENCE);
 
             int over_index = -1;
-            // Sync for non-warp relies on local_liner_size <= c_num_bins 
-            // TODO: Generalize
-            if (local_id < c_num_bins)
             {
-                local uchar* src_ptr = (local uchar*)&s_out_mask[0][local_id];
-                local uchar* dst_ptr = (local uchar*)&s_out_count[0][local_id];
-                int total = 0;
-                for (int i = 0; i < CR_BIN_WARPS; i++)
-                {
-                    total += popcount(*(local uint*)src_ptr);
-                    *(local uint*)dst_ptr = total;
-                    src_ptr += (CR_MAXBINS_SQR + 1) * 4;
-                    dst_ptr += (CR_MAXBINS_SQR + 1) * 4;
+                int total = 0, ofs;
+                bool overflow = 0;
+
+                if (local_id < c_num_bins) {
+                    for (int sub_group = 0; sub_group < get_num_sub_groups(); ++sub_group) {
+                        total += popcount(s_out_mask[sub_group][local_id]);
+                        s_out_count[sub_group][local_id] = total;
+                    }
+                
+                    // overflow => request a new segment
+                    ofs = s_out_ofs[local_id];
+                    // TODO: Checkout this, maybe can be write to be more understandable
+                    overflow = ((ofs - 1) >> CR_BIN_SEG_LOG2) != (((ofs - 1) + total) >> CR_BIN_SEG_LOG2);
                 }
 
-                // overflow => request a new segment
-                int ofs = s_out_ofs[local_id];
-                bool overflow = ((ofs - 1) >> CR_BIN_SEG_LOG2) != (((ofs - 1) + total) >> CR_BIN_SEG_LOG2);
-                #ifdef CONF_SUB_GROUP_ENABLED
-                if (overflow)
-                #endif
+                // exc cumm scan of all overflows in the work group 
+                uint over_total;
+                uint exc_scan_over_index;
+                #ifdef CONF_BIN_SUB_GROUP_ENABLED
                 {
-                    uint mask;
-                    #ifdef CONF_SUB_GROUP_ENABLED
-                    {
-                        // TODO: this code relies on 32 bit warps mask
-                        mask = sub_group_activemask();
-                    }
-                    #else 
-                    {
-                        l_temp[get_local_id(1)] = 0;
-                        barrier(CLK_LOCAL_MEM_FENCE); // TODO: Maybe this is not necesary???
-                        atomic_or(&l_temp[get_local_id(1)], 1 << get_local_id(0));
-                        barrier(CLK_LOCAL_MEM_FENCE);
-                        mask = l_temp[get_local_id(1)];
-                    }
-                    #endif
-                    over_index = popcount(mask & getLaneMaskLt());
-                    if (over_index == 0)  
-                        s_broadcast[get_local_id(1) + 16] = atomic_add((local uint*)&s_over_total, popcount(mask));
-                    over_index += s_broadcast[get_local_id(1) + 16];
+                    exc_scan_over_index = popcount(sub_group_ballot(overflow) & getLaneMaskLt());
+                    if (get_sub_group_local_id() == get_sub_group_size()-1)
+                        over_total = atomic_add(&s_over_total, exc_scan_over_index + overflow);
+                    over_total = sub_group_broadcast_ui(over_total, get_sub_group_size()-1);
+                }
+                #else
+                {
+                    over_total = s_over_total;
+                    exc_scan_over_index = local_scan_inclusive_add_ui(overflow, l_temp) - overflow;
+                    if (get_local_linear_id()-1 == c_num_bins)
+                        s_over_total = exc_scan_over_index + overflow;
+                }
+                #endif
+
+                if (overflow) {
+                    over_index = exc_scan_over_index + over_total;
                     s_over_index[local_id] = over_index;
                 }
+                
             }
 
             // sync after over_total is ready
@@ -398,7 +328,7 @@ void bin_raster(
             uint alloc_base = 0;
             if (over_total > 0)
             {
-                // allocate memory
+                // allocate memory if fits
                 if (local_id == 0)
                 {
                     uint alloc_base = atomic_add(a_num_bin_segs, over_total);
@@ -437,10 +367,10 @@ void bin_raster(
                 // loop over triangle's bins
                 do
                 {
-                    uint outMask = s_out_mask[get_local_id(1)][currBin];
-                    if (outMask & (1<<get_local_id(0)))
+                    uint out_mask = s_out_mask[get_local_id(1)][currBin];
+                    if (out_mask & (1<<get_local_id(0)))
                     {
-                        int idx = popcount(outMask & getLaneMaskLt());
+                        int idx = popcount(out_mask & getLaneMaskLt());
                         if (get_local_id(1) > 0)
                             idx += s_out_count[get_local_id(1)-1][currBin];
 
@@ -465,7 +395,7 @@ void bin_raster(
             barrier(CLK_LOCAL_MEM_FENCE);
             if (local_id < c_num_bins)
             {
-                uint total  = s_out_count[CR_BIN_WARPS - 1][local_id];
+                uint total  = s_out_count[CONF_BIN_SUB_GROUPS - 1][local_id];
                 uint oldOfs = s_out_ofs[local_id];
                 if (over_index == -1)
                     s_out_ofs[local_id] = oldOfs + total;
@@ -480,7 +410,7 @@ void bin_raster(
             }
 
             // these triangles are now done
-            int count = min(buf_count, CR_BIN_WARPS * 32);
+            int count = min(buf_count, CONF_BIN_SUB_GROUPS * 32);
             buf_count -= count;
             buf_index += count;
             buf_index &= FW_ARRAY_SIZE(s_tri_buf)-1;
