@@ -28,7 +28,7 @@ typedef struct {
     to test each bin. 
  */
 kernel
-__attribute__((reqd_work_group_size(DEVICE_SUBGROUP_THREADS, CONF_BIN_SUB_GROUPS, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, CONF_BIN_SUB_GROUPS, 1)))
 void bin_raster(
     global int* a_bin_counter,
     global int* a_num_bin_segs,
@@ -64,13 +64,14 @@ void bin_raster(
 ) {
 
     // Local space
+    // TODO: remove limitations on maxbins
     local volatile int  s_out_ofs     [CR_MAXBINS_SQR];
     local volatile int  s_out_total   [CR_MAXBINS_SQR];
     local volatile int  s_over_index  [CR_MAXBINS_SQR];
     // TODO: s_out_mask relies on 32 sub group size, change for a more OpenCL friendly code.
     local volatile int  s_out_mask    [CONF_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
     local volatile int  s_out_count   [CONF_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
-    local volatile int  s_tri_buf     [CONF_BIN_SUB_GROUPS*DEVICE_SUBGROUP_THREADS*4];  // triangle ring buffer
+    local volatile int  s_tri_buf     [CONF_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4];  // triangle ring buffer
 
     local volatile uint s_batch_pos;
     local volatile uint s_buf_count;
@@ -80,7 +81,7 @@ void bin_raster(
     #ifdef CONF_BIN_SUB_GROUP_ENABLED
     local volatile uint l_temp [CONF_BIN_SUB_GROUPS];
     #else 
-    local volatile uint l_temp [DEVICE_SUBGROUP_THREADS*CONF_BIN_SUB_GROUPS];
+    local volatile uint l_temp [DEVICE_SUB_GROUP_THREADS*CONF_BIN_SUB_GROUPS];
     #endif
 
     if (*a_num_subtris > c_max_subtris) 
@@ -88,7 +89,7 @@ void bin_raster(
 
     // Private space
     int local_id = get_local_linear_id();
-    uint local_size = get_local_size(0) * get_local_size(1);
+    uint local_size = get_local_linear_size();
     int batch_pos = 0;
 
     // initialize output linked lists and offsets

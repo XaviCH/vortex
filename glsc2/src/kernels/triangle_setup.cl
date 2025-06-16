@@ -228,7 +228,7 @@ inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, uint c_
     total size expected to be equal to the total size of triangles to be processed.
 */
 kernel
-__attribute__((reqd_work_group_size(DEVICE_SUBGROUP_THREADS, CONF_SETUP_SUBGROUPS, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, CONF_SETUP_SUB_GROUPS, 1)))
 void triangle_setup(
     global int* a_num_subtris,
 
@@ -255,7 +255,7 @@ void triangle_setup(
     // Store bary buffer in local mem if fits 
 
     #ifdef CONF_SETUP_LOCAL_MEM_ENABLED
-    local float s_bary[CONF_SETUP_SUBGROUPS * DEVICE_SUBGROUP_THREADS][18];
+    local float s_bary[CONF_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
     local float* bary = s_bary[get_local_linear_id()];
     #else
     private float bary[18];

@@ -1,14 +1,8 @@
 #ifdef __COMPILER_RELATIVE_PATH__
-#include "common/headers.cl"
+#include "common.cl"
 #else
-#include "glsc2/src/kernels/common/headers.cl"
+#include "glsc2/src/kernels/common.cl"
 #endif
-
-// Render flags
-// #define RENDER_MODE_FLAG_ENABLE_QUADS   (1 << 0)
-// #define RENDER_MODE_FLAG_ENABLE_DEPTH   (1 << 1)
-// #define RENDER_MODE_FLAG_ENABLE_LERP    (1 << 2)
-// #define RENDER_MODE_FLAG_ENABLE_BLENDER    (1 << 3)
 
 // Blender data
 #define BLENDER_FUNC_ADD                     0
@@ -56,12 +50,14 @@ inline uint4 uint_to_uint4(const int data, int mode) {
         case TEX_RGBA4:
         case TEX_RGB5_A1:
         case TEX_RGB565:
+        default:
             return (uint4) { data & 0xFF, data >> 8 & 0xFF, data >> 16 & 0xFF, data >> 24 & 0xFF};
     }
 }
 
 inline uint read_tex_from_buffer(global const void* g_color_buffer, size_t position, int tex_mode) {
     switch(tex_mode) {
+        default:
         case TEX_R8:
             return *((global const uchar*) g_color_buffer + position);
         case TEX_RG8:
@@ -99,7 +95,7 @@ inline uint read_tex_from_buffer(global const void* g_color_buffer, size_t posit
     }
 }
 
-inline uint write_tex_to_buffer(global void* g_color_buffer, size_t position, int tex_mode, uint tex_data) {
+inline void write_tex_to_buffer(global void* g_color_buffer, size_t position, int tex_mode, uint tex_data) {
     switch(tex_mode) {
         case TEX_R8:
             *((global uchar*) g_color_buffer + position) = tex_data;
@@ -188,14 +184,14 @@ typedef struct {
 
 inline float4 get_varying_at_vertex(
     int varying_idx, int vert_idx,
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     image1d_buffer_t t_vertex_buffer
     #else
     global const float4* g_vertex_buffer
     #endif
 ) {
     size_t idx =  vert_idx * (sizeof(vertex_shader_output_t) / sizeof(float4)) + varying_idx + 1;
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     return read_imagef(t_vertex_buffer, idx);
     #else
     return g_vertex_buffer[idx];
@@ -204,7 +200,7 @@ inline float4 get_varying_at_vertex(
 
 inline float4 interpolate_varying(
     int varying_idx, const uint3 vert_idx, const float3 bary, 
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     image1d_buffer_t vertex_buffer
     #else
     global const float4* vertex_buffer
@@ -231,7 +227,7 @@ inline float3 compute_barys(
 inline void run_fragment_shader(
     fragment_shader_output_t* output,
     int tri_idx, int data_idx, int pixel_x, int pixel_y, uint centroid, local volatile uint* shared,
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     image1d_buffer_t t_tri_data,
     image1d_buffer_t vertex_buffer
     #else
@@ -243,7 +239,7 @@ inline void run_fragment_shader(
     
     // Fetch primitive data.
     uint4 t1, t2, t3;
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     t1 = read_imageui(t_tri_data, data_idx * 4 + 1); // wx, wy, wb, ux
     t2 = read_imageui(t_tri_data, data_idx * 4 + 2); // uy, ub, vx, vy
     t3 = read_imageui(t_tri_data, data_idx * 4 + 3); // vb, vi0, vi1, vi2
@@ -331,7 +327,7 @@ inline void get_triangle(
     global const int* g_tile_seg_data,
     global const int* g_tile_seg_next,
     global const int* g_tile_seg_count
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     , image1d_buffer_t t_tri_header
     #endif
 )
@@ -350,7 +346,7 @@ inline void get_triangle(
         subtri_idx &= 7;
         if (subtri_idx != 7)
             *data_idx = g_tri_header[*tri_idx].misc + subtri_idx;
-        #ifdef __IMAGE_SUPPORT__
+        #ifdef CONF_FINE_IMAGE_ENABLED
         *tri_header = read_imageui(t_tri_header, *data_idx);
         #else
         *tri_header = ((global const uint4*) g_tri_header)[*data_idx];
@@ -583,7 +579,7 @@ kernel void fine_raster_single_sample(
     global const int* g_tile_seg_next,
     global const CRTriangleHeader* g_tri_header,
 
-    #ifdef __IMAGE_SUPPORT__
+    #ifdef CONF_FINE_IMAGE_ENABLED
     read_write image2d_t t_color_buffer,
     read_write image2d_t t_depth_buffer,
     read_only image1d_buffer_t t_tri_data,
@@ -618,7 +614,7 @@ kernel void fine_raster_single_sample(
     local volatile uint     s_tri_data_idx      [CR_FINE_MAX_WARPS][64];          // 5KB  CRTriangleData index
     local volatile ulong    s_triangle_cov      [CR_FINE_MAX_WARPS][64];          // 10KB coverage mask
     local volatile uint     s_triangle_frag     [CR_FINE_MAX_WARPS][64];          // 5KB  fragment index
-    local volatile uint     s_temp              [CR_FINE_MAX_WARPS][80];          // 6.25KB
+    local volatile uint     s_temp              [CR_FINE_MAX_WARPS*80];          // 6.25KB
                                                                             // = 47.25KB total
     // Warp Space
     local volatile uint*   w_tile_color         = (local volatile uint*) &s_tile_color[get_local_id(1)];
@@ -627,7 +623,7 @@ kernel void fine_raster_single_sample(
     local volatile uint*   w_tri_data_idx       = (local volatile uint*) &s_tri_data_idx[get_local_id(1)];
     local volatile ulong*  w_triangle_cov       = (local volatile ulong*) &s_triangle_cov[get_local_id(1)];
     local volatile uint*   w_triangle_frag      = (local volatile uint*) &s_triangle_frag[get_local_id(1)];
-    local volatile uint*   w_temp               = (local volatile uint*) &s_temp[get_local_id(1)];
+    local volatile uint*   w_temp               = (local volatile uint*) &s_temp[get_local_id(1)*80];
 
     if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs || *a_num_tile_segs > c_max_tile_segs)
         return;
@@ -645,7 +641,7 @@ kernel void fine_raster_single_sample(
         if (get_local_id(0) == 0)
             active_idx = atomic_add(a_fine_counter, 1);
 
-        #ifdef CONF_SUB_GROUP_ENABLED
+        #ifdef CONF_FINE_SUB_GROUP_ENABLED
         {
             active_idx = sub_group_broadcast_ui(active_idx, 0);
         }
@@ -659,7 +655,7 @@ kernel void fine_raster_single_sample(
         #endif
 
         bool is_not_active = active_idx >= *a_num_active_tiles;
-        #ifdef CONF_SUB_GROUP_ENABLED
+        #ifdef CONF_FINE_SUB_GROUP_ENABLED
         {
             if (is_not_active)
                 break;
@@ -672,7 +668,7 @@ kernel void fine_raster_single_sample(
         #endif
 
         int tile_idx, segment, tile_y, tile_x;
-        #ifndef CONF_SUB_GROUP_ENABLED
+        #ifndef CONF_FINE_SUB_GROUP_ENABLED
         if (!is_not_active)
         #endif
         {
@@ -687,7 +683,7 @@ kernel void fine_raster_single_sample(
         int frag_read = 0, frag_write = 0;
         w_triangle_frag[63] = 0; // "previous triangle"
 
-        #ifndef CONF_SUB_GROUP_ENABLED
+        #ifndef CONF_FINE_SUB_GROUP_ENABLED
         if (!is_not_active)
         #endif
         {
@@ -705,7 +701,7 @@ kernel void fine_raster_single_sample(
             {
                 int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
                 int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-                #ifdef __IMAGE_SUPPORT__
+                #ifdef CONF_FINE_IMAGE_ENABLED
                 w_tile_color[get_local_id(0)] = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y}));
                 w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
                 w_tile_color[get_local_id(0) + 32] = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
@@ -730,7 +726,7 @@ kernel void fine_raster_single_sample(
             bool need_fragments = frag_write - frag_read < 32 && segment >= 0;
 
             bool local_need_fragments = 0;
-            #ifndef CONF_SUB_GROUP_ENABLED
+            #ifndef CONF_FINE_SUB_GROUP_ENABLED
             {
                 need_fragments = need_fragments && !is_not_active;
                 local_need_fragments = local_reduce_or_ui(need_fragments, s_temp);
@@ -742,7 +738,7 @@ kernel void fine_raster_single_sample(
             {
                 // update tile z
 
-                #ifdef CONF_SUB_GROUP_ENABLED
+                #ifdef CONF_FINE_SUB_GROUP_ENABLED
                 sub_group_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth); // , w_temp);
                 #else
                 local_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, s_temp);
@@ -754,13 +750,13 @@ kernel void fine_raster_single_sample(
                     // read triangle index and data, advance to next segment
                     int tri_idx, data_idx;
                     uint4 tri_header;
-                    #ifndef CONF_SUB_GROUP_ENABLED
+                    #ifndef CONF_FINE_SUB_GROUP_ENABLED
                     if (need_fragments)
                     #endif
                     {
                         get_triangle(&tri_idx, &data_idx, &tri_header, &segment, 
                             g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count, 
-                            #ifdef __IMAGE_SUPPORT__
+                            #ifdef CONF_FINE_IMAGE_ENABLED
                             t_tri_header
                             #else
                             g_tri_header
@@ -775,7 +771,7 @@ kernel void fine_raster_single_sample(
                     // determine coverage
                     ulong coverage;
                     int pop;
-                    #ifndef CONF_SUB_GROUP_ENABLED
+                    #ifndef CONF_FINE_SUB_GROUP_ENABLED
                     if (need_fragments)
                     #endif
                     {
@@ -785,7 +781,7 @@ kernel void fine_raster_single_sample(
 
                     // fragment count scan
                     uint frag;
-                    #ifdef CONF_SUB_GROUP_ENABLED
+                    #ifdef CONF_FINE_SUB_GROUP_ENABLED
                     {
                         frag = sub_group_scan_inclusive_add_ui(pop); // scan32_value(pop, w_temp);
                         uint temp_frag = frag;
@@ -806,13 +802,13 @@ kernel void fine_raster_single_sample(
 
                     // queue non-empty triangles
                     uint good_mask;
-                    #ifdef CONF_SUB_GROUP_ENABLED
+                    #ifdef CONF_FINE_SUB_GROUP_ENABLED
                     good_mask = sub_group_ballot(pop != 0);
                     #else
                     good_mask = local_reduce_or_1dim_ui((pop != 0) << get_local_id(0), s_temp);
                     #endif
 
-                    #ifndef CONF_SUB_GROUP_ENABLED
+                    #ifndef CONF_FINE_SUB_GROUP_ENABLED
                     if (need_fragments)
                     #endif
                     {
@@ -828,7 +824,7 @@ kernel void fine_raster_single_sample(
                     }
 
                     need_fragments = frag_write - frag_read < 32 && segment >= 0;
-                    #ifndef CONF_SUB_GROUP_ENABLED
+                    #ifndef CONF_FINE_SUB_GROUP_ENABLED
                     need_fragments = need_fragments && !is_not_active;
                     local_need_fragments = local_reduce_or_ui(need_fragments, s_temp);
                     #endif
@@ -839,7 +835,7 @@ kernel void fine_raster_single_sample(
             // end of segment?
             bool end_of_segment = frag_read == frag_write;
             bool local_end_of_segment = 1;
-            #ifndef CONF_SUB_GROUP_ENABLED
+            #ifndef CONF_FINE_SUB_GROUP_ENABLED
             end_of_segment = end_of_segment || is_not_active;
             local_end_of_segment = local_reduce_and_ui(end_of_segment ? 1 : 0, s_temp);
             #endif
@@ -847,7 +843,7 @@ kernel void fine_raster_single_sample(
                 break;
             
             // tag triangle boundaries
-            #ifndef CONF_SUB_GROUP_ENABLED
+            #ifndef CONF_FINE_SUB_GROUP_ENABLED
             if (!end_of_segment)
             #endif
             {
@@ -864,7 +860,7 @@ kernel void fine_raster_single_sample(
 
             int rop_lane_idx = popcount(rop_lane_mask);
             uint boundary_mask;
-            #ifdef CONF_SUB_GROUP_ENABLED
+            #ifdef CONF_FINE_SUB_GROUP_ENABLED
             // TODO subgroup barrier w_temp
             boundary_mask = sub_group_ballot(w_temp[rop_lane_idx + 16]);
             #else
@@ -873,7 +869,7 @@ kernel void fine_raster_single_sample(
             #endif
             // distribute fragments
             
-            #ifndef CONF_SUB_GROUP_ENABLED
+            #ifndef CONF_FINE_SUB_GROUP_ENABLED
             if (!end_of_segment)
             #endif
             if (rop_lane_idx < frag_write - frag_read)
@@ -895,7 +891,7 @@ kernel void fine_raster_single_sample(
                 if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
                 {
                     uint4 zdata;
-                    #ifdef __IMAGE_SUPPORT__
+                    #ifdef CONF_FINE_IMAGE_ENABLED
                     zdata = read_imageui(t_tri_data, data_idx * 4);
                     #else
                     zdata = *((uint4*) &g_tri_data[data_idx]);
@@ -915,7 +911,7 @@ kernel void fine_raster_single_sample(
                     run_fragment_shader(
                         &fragment_shader_output,
                         tri_idx, data_idx, pixel_x, pixel_y, 0x11, &w_temp[16],
-                        #ifdef __IMAGE_SUPPORT__
+                        #ifdef CONF_FINE_IMAGE_ENABLED
                         t_tri_data,
                         t_vertex_buffer
                         #else
@@ -943,13 +939,13 @@ kernel void fine_raster_single_sample(
         }
 
         // Write tile back to the framebuffer.
-        #ifndef CONF_SUB_GROUP_ENABLED
+        #ifndef CONF_FINE_SUB_GROUP_ENABLED
         if (!is_not_active)
         #endif
         {
             int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            #ifdef __IMAGE_SUPPORT__
+            #ifdef CONF_FINE_IMAGE_ENABLED
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, uint_to_uint4(w_tile_color[get_local_id(0)], TEX_RGBA8));
             write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, uint_to_uint4(w_tile_color[get_local_id(0) + 32], TEX_RGBA8));

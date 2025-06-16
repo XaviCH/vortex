@@ -262,19 +262,6 @@ inline uint get_num_sub_groups()        { return get_local_size(1); }
 #endif
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 // inline size_t get_local_linear_id() {
 //     return get_local_id(0) + get_local_id(1) * get_local_size(0) + get_local_id(2) * get_local_size(1) * get_local_size(0);
 // }
@@ -330,11 +317,77 @@ inline uint local_scan_inclusive_min_ui(uint value, local volatile uint* l_temp)
     return value;
 }
 
+/** 
+    PRE: All threads active
+    POST: Only threads with get_local_linear_id < threads has correct answer, others could have unexpected values
+inline uint local_sized_reduce_min_sized_ui(uint value, local volatile uint* l_temp, uint threads) {
+    uint id, num_ids, tmp;
+    local volatile uint* ptr;
+
+    #if DEVICE_SUB_GROUP_SUPPORT == 1
+    uint sub_group_min = sub_group_reduce_min_ui(get_local_linear_id() < threads ? value : UINT_MAX);
+    if (threads <= get_sub_group_size()) return sub_group_min; 
+    id      = get_sub_group_id();
+    num_ids = get_num_sub_groups();
+    #else
+
+    #endif
+
+    #pragma unroll
+    for(uint i=1; i<num_ids; i=i*2) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (id >= i) {
+            value += ptr[-i];
+            *ptr = value;
+        }
+    }
+}
+*/
+
+/**
+    PRE: All threads are active when function is called.
+ */
+inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
+    uint result;
+
+    #if DEVICE_SUB_GROUP_SUPPORT == 1
+    {
+        uint sub_group_min = sub_group_reduce_min_ui(value);
+
+        if (get_num_sub_groups() > 1) {
+            l_temp[get_sub_group_local_id()] = UINT_MAX;
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+
+        #pragma unroll
+        for(uint i=1; i<get_num_sub_groups(); i=i*get_sub_group_size()) {
+            l_temp[get_sub_group_id()] = sub_group_min;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            sub_group_min = sub_group_reduce_min_ui(l_temp[get_sub_group_local_id()]);
+        }
+
+        result = sub_group_min;
+    }
+    #else 
+    {
+        local_scan_inclusive_min_ui(value, l_temp);
+        barrier(CLK_LOCAL_MEM_FENCE);
+        result = l_temp[get_local_linear_size()-1];
+    }
+
+    #endif
+
+    return result;
+}
+
+
+/*
 inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
     local_scan_inclusive_min_ui(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
     return l_temp[get_local_linear_size()-1];
 }
+*/
 
 inline uint local_scan_inclusive_add_1dim_ui(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);
@@ -391,6 +444,27 @@ inline uint local_reduce_or_1dim_ui(uint value, local volatile uint* l_temp) {
     local_scan_inclusive_or_1dim_ui(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
     return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
+}
+
+/**
+    PRE: 
+        For DEVICE_SUB_GROUP_SUPPORT == 1 is not required that all threads were active. 
+        Otherwise all threads in work group must be active. 
+ */
+inline uint local_ballot_1dim(bool value, local volatile uint* l_temp) {
+    uint mask;
+
+    #if DEVICE_SUB_GROUP_SUPPORT == 1
+    {
+        mask = sub_group_ballot(value);
+    }
+    #else
+    {
+        mask = local_reduce_or_1dim_ui((value ? 1u : 0u) << get_local_id(0), l_temp);
+    }
+    #endif
+
+    return mask;
 }
 
 inline uint local_scan_inclusive_max_1dim_ui(uint value, local volatile uint* l_temp) {

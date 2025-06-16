@@ -15,7 +15,7 @@
 #endif
 
 #define DEVICE_HAS_SUB_GROUP_INTRINSICTS 1
-#define DEVICE_SUBGROUP_THREADS_LOG2 5
+#define DEVICE_SUB_GROUP_THREADS_LOG2 5
 #define DEVICE_SUB_GROUP_MEM_COHERENCE 0 // 0 --> explicit coherence, 1 --> implicit coherence
 // ------
 // RENDER CONFIG
@@ -30,5 +30,8 @@
 // Bin Raster Configuration
 #define CONF_BIN_SUB_GROUPS 16
 
+#define CONF_COARSE_SUB_GROUPS 16
+
+#define CONF_FINE_SUB_GROUPS 20
 
 #endif
