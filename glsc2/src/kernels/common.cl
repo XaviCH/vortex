@@ -75,11 +75,13 @@ inline int      f32_to_s32_sat      (float a)                   { return (int)a;
 inline uint     f32_to_u32_sat      (float a)                   { return (uint)a; }
 inline uint     f32_to_u32_sat_rmi  (float a)                   { return (uint)a; }
 inline long   f32_to_s64              (float a)                 { return (long)a; }
-inline int      add_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) + (b & 0xFFFF); }
-inline int      add_s16hi_s16lo     (int a, int b)              { return (a >> 16) + (b & 0xFFFF); }
-inline int      sub_s16lo_s16lo     (int a, int b)              { return (a & 0xFFFF) - (b & 0xFFFF); }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { return (a >> 16) - (b & 0xFFFF); }
+
+inline int      add_s16lo_s16lo     (int a, int b)              { return (short)a + (short)b; }
+inline int      add_s16hi_s16lo     (int a, int b)              { return (a >> 16) + (short)b; }
+inline int      sub_s16lo_s16lo     (int a, int b)              { return (short)a - (short)b; }
+inline int      sub_s16hi_s16lo     (int a, int b)			    { return (a >> 16) - (short)b; }
 inline int      sub_s16hi_s16hi     (int a, int b)              { return (a >> 16) - (b >> 16); }
+
 inline int      max_max             (int a, int b, int c)       { return max(a, max(b, c)); }
 inline int      min_min             (int a, int b, int c)       { return min(a, min(b, c)); }
 inline uint     add_sub             (uint a, uint b, uint c)    { return a+b-c; }
