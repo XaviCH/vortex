@@ -273,32 +273,28 @@ inline void run_blend_shader(
 
 //------------------------------------------------------------------------
 
-inline void init_tile_z_max(uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth)
+inline bool depth_test(uint z, uint depth) { return z < depth; }
+inline bool update_z_max(uint depth, uint tile_z) { return depth == tile_z; };
+
+inline void init_tile_z_max(uint* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
 {
-    *tile_z_max = CR_DEPTH_MAX;
+    *tile_z_max = CR_DEPTH_MAX >> 16;
     *tile_z_upd = (min(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]) < *tile_z_max);
 }
 
 #ifdef CONF_FINE_SUB_GROUP_ENABLED
-inline void sub_group_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth) // , local volatile uint* temp)
+inline void sub_group_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
     {
         uint z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        // temp[get_local_id(0) + 16] = z;
-        // z = max(z, temp[get_local_id(0) + 16 -  1]); temp[get_local_id(0) + 16] = z;
-        // z = max(z, temp[get_local_id(0) + 16 -  2]); temp[get_local_id(0) + 16] = z;
-        // z = max(z, temp[get_local_id(0) + 16 -  4]); temp[get_local_id(0) + 16] = z;
-        // z = max(z, temp[get_local_id(0) + 16 -  8]); temp[get_local_id(0) + 16] = z;
-        // z = max(z, temp[get_local_id(0) + 16 - 16]); temp[get_local_id(0) + 16] = z;
-        // *tile_z_max = temp[47];
         *tile_z_max = sub_group_reduce_max_ui(z);
         *tile_z_upd = false;
     }
 }
 #endif
 
-inline void local_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth, local volatile uint* l_temp) // , local volatile uint* temp)
+inline void local_1dim_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth, local volatile uint* l_temp)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
         uint any_tile_z_upd = local_reduce_or_1dim_ui(*tile_z_upd, l_temp);
@@ -357,7 +353,7 @@ inline bool early_z_cull(uint render_mode_flags, uint4 tri_header, uint tile_z_m
 {
     if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
     {
-        uint zmin = tri_header.w & 0xFFFFF000;
+        uint zmin = (tri_header.w & 0xFFFFF000) >> 16;
         if (zmin >= tile_z_max)
             return true;
     }
@@ -404,30 +400,6 @@ inline ulong triangle_pixel_coverage(const int samples_log_2, const uint4 tri_he
     return c01 & c12 & c20;
 }
 
-//------------------------------------------------------------------------
-
-
-
-inline uint scan32_value(uint value, local volatile uint* temp)
-{
-    temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  1]; 
-    temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  2]; 
-    temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  4]; 
-    temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 -  8]; 
-    temp[get_local_id(0) + 16] = value;
-    value += temp[get_local_id(0) + 16 - 16]; 
-    temp[get_local_id(0) + 16] = value;
-    return value;
-}
-
-inline uint scan32_total(local volatile uint* temp)
-{
-    return temp[47];
-}
 
 //------------------------------------------------------------------------
 
@@ -514,7 +486,7 @@ inline int find_fragment(uint render_mode_flags, ulong coverage, int frag_idx)
 inline void execute_ROP_single_sample(
     uint render_mode_flags,
     int tri_idx, int pixel_x, int pixel_y,
-    uint color, uint depth, local volatile uint* ptr_color, local volatile uint* ptr_depth)
+    uint color, uint depth, local volatile uint* ptr_color, local volatile ushort* ptr_depth)
 {
     blend_shader_input_t blend_shader_input;
     blend_shader_output_t blend_shader_output;
@@ -523,6 +495,7 @@ inline void execute_ROP_single_sample(
 
     if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
     {
+        // TODO: Seems odd doing a loop here, just a fragment is processed
         do
         {
             rounds++;
@@ -581,14 +554,14 @@ kernel void fine_raster_single_sample(
     read_only image1d_buffer_t t_vertex_buffer,
     #else
     global void* g_color_buffer,
-    global uint* g_depth_buffer,
+    global ushort* g_depth_buffer,
     global const CRTriangleData* g_tri_data,
     global const float4* g_vertex_buffer,
     const uint   c_framebuffer_width,
     #endif
 
     const uint   c_clear_color,
-    const uint   c_clear_depth,
+    const ushort c_clear_depth,
     const uint   c_color_buffer_mode,
     const int    c_deferred_clear,
     const int    c_max_bin_segs,
@@ -603,7 +576,8 @@ kernel void fine_raster_single_sample(
                                                                             // for 20 warps:
     local volatile ulong    s_cover8x8_lut      [CR_COVER8X8_LUT_SIZE];           // 6KB
     local volatile uint     s_tile_color        [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 5KB
-    local volatile uint     s_tile_depth        [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 5KB
+    local volatile ushort   s_tile_depth        [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 2.5KB
+    local volatile uchar    s_tile_stencil      [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 1.25KB
     local volatile uint     s_triangle_idx      [CR_FINE_MAX_WARPS][64];          // 5KB  original triangle index
     local volatile uint     s_tri_data_idx      [CR_FINE_MAX_WARPS][64];          // 5KB  CRTriangleData index
     local volatile ulong    s_triangle_cov      [CR_FINE_MAX_WARPS][64];          // 10KB coverage mask
@@ -611,13 +585,14 @@ kernel void fine_raster_single_sample(
     local volatile uint     s_temp              [CR_FINE_MAX_WARPS*80];          // 6.25KB
                                                                             // = 47.25KB total
     // Warp Space
-    local volatile uint*   w_tile_color         = (local volatile uint*) &s_tile_color[get_local_id(1)];
-    local volatile uint*   w_tile_depth         = (local volatile uint*) &s_tile_depth[get_local_id(1)];
-    local volatile uint*   w_triangle_idx       = (local volatile uint*) &s_triangle_idx[get_local_id(1)];
-    local volatile uint*   w_tri_data_idx       = (local volatile uint*) &s_tri_data_idx[get_local_id(1)];
-    local volatile ulong*  w_triangle_cov       = (local volatile ulong*) &s_triangle_cov[get_local_id(1)];
-    local volatile uint*   w_triangle_frag      = (local volatile uint*) &s_triangle_frag[get_local_id(1)];
-    local volatile uint*   w_temp               = (local volatile uint*) &s_temp[get_local_id(1)*80];
+    local volatile uint*    w_tile_color        = (local volatile uint*)    &s_tile_color[get_local_id(1)];
+    local volatile ushort*  w_tile_depth        = (local volatile ushort*)  &s_tile_depth[get_local_id(1)];
+    local volatile uchar*   w_tile_stencil      = (local volatile uchar*)   &s_tile_stencil[get_local_id(1)];
+    local volatile uint*    w_triangle_idx      = (local volatile uint*)    &s_triangle_idx[get_local_id(1)];
+    local volatile uint*    w_tri_data_idx      = (local volatile uint*)    &s_tri_data_idx[get_local_id(1)];
+    local volatile ulong*   w_triangle_cov      = (local volatile ulong*)   &s_triangle_cov[get_local_id(1)];
+    local volatile uint*    w_triangle_frag     = (local volatile uint*)    &s_triangle_frag[get_local_id(1)];
+    local volatile uint*    w_temp              = (local volatile uint*)    &s_temp[get_local_id(1)*80];
 
     if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs || *a_num_tile_segs > c_max_tile_segs)
         return;
@@ -688,6 +663,8 @@ kernel void fine_raster_single_sample(
                 w_tile_depth[get_local_id(0)] = c_clear_depth;
                 w_tile_color[get_local_id(0) + 32] = c_clear_color;
                 w_tile_depth[get_local_id(0) + 32] = c_clear_depth;
+                // w_tile_stencil[get_local_id(0)] = c_clear_stencil;
+                // w_tile_stencil[get_local_id(0) + 32] = c_clear_stencil;
             }
 
             // otherwise => read tile from framebuffer
@@ -700,6 +677,8 @@ kernel void fine_raster_single_sample(
                 w_tile_color[get_local_id(0) + 32]  = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
                 w_tile_depth[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
                 w_tile_depth[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
+                // w_tile_stencil[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
+                // w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
                 #else
                 w_tile_color[get_local_id(0)]       = read_tex_from_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode);
                 w_tile_color[get_local_id(0) + 32]  = read_tex_from_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode);
@@ -709,9 +688,11 @@ kernel void fine_raster_single_sample(
             }
         }
 
-        uint tile_z_max;
-        bool tile_z_upd;
+        // bound tile z
+        uint tile_z_max, tile_z_min;
+        bool tile_z_upd, tile_z_upd_min;
         init_tile_z_max(&tile_z_max, &tile_z_upd, w_tile_depth);
+        // init_tile_z_min(&tile_z_min, &tile_z_upd_min, w_tile_depth);
         
         // process fragments
         for(;;)
@@ -733,9 +714,11 @@ kernel void fine_raster_single_sample(
                 // update tile z
 
                 #ifdef CONF_FINE_SUB_GROUP_ENABLED
-                sub_group_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth); // , w_temp);
+                sub_group_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth);
+                // sub_group_update_tile_z_min(c_render_mode_flags, &tile_z_min, &tile_z_upd_min, w_tile_depth);
                 #else
-                local_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, s_temp);
+                local_1dim_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, s_temp);
+                // local_1dim_update_tile_z_min(c_render_mode_flags, &tile_z_min, &tile_z_upd_min, w_tile_depth, s_temp);
                 #endif
                 
                 // read triangles
@@ -775,10 +758,10 @@ kernel void fine_raster_single_sample(
                     uint frag;
                     #ifdef CONF_FINE_SUB_GROUP_ENABLED
                     {
-                        frag = sub_group_scan_inclusive_add_ui(pop); // scan32_value(pop, w_temp);
+                        frag = sub_group_scan_inclusive_add_ui(pop);
                         uint temp_frag = frag;
                         frag += frag_write; // frag now holds cumulative fragment count
-                        frag_write += sub_group_broadcast_ui(temp_frag, get_local_size(0) - 1); // scan32_total(w_temp);
+                        frag_write += sub_group_broadcast_ui(temp_frag, get_local_size(0) - 1);
                     }
                     #else
                     {
@@ -888,11 +871,11 @@ kernel void fine_raster_single_sample(
                     #else
                     zdata = *((uint4*) &g_tri_data[data_idx]);
                     #endif
-                    depth = zdata.x * pixel_x + zdata.y * pixel_y + zdata.z;
+                    depth = (zdata.x * pixel_x + zdata.y * pixel_y + zdata.z) >> 16;
                     uint old_depth = w_tile_depth[pixel_in_tile];
-                    if (depth >= old_depth)
+                    if (!depth_test(depth, old_depth))
                         zkill = true;
-                    else if (old_depth == tile_z_max)
+                    else if (update_z_max(old_depth, tile_z_max))
                         tile_z_upd = true; // we are replacing previous zmax => need to update
                 }
                 
