@@ -94,4 +94,13 @@
 #define RENDER_MODE_FLAG_ENABLE_CULL_BACK    (1 << 5)
 #define RENDER_MODE_FLAG_ENABLE_STENCIL      (1 << 6)
 
+// Texture modes
+#define TEX_R8                               0
+#define TEX_RG8                              1
+#define TEX_RGB8                             2
+#define TEX_RGBA8                            3
+#define TEX_RGBA4                            4
+#define TEX_RGB5_A1                          5
+#define TEX_RGB565                           6
+
 #endif

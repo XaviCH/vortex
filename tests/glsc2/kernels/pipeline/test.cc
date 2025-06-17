@@ -147,6 +147,7 @@ cl_uint c_clear_depth;
 cl_uint c_color_buffer_mode;
 cl_uint c_cull_face;
 cl_int c_deferred_clear;
+cl_uint c_framebuffer_width;
 cl_int c_height_bins;
 cl_int c_height_tiles;
 cl_int c_max_bin_segs;
@@ -325,7 +326,12 @@ int main(int argc, char** argv) {
 
     uint32_t* result = (uint32_t*) malloc(sizeof(int)*HEIGHT*WIDTH);
 
+    #ifdef CONF_FINE_IMAGE_ENABLED
     CL_CHECK(clEnqueueReadImage(command_queue, t_color_buffer, CL_TRUE, origin, region, 0, 0, result, 0, NULL, NULL));
+    #else
+    // TODO test more image formats
+    CL_CHECK(clEnqueueReadBuffer(command_queue, t_color_buffer, CL_TRUE, origin[0]*origin[1], region[0]*region[1]*sizeof(uint32_t), result, 0, NULL, NULL));
+    #endif
     CL_CHECK(clFinish(command_queue));
 
     print_ppm("output.ppm", WIDTH, HEIGHT, (uint8_t*)result);
@@ -420,9 +426,10 @@ void setCLParameters() {
     c_bin_batch_sz = glm::clamp(num_tris / (round_size * min_batches), 1, max_rounds) * round_size;
     c_clear_color = 0x00000000; // TODO ??
     c_clear_depth = 0xFFFFFFFF; // TODO ??
-    c_color_buffer_mode = 3; // TEX_RGBA8
+    c_color_buffer_mode = TEX_RGBA8;
     c_cull_face = 0;
     c_deferred_clear = 1; // TODO ??
+    c_framebuffer_width = WIDTH;
     c_height_bins = size_bins.y;
     c_height_tiles = size_tiles.y;
     c_max_bin_segs = std::max(MAX_BIN_SEGS, std::max(num_bins * CR_BIN_STREAMS_SIZE, (NUM_TRIS - 1) / CR_BIN_SEG_SIZE + 1) + maxBinSegsSlack);
@@ -500,6 +507,7 @@ void setCLParameters() {
         h_a_num_tile_segs[0] = 0;
     }
 
+    // #if DEVICE_IMAGE_SUPPORT == 1
     {
         cl_image_format image_format = {
             .image_channel_order = CL_RGBA,
@@ -542,24 +550,32 @@ void setCLParameters() {
 
         t_tri_data = CL_CHECK2(clCreateImage(context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, &_err));
     }
+    // #endif
+
+    #if DEVICE_IMAGE_SUPPORT == 1
     {
-        cl_image_format image_format = {
+        cl_image_format image_format;
+        
+        image_format = {
             .image_channel_order = CL_RGBA,
             .image_channel_data_type = CL_UNSIGNED_INT8,
         };
-        
         t_color_buffer = CL_CHECK2(clCreateImage2D(context, CL_MEM_READ_WRITE, &image_format, WIDTH, HEIGHT, 0, NULL, &_err));
-    }
-    h_t_color_buffer.resize(size.x*size.y);
-
-    {
-        cl_image_format image_format = {
+        
+        image_format = {
             .image_channel_order = CL_DEPTH, // this may be not supported for OpenCL 1.2 check cl_khr_depth_images extension
             .image_channel_data_type = CL_UNSIGNED_INT32,
         };
-        
         t_depth_buffer = CL_CHECK2(clCreateImage2D(context, CL_MEM_READ_WRITE, &image_format, WIDTH, HEIGHT, 0, NULL, &_err));
     }
+    #else
+    {
+        t_color_buffer = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uint[WIDTH][HEIGHT]), NULL, &_err));
+        t_depth_buffer = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uint[WIDTH][HEIGHT]), NULL, &_err));
+    }
+    #endif
+
+    h_t_color_buffer.resize(size.x*size.y);
     h_t_depth_buffer.resize(size.x*size.y);
 
 }
@@ -574,9 +590,11 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_data),          &g_tri_data));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_subtris),       &g_tri_subtris));
-    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),     &t_vertex_buffer));
-    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_cull_face),         &c_cull_face));
+    #ifdef CONF_SETUP_IMAGE_ENABLED
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),     &t_vertex_buffer)); 
+    #else
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
+    #endif
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_num_tris),          &c_num_tris));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),       &c_max_subtris));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_render_mode_flags), &c_render_mode_flags));
@@ -584,7 +602,6 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_vertex_size),       &c_vertex_size));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),   &c_viewport_height));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),    &c_viewport_width));
-    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_result),    &g_result));
 
     kernel = bin_raster_kernel;
     counter = 0;
@@ -598,7 +615,9 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_total),         &g_bin_total));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_subtris),       &g_tri_subtris));
+    #ifdef CONF_BIN_IMAGE_ENABLED
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
+    #endif
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_bin_batch_sz),      &c_bin_batch_sz));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_height_bins),       &c_height_bins));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
@@ -627,7 +646,9 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_data),     &g_tile_seg_data));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_next),     &g_tile_seg_next));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
+    #ifdef CONF_COARSE_IMAGE_ENABLED
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
+    #endif
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_deferred_clear),    &c_deferred_clear));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_height_tiles),      &c_height_tiles));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
@@ -655,9 +676,15 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_color_buffer),      &t_color_buffer));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_depth_buffer),      &t_depth_buffer));
+    #ifdef CONF_FINE_IMAGE_ENABLED
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_data),          &t_tri_data));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),     &t_vertex_buffer));
+    #else
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_data),          &g_tri_data));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_framebuffer_width), &c_framebuffer_width));
+    #endif
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_color),       &c_clear_color));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_depth),       &c_clear_depth));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_color_buffer_mode), &c_color_buffer_mode));

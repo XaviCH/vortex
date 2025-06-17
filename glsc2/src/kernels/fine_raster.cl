@@ -25,14 +25,6 @@
 #define BLENDER_OP_CONSTANT_ALPHA            13
 #define BLENDER_OP_ONE_MINUS_CONSTANT_ALPHA  14
 
-// Texture types
-#define TEX_R8                               0
-#define TEX_RG8                              1
-#define TEX_RGB8                             2
-#define TEX_RGBA8                            3
-#define TEX_RGBA4                            4
-#define TEX_RGB5_A1                          5
-#define TEX_RGB565                           6
 
 inline uint uint4_to_int(const uint4 data) {
     return data.x | (data.y << 8) | (data.z << 16) | (data.w << 24);
@@ -55,7 +47,7 @@ inline uint4 uint_to_uint4(const int data, int mode) {
     }
 }
 
-inline uint read_tex_from_buffer(global const void* g_color_buffer, size_t position, int tex_mode) {
+inline uint read_tex_from_buffer(global const void* g_color_buffer, size_t position, uint tex_mode) {
     switch(tex_mode) {
         default:
         case TEX_R8:
@@ -111,7 +103,7 @@ inline void write_tex_to_buffer(global void* g_color_buffer, size_t position, in
             }
             break;
         case TEX_RGBA8:
-            *((global uint*) g_color_buffer + position) = tex_data;
+            *(((global uint*) g_color_buffer) + position) = tex_data;
             break;
         case TEX_RGBA4:
             *((global ushort*) g_color_buffer + position) = 
@@ -231,8 +223,8 @@ inline void run_fragment_shader(
     image1d_buffer_t t_tri_data,
     image1d_buffer_t vertex_buffer
     #else
-    global const uint4* g_tri_data, 
-    global const float4* vertex_buffer, 
+    global const CRTriangleData* g_tri_data, 
+    global const float4* vertex_buffer
     #endif
 ) {
     fragment_shader_input_t input;
@@ -244,9 +236,9 @@ inline void run_fragment_shader(
     t2 = read_imageui(t_tri_data, data_idx * 4 + 2); // uy, ub, vx, vy
     t3 = read_imageui(t_tri_data, data_idx * 4 + 3); // vb, vi0, vi1, vi2
     #else
-    t1 = g_tri_data[data_idx * 4 + 1];
-    t2 = g_tri_data[data_idx * 4 + 2];
-    t3 = g_tri_data[data_idx * 4 + 3];
+    t1 = ((global const uint4*) g_tri_data)[data_idx * 4 + 1];
+    t2 = ((global const uint4*) g_tri_data)[data_idx * 4 + 2];
+    t3 = ((global const uint4*) g_tri_data)[data_idx * 4 + 3];
     #endif
 
     // Pixel varying data.
@@ -287,6 +279,7 @@ inline void init_tile_z_max(uint* tile_z_max, bool* tile_z_upd, local volatile u
     *tile_z_upd = (min(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]) < *tile_z_max);
 }
 
+#ifdef CONF_FINE_SUB_GROUP_ENABLED
 inline void sub_group_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth) // , local volatile uint* temp)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
@@ -303,6 +296,7 @@ inline void sub_group_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_m
         *tile_z_upd = false;
     }
 }
+#endif
 
 inline void local_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile uint* w_tile_depth, local volatile uint* l_temp) // , local volatile uint* temp)
 {
@@ -589,7 +583,7 @@ kernel void fine_raster_single_sample(
     global void* g_color_buffer,
     global uint* g_depth_buffer,
     global const CRTriangleData* g_tri_data,
-    global const float* g_vertex_buffer,
+    global const float4* g_vertex_buffer,
     const uint   c_framebuffer_width,
     #endif
 
@@ -702,15 +696,15 @@ kernel void fine_raster_single_sample(
                 int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
                 int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
                 #ifdef CONF_FINE_IMAGE_ENABLED
-                w_tile_color[get_local_id(0)] = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y}));
-                w_tile_depth[get_local_id(0)] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
-                w_tile_color[get_local_id(0) + 32] = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
-                w_tile_depth[get_local_id(0) + 32] = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
+                w_tile_color[get_local_id(0)]       = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y}));
+                w_tile_color[get_local_id(0) + 32]  = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
+                w_tile_depth[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
+                w_tile_depth[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
                 #else
-                w_tile_color[get_local_id(0)] = read_tex_from_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode);
-                w_tile_depth[get_local_id(0)] = g_depth_buffer[surf_x/4 + surf_y*c_framebuffer_width];
-                w_tile_color[get_local_id(0) + 32] = read_tex_from_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode);
-                w_tile_depth[get_local_id(0) + 32] = g_depth_buffer[surf_x/4 + (surf_y + 4)*c_framebuffer_width];
+                w_tile_color[get_local_id(0)]       = read_tex_from_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode);
+                w_tile_color[get_local_id(0) + 32]  = read_tex_from_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode);
+                w_tile_depth[get_local_id(0)]       = g_depth_buffer[surf_x/4 + surf_y*c_framebuffer_width];
+                w_tile_depth[get_local_id(0) + 32]  = g_depth_buffer[surf_x/4 + (surf_y + 4)*c_framebuffer_width];
                 #endif
             }
         }
@@ -755,11 +749,9 @@ kernel void fine_raster_single_sample(
                     #endif
                     {
                         get_triangle(&tri_idx, &data_idx, &tri_header, &segment, 
-                            g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count, 
+                            g_tri_header, g_tile_seg_data, g_tile_seg_next, g_tile_seg_count
                             #ifdef CONF_FINE_IMAGE_ENABLED
-                            t_tri_header
-                            #else
-                            g_tri_header
+                            , t_tri_header
                             #endif
                             );
 
@@ -947,13 +939,13 @@ kernel void fine_raster_single_sample(
             int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
             #ifdef CONF_FINE_IMAGE_ENABLED
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, uint_to_uint4(w_tile_color[get_local_id(0)], TEX_RGBA8));
-            write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, uint_to_uint4(w_tile_color[get_local_id(0) + 32], TEX_RGBA8));
+            write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
             write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
             #else
             write_tex_to_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode, w_tile_color[get_local_id(0)]);
-            g_depth_buffer[surf_x/4 + surf_y*c_framebuffer_width] = w_tile_depth[get_local_id(0)];
             write_tex_to_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode, w_tile_color[get_local_id(0) + 32]);
+            g_depth_buffer[surf_x/4 + surf_y*c_framebuffer_width] = w_tile_depth[get_local_id(0)];
             g_depth_buffer[surf_x/4 + (surf_y+4)*c_framebuffer_width] = w_tile_depth[get_local_id(0) + 32];
             #endif
         }
