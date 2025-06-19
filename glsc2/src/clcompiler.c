@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
     }
     CHECK(error);
 
-    size_t result;
+    size_t result = 0;
     size_t size_result;
 
     error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_STATUS, sizeof(result), &result, &size_result);

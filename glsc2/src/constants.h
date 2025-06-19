@@ -95,12 +95,43 @@
 #define RENDER_MODE_FLAG_ENABLE_STENCIL      (1 << 6)
 
 // Texture modes
-#define TEX_R8                               0
-#define TEX_RG8                              1
-#define TEX_RGB8                             2
-#define TEX_RGBA8                            3
-#define TEX_RGBA4                            4
-#define TEX_RGB5_A1                          5
-#define TEX_RGB565                           6
+#define TEX_R8                              0
+#define TEX_RG8                             1
+#define TEX_RGB8                            2
+#define TEX_RGBA8                           3
+#define TEX_RGBA4                           4
+#define TEX_RGB5_A1                         5
+#define TEX_RGB565                          6
+
+// Depth
+#define DEPTH_FUNC_NEVER                            0
+#define DEPTH_FUNC_LESS                             1
+#define DEPTH_FUNC_EQUAL                            2
+#define DEPTH_FUNC_LEQUAL                           3
+#define DEPTH_FUNC_GREATER                          4
+#define DEPTH_FUNC_NOTEQUAL                         5
+#define DEPTH_FUNC_GEQUAL                           6
+#define DEPTH_FUNC_ALWAYS                           7
+
+// Blending
+#define GL_FUNC_ADD                       0
+#define GL_FUNC_SUBTRACT                  1
+#define GL_FUNC_REVERSE_SUBTRACT          2
+
+#define GL_ZERO                           0
+#define GL_ONE                            1
+#define GL_SRC_COLOR                      2
+#define GL_ONE_MINUS_SRC_COLOR            3
+#define GL_SRC_ALPHA                      4
+#define GL_ONE_MINUS_SRC_ALPHA            5
+#define GL_DST_ALPHA                      6
+#define GL_ONE_MINUS_DST_ALPHA            7
+#define GL_DST_COLOR                      8
+#define GL_ONE_MINUS_DST_COLOR            9
+#define GL_SRC_ALPHA_SATURATE             10
+#define GL_CONSTANT_COLOR                 11
+#define GL_ONE_MINUS_CONSTANT_COLOR       12
+#define GL_CONSTANT_ALPHA                 13
+#define GL_ONE_MINUS_CONSTANT_ALPHA       14
 
 #endif

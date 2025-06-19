@@ -1,29 +1,12 @@
 #ifdef __COMPILER_RELATIVE_PATH__
 #include "common.cl"
+#include "depth.cl"
+#include "blending.cl"
 #else
 #include "glsc2/src/kernels/common.cl"
+#include "glsc2/src/kernels/depth.cl"
+#include "glsc2/src/kernels/blending.cl"
 #endif
-
-// Blender data
-#define BLENDER_FUNC_ADD                     0
-#define BLENDER_FUNC_SUBTRACT                1
-#define BLENDER_FUNC_REVERSE_SUBTRACT        2
-
-#define BLENDER_OP_ZERO                      0
-#define BLENDER_OP_ONE                       1
-#define BLENDER_OP_SRC_COLOR                 2
-#define BLENDER_OP_ONE_MINUS_SRC_COLOR       3
-#define BLENDER_OP_SRC_ALPHA                 4
-#define BLENDER_OP_ONE_MINUS_SRC_ALPHA       5
-#define BLENDER_OP_DST_ALPHA                 6
-#define BLENDER_OP_ONE_MINUS_DST_ALPHA       7
-#define BLENDER_OP_DST_COLOR                 8
-#define BLENDER_OP_ONE_MINUS_DST_COLOR       9
-#define BLENDER_OP_SRC_ALPHA_SATURATE        10
-#define BLENDER_OP_CONSTANT_COLOR            11
-#define BLENDER_OP_ONE_MINUS_CONSTANT_COLOR  12
-#define BLENDER_OP_CONSTANT_ALPHA            13
-#define BLENDER_OP_ONE_MINUS_CONSTANT_ALPHA  14
 
 
 inline uint uint4_to_int(const uint4 data) {
@@ -152,7 +135,7 @@ inline void fragment_shader(
     fragment_shader_input_t* input, 
     fragment_shader_output_t* output
 ) {
-    output->gl_FragColor = (float4){input->color, 1.f};
+    output->gl_FragColor = (float4){input->color, 0.5f};
     output->discard = false;
     output->color = 
         ((int)(output->gl_FragColor.x * 255) << 8*0) |
@@ -257,57 +240,55 @@ inline void run_fragment_shader(
 //------------------------------------------------------------------------
 
 inline bool bs_needs_dst(uint c_render_mode_flags, uint c_blender_op) {
-    if (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) {
-        return c_blender_op;
+    if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) != 0) {
+        return true;
     }
     return false; 
 }
 
 inline void run_blend_shader(
     blend_shader_input_t* input, blend_shader_output_t* output,
-    int tri_idx, int pixel_x, int pixel_y, int sampleIdx, uint src, uint dst)
+    int tri_idx, int pixel_x, int pixel_y, int sampleIdx, uint src, uint dst,
+    uint c_blending_color, uint c_blending_data, uint c_render_mode_flags)
 {
+    if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) != 0) {
+        output->color = blend(src, dst, c_blending_color, c_blending_data);
+    } else {
+        output->color = src;
+    }
     output->write_color = true;
-    output->color = src;
 }
 
 //------------------------------------------------------------------------
 
-inline bool depth_test(uint z, uint depth) { return z < depth; }
-inline bool update_z_max(uint depth, uint tile_z) { return depth == tile_z; };
-
-inline void init_tile_z_max(uint* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
+/*
+inline bool depth_test(ushort z, ushort depth) { return z < depth; }
+inline bool update_z_max(ushort depth, ushort tile_z) { return depth == tile_z; };
+inline void init_tile_z_max(ushort* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
 {
     *tile_z_max = CR_DEPTH_MAX >> 16;
     *tile_z_upd = (min(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]) < *tile_z_max);
 }
-
 #ifdef CONF_FINE_SUB_GROUP_ENABLED
-inline void sub_group_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
+inline void sub_group_update_tile_z_max(uint c_render_mode_flags, ushort* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
     {
-        uint z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
+        ushort z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
         *tile_z_max = sub_group_reduce_max_ui(z);
         *tile_z_upd = false;
     }
 }
 #endif
-
-inline void local_1dim_update_tile_z_max(uint c_render_mode_flags, uint* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth, local volatile uint* l_temp)
+inline void local_1dim_update_tile_z_max(uint c_render_mode_flags, ushort* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth, local volatile uint* l_temp)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
-        uint any_tile_z_upd = local_reduce_or_1dim_ui(*tile_z_upd, l_temp);
-
-        uint z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        uint temp_z_max = local_reduce_max_1dim_ui(z, l_temp);
-        if (any_tile_z_upd) {
-            *tile_z_max = temp_z_max;
-            *tile_z_upd = false;
-        } 
-
+        ushort z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
+        *tile_z_max = local_reduce_max_1dim_ui(z, l_temp);
+        *tile_z_upd = false;
     }
 }
+*/
 
 //------------------------------------------------------------------------
 
@@ -349,16 +330,27 @@ inline void get_triangle(
 
 //------------------------------------------------------------------------
 
-inline bool early_z_cull(uint render_mode_flags, uint4 tri_header, uint tile_z_max)
+
+inline bool early_z_cull(uint render_mode_flags, uint4 tri_header, ushort tile_z_min, ushort tile_z_max, uint c_depth_data)
 {
     if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
     {
-        uint zmin = (tri_header.w & 0xFFFFF000) >> 16;
-        if (zmin >= tile_z_max)
-            return true;
+        ushort z = (tri_header.w & 0xFFFFF000) >> 16;
+        return !range_depth_test(z, tile_z_min, tile_z_max, c_depth_data);
     }
     return false;
 }
+/*
+inline bool early_z_cull(uint render_mode_flags, uint4 tri_header, ushort tile_z_min, ushort tile_z_max, uint c_depth_data)
+{
+    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
+    {
+        ushort zmin = (tri_header.w & 0xFFFFF000) >> 16;
+        if (!depth_test(zmin, tile_z_max, c_depth_data))
+            return true;
+    }
+    return false;
+}*/
 
 //------------------------------------------------------------------------
 
@@ -486,7 +478,11 @@ inline int find_fragment(uint render_mode_flags, ulong coverage, int frag_idx)
 inline void execute_ROP_single_sample(
     uint render_mode_flags,
     int tri_idx, int pixel_x, int pixel_y,
-    uint color, uint depth, local volatile uint* ptr_color, local volatile ushort* ptr_depth)
+    uint color, ushort depth, local volatile uint* ptr_color, local volatile ushort* ptr_depth, 
+    uint c_blending_color, uint c_blending_data,
+    uint c_depth_data,
+    uint c_render_mode_flags
+)
 {
     blend_shader_input_t blend_shader_input;
     blend_shader_output_t blend_shader_output;
@@ -495,22 +491,24 @@ inline void execute_ROP_single_sample(
 
     if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
     {
-        // TODO: Seems odd doing a loop here, just a fragment is processed
+        // TODO: maybe a more OpenCL way to communicate
         do
         {
             rounds++;
             *ptr_depth = depth;
 			uint s_color = *ptr_color;
-			run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, s_color);
+			run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, s_color,
+                c_blending_color, c_blending_data, c_render_mode_flags);
             if (blend_shader_output.write_color)
                 *ptr_color = blend_shader_output.color;
         }
-        while (depth < *ptr_depth);
+        while (depth_test(depth, *ptr_depth, c_depth_data));
     }
     else if (!blend_shader_input.needs_dst)
     {
         rounds++;
-        run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, 0);
+        run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, 0,
+        c_blending_color, c_blending_data, c_render_mode_flags);
         if (blend_shader_output.write_color)
             *ptr_color = blend_shader_output.color;
     }
@@ -521,7 +519,8 @@ inline void execute_ROP_single_sample(
             rounds++;
             *ptr_depth = get_local_id(0);
 			uint s_color = *ptr_color;
-			run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, s_color);
+			run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, s_color,
+            c_blending_color, c_blending_data, c_render_mode_flags);
             if (blend_shader_output.write_color)
                 *ptr_color = blend_shader_output.color;
         }
@@ -531,7 +530,6 @@ inline void execute_ROP_single_sample(
 
 //------------------------------------------------------------------------
 
-//template <class VertexClass, class FragmentShaderClass, class BlendShaderClass, U32 RenderModeFlags>
 kernel void fine_raster_single_sample(
     global int* a_fine_counter,
     global const int* a_num_active_tiles,
@@ -549,21 +547,27 @@ kernel void fine_raster_single_sample(
     #ifdef CONF_FINE_IMAGE_ENABLED
     read_write image2d_t t_color_buffer,
     read_write image2d_t t_depth_buffer,
+    read_write image2d_t t_stencil_buffer,
     read_only image1d_buffer_t t_tri_data,
     read_only image1d_buffer_t t_tri_header,
     read_only image1d_buffer_t t_vertex_buffer,
     #else
     global void* g_color_buffer,
     global ushort* g_depth_buffer,
+    global uchar* g_stencil_buffer,
     global const CRTriangleData* g_tri_data,
     global const float4* g_vertex_buffer,
     const uint   c_framebuffer_width,
     #endif
 
+    const uint   c_blending_color,
+    const uint   c_blending_data,
     const uint   c_clear_color,
     const ushort c_clear_depth,
+    const uchar  c_clear_stencil,
     const uint   c_color_buffer_mode,
     const int    c_deferred_clear,
+    const uint   c_depth_data,
     const int    c_max_bin_segs,
     const int    c_max_subtris,
     const int    c_max_tile_segs,
@@ -663,8 +667,8 @@ kernel void fine_raster_single_sample(
                 w_tile_depth[get_local_id(0)] = c_clear_depth;
                 w_tile_color[get_local_id(0) + 32] = c_clear_color;
                 w_tile_depth[get_local_id(0) + 32] = c_clear_depth;
-                // w_tile_stencil[get_local_id(0)] = c_clear_stencil;
-                // w_tile_stencil[get_local_id(0) + 32] = c_clear_stencil;
+                w_tile_stencil[get_local_id(0)] = c_clear_stencil;
+                w_tile_stencil[get_local_id(0) + 32] = c_clear_stencil;
             }
 
             // otherwise => read tile from framebuffer
@@ -677,22 +681,24 @@ kernel void fine_raster_single_sample(
                 w_tile_color[get_local_id(0) + 32]  = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
                 w_tile_depth[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
                 w_tile_depth[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
-                // w_tile_stencil[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
-                // w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
+                w_tile_stencil[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
+                w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
                 #else
                 w_tile_color[get_local_id(0)]       = read_tex_from_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode);
                 w_tile_color[get_local_id(0) + 32]  = read_tex_from_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode);
                 w_tile_depth[get_local_id(0)]       = g_depth_buffer[surf_x/4 + surf_y*c_framebuffer_width];
                 w_tile_depth[get_local_id(0) + 32]  = g_depth_buffer[surf_x/4 + (surf_y + 4)*c_framebuffer_width];
+                w_tile_stencil[get_local_id(0)]       = g_stencil_buffer[surf_x/4 + surf_y*c_framebuffer_width];
+                w_tile_stencil[get_local_id(0) + 32]  = g_stencil_buffer[surf_x/4 + (surf_y + 4)*c_framebuffer_width];
                 #endif
             }
         }
 
         // bound tile z
-        uint tile_z_max, tile_z_min;
-        bool tile_z_upd, tile_z_upd_min;
-        init_tile_z_max(&tile_z_max, &tile_z_upd, w_tile_depth);
-        // init_tile_z_min(&tile_z_min, &tile_z_upd_min, w_tile_depth);
+        ushort tile_z_max, tile_z_min;
+        bool tile_z_upd_max, tile_z_upd_min;
+        init_tile_z_max(&tile_z_max, &tile_z_upd_max, w_tile_depth);
+        init_tile_z_min(&tile_z_min, &tile_z_upd_min, w_tile_depth);
         
         // process fragments
         for(;;)
@@ -714,11 +720,11 @@ kernel void fine_raster_single_sample(
                 // update tile z
 
                 #ifdef CONF_FINE_SUB_GROUP_ENABLED
-                sub_group_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth);
-                // sub_group_update_tile_z_min(c_render_mode_flags, &tile_z_min, &tile_z_upd_min, w_tile_depth);
+                sub_group_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd_max, w_tile_depth);
+                sub_group_update_tile_z_min(c_render_mode_flags, &tile_z_min, &tile_z_upd_min, w_tile_depth);
                 #else
-                local_1dim_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd, w_tile_depth, s_temp);
-                // local_1dim_update_tile_z_min(c_render_mode_flags, &tile_z_min, &tile_z_upd_min, w_tile_depth, s_temp);
+                local_1dim_update_tile_z_max(c_render_mode_flags, &tile_z_max, &tile_z_upd_max, w_tile_depth, s_temp);
+                local_1dim_update_tile_z_min(c_render_mode_flags, &tile_z_min, &tile_z_upd_min, w_tile_depth, s_temp);
                 #endif
                 
                 // read triangles
@@ -739,7 +745,7 @@ kernel void fine_raster_single_sample(
                             );
 
                         // early z cull
-                        if (tri_idx >= 0 && early_z_cull(c_render_mode_flags, tri_header, tile_z_max))
+                        if (tri_idx >= 0 && early_z_cull(c_render_mode_flags, tri_header, tile_z_min, tile_z_max, c_depth_data))
                             tri_idx = -1;
                     }
 
@@ -861,7 +867,7 @@ kernel void fine_raster_single_sample(
                 uint pixel_y = (tile_y << CR_TILE_LOG2) + (pixel_in_tile >> 3);
 
                 // depth test
-                uint depth = 0;
+                ushort depth = 0;
                 bool zkill = false;
                 if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
                 {
@@ -872,11 +878,14 @@ kernel void fine_raster_single_sample(
                     zdata = *((uint4*) &g_tri_data[data_idx]);
                     #endif
                     depth = (zdata.x * pixel_x + zdata.y * pixel_y + zdata.z) >> 16;
-                    uint old_depth = w_tile_depth[pixel_in_tile];
-                    if (!depth_test(depth, old_depth))
+                    ushort old_depth = w_tile_depth[pixel_in_tile];
+                    if (!depth_test(depth, old_depth, c_depth_data))
                         zkill = true;
-                    else if (update_z_max(old_depth, tile_z_max))
-                        tile_z_upd = true; // we are replacing previous zmax => need to update
+                    else {
+                        // TODO: Checkout this
+                        tile_z_upd_max = update_tile_z(old_depth, tile_z_max, c_depth_data); // we are replacing previous zmax => need to update
+                        tile_z_upd_min = update_tile_z(old_depth, tile_z_min, c_depth_data); // we are replacing previous zmax => need to update
+                    }
                 }
                 
                 if (!zkill)
@@ -902,7 +911,10 @@ kernel void fine_raster_single_sample(
 					    execute_ROP_single_sample(
                             c_render_mode_flags,
                             tri_idx, pixel_x, pixel_y, fragment_shader_output.color, depth,
-                            &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile]
+                            &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile],
+                            c_blending_color, c_blending_data,
+                            c_depth_data,
+                            c_render_mode_flags
                         );
                     }
                 }

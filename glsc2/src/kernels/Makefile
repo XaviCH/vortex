@@ -2,12 +2,13 @@ VORTEX_PATH = ../../..
 
 include ../common.mk
 
-KERNELS_CL = $(wildcard *.cl)
+# KERNELS_CL = $(wildcard *.cl)
+KERNELS_CL = triangle_setup.cl bin_raster.cl coarse_raster.cl fine_raster.cl
 KERNELS_POCL_C = $(KERNELS_CL:.cl=.pocl.c)
 KERNELS_CL_C = $(KERNELS_CL:.cl=.ocl.c)
 
 CL_FLAGS = -Werror -D__COMPILER_RELATIVE_PATH__
-OPT_FLAGS = -DCUDA -D'DEVICE_SUB_GROUP_SUPPORT=1' -D'DEVICE_IMAGE_SUPPORT=1'
+OPT_FLAGS = -D'DEVICE_SUB_GROUP_SUPPORT=0' -D'DEVICE_IMAGE_SUPPORT=0'
 
 .PHONY: all clean vortex opencl
 
