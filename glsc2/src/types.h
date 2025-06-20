@@ -83,7 +83,12 @@ typedef struct {
     rasterization_kernel_container_t rasterization;
     readnpixels_kernel_container_t readnpixels;
     cl_kernel viewport_division, perspective_division, strided_write, depth_test, stencil_test, scissor_test, blending, clear, dithering;
+    cl_kernel triangle_setup, bin_raster, coarse_raster;
 } kernel_container_t;
+
+typedef struct {
+    cl_program triangle_setup, bin_raster, coarse_raster;
+} program_container_t;
 
 typedef struct {
     GLboolean depth_test, stencil_test, scissor_test, pixel_ownership, dither, blend, cull_face, polygon_offset_fill;

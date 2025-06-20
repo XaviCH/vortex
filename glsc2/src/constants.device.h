@@ -61,4 +61,8 @@
 #define CONF_FINE_SUB_GROUP_ENABLED
 #endif
 
+#if DEVICE_SUB_GROUP_RAW == 1
+#define CONF_FINE_SUB_GROUP_RAW_ENABLED
+#endif
+
 #endif

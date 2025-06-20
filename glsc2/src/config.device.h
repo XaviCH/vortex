@@ -6,7 +6,7 @@
 // -----------
 // Byte size of local memory available for core
 #define DEVICE_LOCAL_MEM_SIZE 0xc000u
- 
+
 #define DEVICE_LOCAL_THREADS_LOG2 10
 
 #ifndef DEVICE_IMAGE_SUPPORT
@@ -16,6 +16,18 @@
 #ifndef DEVICE_SUB_GROUP_SUPPORT
 #define DEVICE_SUB_GROUP_SUPPORT 1
 #endif
+
+#ifndef DEVICE_SUB_GROUP_RAW
+#define DEVICE_SUB_GROUP_RAW 1
+#endif
+
+#ifndef DEVICE_NUM_CORES
+#define DEVICE_NUM_CORES 15
+#endif
+
+// TODO DEVICE_SUB_GROUP_RAW
+// caos17 cluster josue
+// tfm
 
 #define DEVICE_HAS_SUB_GROUP_INTRINSICTS 1
 #define DEVICE_SUB_GROUP_THREADS_LOG2 5
@@ -34,6 +46,6 @@
 
 #define CONF_COARSE_SUB_GROUPS 16
 
-#define CONF_FINE_SUB_GROUPS 20
+#define CONF_FINE_SUB_GROUPS 16
 
 #endif

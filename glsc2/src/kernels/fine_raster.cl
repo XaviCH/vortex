@@ -1,11 +1,13 @@
 #ifdef __COMPILER_RELATIVE_PATH__
+#include "blending.cl"
 #include "common.cl"
 #include "depth.cl"
-#include "blending.cl"
+#include "stencil.cl"
 #else
+#include "glsc2/src/kernels/blending.cl"
 #include "glsc2/src/kernels/common.cl"
 #include "glsc2/src/kernels/depth.cl"
-#include "glsc2/src/kernels/blending.cl"
+#include "glsc2/src/kernels/stencil.cl"
 #endif
 
 
@@ -478,18 +480,66 @@ inline int find_fragment(uint render_mode_flags, ulong coverage, int frag_idx)
 inline void execute_ROP_single_sample(
     uint render_mode_flags,
     int tri_idx, int pixel_x, int pixel_y,
-    uint color, ushort depth, local volatile uint* ptr_color, local volatile ushort* ptr_depth, 
+    fragment_shader_output_t* fs_out, ushort depth, 
+    local volatile uint* ptr_color, local volatile ushort* ptr_depth, local volatile uchar* ptr_stencil,
+    local volatile uint* w_temp,
     uint c_blending_color, uint c_blending_data,
     uint c_depth_data,
-    uint c_render_mode_flags
+    uint c_render_mode_flags,
+    uint c_stencil_data
 )
 {
     blend_shader_input_t blend_shader_input;
     blend_shader_output_t blend_shader_output;
-    blend_shader_input.needs_dst = false;
-    int rounds = 0;
 
-    if ((render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
+    uint color = fs_out->color;
+    bool discarded = fs_out->discard;
+    // blend_shader_input.needs_dst = false;
+
+    #ifdef CONF_FINE_SUB_GROUP_RAW_ENABLED
+
+    if (fs_out->discard) return;
+
+    // TODO: Optimize, ordering on triangle is not always required.  
+    do
+    {
+        *w_temp = 0;
+        atomic_or(w_temp,1 << get_local_id(0));
+
+        if ((*w_temp & getLaneMaskLt()) == 0) {
+            
+            // stencil test
+            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+                if (!stencil_test(*ptr_stencil, c_stencil_data)) {
+                    stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_sfail(c_stencil_data));
+                    return;
+                }
+            }
+
+            // depth test
+            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
+                discarded = !depth_test(depth, *ptr_depth, c_depth_data);
+                if (discarded) {
+                    stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dfail(c_stencil_data));
+                    return;
+                }
+                *ptr_depth = depth;
+                stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dpass(c_stencil_data));
+            }
+
+            // blending
+            run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, *ptr_color,
+                c_blending_color, c_blending_data, c_render_mode_flags);
+            if (blend_shader_output.write_color)
+                *ptr_color = blend_shader_output.color;
+            
+            break;
+        }
+    }
+    while (true);
+
+    /*
+    if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
     {
         // TODO: maybe a more OpenCL way to communicate
         do
@@ -526,6 +576,8 @@ inline void execute_ROP_single_sample(
         }
         while (*ptr_depth != get_local_id(0));
     }
+    */
+    #endif
 }
 
 //------------------------------------------------------------------------
@@ -572,6 +624,7 @@ kernel void fine_raster_single_sample(
     const int    c_max_subtris,
     const int    c_max_tile_segs,
     const uint   c_render_mode_flags,
+    const uint   c_stencil_data,
     const int    c_viewport_height,
     const int    c_viewport_width,
     const int    c_width_tiles
@@ -579,14 +632,14 @@ kernel void fine_raster_single_sample(
 {
                                                                             // for 20 warps:
     local volatile ulong    s_cover8x8_lut      [CR_COVER8X8_LUT_SIZE];           // 6KB
-    local volatile uint     s_tile_color        [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 5KB
-    local volatile ushort   s_tile_depth        [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 2.5KB
-    local volatile uchar    s_tile_stencil      [CR_FINE_MAX_WARPS][CR_TILE_SQR]; // 1.25KB
-    local volatile uint     s_triangle_idx      [CR_FINE_MAX_WARPS][64];          // 5KB  original triangle index
-    local volatile uint     s_tri_data_idx      [CR_FINE_MAX_WARPS][64];          // 5KB  CRTriangleData index
-    local volatile ulong    s_triangle_cov      [CR_FINE_MAX_WARPS][64];          // 10KB coverage mask
-    local volatile uint     s_triangle_frag     [CR_FINE_MAX_WARPS][64];          // 5KB  fragment index
-    local volatile uint     s_temp              [CR_FINE_MAX_WARPS*80];          // 6.25KB
+    local volatile uint     s_tile_color        [CONF_FINE_SUB_GROUPS][CR_TILE_SQR]; // 5KB
+    local volatile ushort   s_tile_depth        [CONF_FINE_SUB_GROUPS][CR_TILE_SQR]; // 2.5KB
+    local volatile uchar    s_tile_stencil      [CONF_FINE_SUB_GROUPS][CR_TILE_SQR]; // 1.25KB
+    local volatile uint     s_triangle_idx      [CONF_FINE_SUB_GROUPS][64];          // 5KB  original triangle index
+    local volatile uint     s_tri_data_idx      [CONF_FINE_SUB_GROUPS][64];          // 5KB  CRTriangleData index
+    local volatile ulong    s_triangle_cov      [CONF_FINE_SUB_GROUPS][64];          // 10KB coverage mask
+    local volatile uint     s_triangle_frag     [CONF_FINE_SUB_GROUPS][64];          // 5KB  fragment index
+    local volatile uint     s_temp              [CONF_FINE_SUB_GROUPS*80];          // 6.25KB
                                                                             // = 47.25KB total
     // Warp Space
     local volatile uint*    w_tile_color        = (local volatile uint*)    &s_tile_color[get_local_id(1)];
@@ -681,8 +734,8 @@ kernel void fine_raster_single_sample(
                 w_tile_color[get_local_id(0) + 32]  = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
                 w_tile_depth[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
                 w_tile_depth[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
-                w_tile_stencil[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
-                w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
+                w_tile_stencil[get_local_id(0)]       = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y}).x;
+                w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y+4}).x;
                 #else
                 w_tile_color[get_local_id(0)]       = read_tex_from_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode);
                 w_tile_color[get_local_id(0) + 32]  = read_tex_from_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode);
@@ -866,10 +919,23 @@ kernel void fine_raster_single_sample(
                 uint pixel_x = (tile_x << CR_TILE_LOG2) + (pixel_in_tile & 7);
                 uint pixel_y = (tile_y << CR_TILE_LOG2) + (pixel_in_tile >> 3);
 
+                // PRE ROP tests
+                // TODO: Optimize
+
+                // stencil test
+                uchar stencil;
+                bool skill = false;
+                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+                    uchar old_stencil = w_tile_stencil[pixel_in_tile];
+                    if(!stencil_test(old_stencil, c_stencil_data)) {
+                        skill = true;
+                    }
+                }
+
                 // depth test
-                ushort depth = 0;
+                ushort depth;
                 bool zkill = false;
-                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
+                if (!skill && (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
                 {
                     uint4 zdata;
                     #ifdef CONF_FINE_IMAGE_ENABLED
@@ -888,10 +954,13 @@ kernel void fine_raster_single_sample(
                     }
                 }
                 
-                if (!zkill)
+                // TODO: This pipeline does not support discarding from fragment shader
+                fragment_shader_output_t fragment_shader_output;
+                fragment_shader_output.discard = false;
+
+                if (!skill && !zkill)
                 {
                     // run fragment shader
-                    fragment_shader_output_t fragment_shader_output;
                     run_fragment_shader(
                         &fragment_shader_output,
                         tri_idx, data_idx, pixel_x, pixel_y, 0x11, &w_temp[16],
@@ -904,20 +973,23 @@ kernel void fine_raster_single_sample(
                         #endif
                         // 0, c_render_mode_flags
                         );
-                    
-                    // run ROP
-                    if (!fragment_shader_output.discard)
-                    {
-					    execute_ROP_single_sample(
-                            c_render_mode_flags,
-                            tri_idx, pixel_x, pixel_y, fragment_shader_output.color, depth,
-                            &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile],
-                            c_blending_color, c_blending_data,
-                            c_depth_data,
-                            c_render_mode_flags
-                        );
-                    }
                 }
+
+                // run ROP
+                if (!fragment_shader_output.discard)
+                {
+                    execute_ROP_single_sample(
+                        c_render_mode_flags,
+                        tri_idx, pixel_x, pixel_y, &fragment_shader_output, depth,
+                        &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
+                        &w_temp[pixel_in_tile],
+                        c_blending_color, c_blending_data,
+                        c_depth_data,
+                        c_render_mode_flags,
+                        c_stencil_data
+                    );
+                }
+
             }
             
             // update counters
@@ -937,11 +1009,15 @@ kernel void fine_raster_single_sample(
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, uint_to_uint4(w_tile_color[get_local_id(0) + 32], TEX_RGBA8));
             write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
             write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
+            write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y}, w_tile_stencil[get_local_id(0)]);
+            write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_stencil[get_local_id(0) + 32]);
             #else
             write_tex_to_buffer(g_color_buffer, surf_x/4 + surf_y*c_framebuffer_width, c_color_buffer_mode, w_tile_color[get_local_id(0)]);
             write_tex_to_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_framebuffer_width, c_color_buffer_mode, w_tile_color[get_local_id(0) + 32]);
             g_depth_buffer[surf_x/4 + surf_y*c_framebuffer_width] = w_tile_depth[get_local_id(0)];
             g_depth_buffer[surf_x/4 + (surf_y+4)*c_framebuffer_width] = w_tile_depth[get_local_id(0) + 32];
+            g_stencil_buffer[surf_x/4 + surf_y*c_framebuffer_width] = w_tile_stencil[get_local_id(0)];
+            g_stencil_buffer[surf_x/4 + (surf_y+4)*c_framebuffer_width] = w_tile_stencil[get_local_id(0) + 32];
             #endif
         }
         
