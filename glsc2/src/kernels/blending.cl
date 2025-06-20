@@ -11,7 +11,7 @@ inline uint get_blending_func_alpha_src     (uint c_blending_data) { return (c_b
 inline uint get_blending_func_color_dst     (uint c_blending_data) { return (c_blending_data >> 24) & 0xfu; }
 inline uint get_blending_func_alpha_dst     (uint c_blending_data) { return (c_blending_data >> 28) & 0xfu; }
 
-inline void apply_blend_color_func(uint func, const uint4* src, const uint4* dst, const uint4* color, uint4* out) {
+inline void apply_blend_color_func(uint func, const float4* src, const float4* dst, const float4* color, float4* out) {
   switch (func) {
     default:
     case GL_ZERO:
@@ -62,7 +62,7 @@ inline void apply_blend_color_func(uint func, const uint4* src, const uint4* dst
   }
 }
 
-inline void apply_blend_alpha_func(uint func, const uint4* src, const uint4* dst, const uint4* color, uint4* out) {
+inline void apply_blend_alpha_func(uint func, const float4* src, const float4* dst, const float4* color, float4* out) {
   switch (func) {
     default:
     case GL_ZERO:
@@ -114,12 +114,35 @@ inline void apply_blend_alpha_func(uint func, const uint4* src, const uint4* dst
 }
 
 
+
+inline float4 uint_to_float4(const uint color) {
+  #define EXTRACT_BYTE(_REG, _BYTE) ((_REG >> _BYTE*8) & 0xFFu)
+
+  return (float4) {
+    (float) EXTRACT_BYTE(color, 0) / 255.f,
+    (float) EXTRACT_BYTE(color, 1) / 255.f,
+    (float) EXTRACT_BYTE(color, 2) / 255.f,
+    (float) EXTRACT_BYTE(color, 3) / 255.f,
+  };
+
+  #undef EXTRACT_BYTE
+}
+
+inline uint float4_to_uint(const float4* color) {
+  float4 tmp = clamp(*color, 0.f, 1.f);
+
+  return 
+    (uint)(tmp.x * 255.f) <<  0 |
+    (uint)(tmp.y * 255.f) <<  8 |
+    (uint)(tmp.z * 255.f) << 16 |
+    (uint)(tmp.w * 255.f) << 24 ;
+}
+
 inline uint blend(
   uint src, uint dst,
   uint c_blending_color, uint c_blending_data
 ) {
-  uint4  srcColor,  dstColor, conColor, 
-        wsrcColor, wdstColor, outColor;
+  float4  srcColor,  dstColor, conColor, wsrcColor, wdstColor, outColor;
 
   uint blending_func_color_src  = get_blending_func_color_src (c_blending_data);
   uint blending_func_color_dst  = get_blending_func_color_dst (c_blending_data);
@@ -128,24 +151,9 @@ inline uint blend(
   uint blending_eq_color    = get_blending_eq_color   (c_blending_data);
   uint blending_eq_alpha    = get_blending_eq_alpha   (c_blending_data);
 
-  srcColor = (uint4){
-    (src >>  0) & 0xFFu, 
-    (src >>  8) & 0xFFu, 
-    (src >> 16) & 0xFFu, 
-    (src >> 24) & 0xFFu
-  };
-  dstColor = (uint4){
-    (dst >>  0) & 0xFFu, 
-    (dst >>  8) & 0xFFu, 
-    (dst >> 16) & 0xFFu, 
-    (dst >> 24) & 0xFFu
-  };
-  conColor = (uint4){
-    (c_blending_color >>  0) & 0xFFu, 
-    (c_blending_color >>  8) & 0xFFu, 
-    (c_blending_color >> 16) & 0xFFu, 
-    (c_blending_color >> 24) & 0xFFu
-  };
+  srcColor = uint_to_float4(src);
+  dstColor = uint_to_float4(dst);
+  conColor = uint_to_float4(c_blending_color);
 
   apply_blend_color_func(blending_func_alpha_src, &srcColor, &dstColor, &conColor, &wsrcColor);
   apply_blend_alpha_func(blending_func_alpha_src, &srcColor, &dstColor, &conColor, &wsrcColor);
@@ -176,10 +184,6 @@ inline uint blend(
       break;
   }
 
-  return 
-    (outColor.x <<  0) |
-    (outColor.y <<  8) |
-    (outColor.z << 16) |
-    (outColor.w << 24) ;
+  return float4_to_uint(&outColor);
 
 }

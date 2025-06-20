@@ -80,7 +80,7 @@ int32_t num_tris;
 
 // INPUT PARAMETERS
 cl_int samples_log2 = 0;
-cl_uint render_mode_flags = 0 | RENDER_MODE_FLAG_ENABLE_LERP | RENDER_MODE_FLAG_ENABLE_DEPTH;
+cl_uint render_mode_flags = 0 | RENDER_MODE_FLAG_ENABLE_LERP | RENDER_MODE_FLAG_ENABLE_DEPTH | RENDER_MODE_FLAG_ENABLE_BLENDER;
 // const glm::ivec2 viewport_size = {WIDTH, HEIGHT};
 
 // OUTPUTS
@@ -142,11 +142,15 @@ cl_mem a_num_subtris;
 cl_mem a_num_tile_segs;
 
 cl_int c_bin_batch_sz; // number of triangles being processed in each CTA
+cl_uint c_blending_color;
+cl_uint c_blending_data;
 cl_uint c_clear_color;
-cl_uint c_clear_depth;
+cl_ushort c_clear_depth;
+cl_uchar c_clear_stencil;
 cl_uint c_color_buffer_mode;
 cl_uint c_cull_face;
 cl_int c_deferred_clear;
+cl_int c_depth_data;
 cl_uint c_framebuffer_width;
 cl_int c_height_bins;
 cl_int c_height_tiles;
@@ -167,6 +171,7 @@ cl_mem t_tri_data;
 cl_mem t_tri_header;
 cl_mem t_color_buffer;
 cl_mem t_depth_buffer;
+cl_mem t_stencil_buffer;
 cl_mem t_vertex_buffer;
 
 cl_mem g_result;
@@ -407,8 +412,7 @@ void setParameters(int argc, char** argv) {
 
     glm::mat4 perspective = glm::perspective(45.0f, 1.0f, 0.01f, 1000.0f);
     glm::mat4 camera = glm::lookAt(glm::vec3{2,2,-5}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
-    // glm::mat4 rotation; 
-    // rotation = glm::rotate(rotation, 1.f, glm::vec3(0.5, 0.5, 0.5));
+
     for (int i=0; i<sizeof(VERTEX_BUFFER)/sizeof(float); i+=8) {
         glm::vec4 vec(VERTEX_BUFFER[i], VERTEX_BUFFER[i+1], VERTEX_BUFFER[i+2], VERTEX_BUFFER[i+3]);
         vec = perspective * camera * vec;
@@ -424,11 +428,15 @@ void setParameters(int argc, char** argv) {
 
 void setCLParameters() {
     c_bin_batch_sz = glm::clamp(num_tris / (round_size * min_batches), 1, max_rounds) * round_size;
-    c_clear_color = 0x00000000; // TODO ??
-    c_clear_depth = 0xFFFFFFFF; // TODO ??
+    c_blending_color = 0x00000000;
+    c_blending_data = 0x00000000;
+    c_clear_color = 0xFFFF0000;
+    c_clear_depth = 0xFFFFu;
+    c_clear_stencil = 0xFFu;
     c_color_buffer_mode = TEX_RGBA8;
     c_cull_face = 0;
-    c_deferred_clear = 1; // TODO ??
+    c_deferred_clear = 1;
+    c_depth_data = DEPTH_FUNC_LESS | (1 << 16);
     c_framebuffer_width = WIDTH;
     c_height_bins = size_bins.y;
     c_height_tiles = size_tiles.y;
@@ -564,14 +572,21 @@ void setCLParameters() {
         
         image_format = {
             .image_channel_order = CL_DEPTH, // this may be not supported for OpenCL 1.2 check cl_khr_depth_images extension
-            .image_channel_data_type = CL_UNSIGNED_INT32,
+            .image_channel_data_type = CL_UNSIGNED_INT16,
         };
         t_depth_buffer = CL_CHECK2(clCreateImage2D(context, CL_MEM_READ_WRITE, &image_format, WIDTH, HEIGHT, 0, NULL, &_err));
+
+        image_format = {
+            .image_channel_order = CL_A,
+            .image_channel_data_type = CL_UNSIGNED_INT8,
+        };
+        t_stencil_buffer = CL_CHECK2(clCreateImage2D(context, CL_MEM_READ_WRITE, &image_format, WIDTH, HEIGHT, 0, NULL, &_err));
     }
     #else
     {
         t_color_buffer = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uint[WIDTH][HEIGHT]), NULL, &_err));
-        t_depth_buffer = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uint[WIDTH][HEIGHT]), NULL, &_err));
+        t_depth_buffer = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_ushort[WIDTH][HEIGHT]), NULL, &_err));
+        t_stencil_buffer = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uchar[WIDTH][HEIGHT]), NULL, &_err));
     }
     #endif
 
@@ -676,6 +691,7 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_color_buffer),      &t_color_buffer));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_depth_buffer),      &t_depth_buffer));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_stencil_buffer),    &t_stencil_buffer));
     #ifdef CONF_FINE_IMAGE_ENABLED
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_data),          &t_tri_data));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
@@ -685,10 +701,14 @@ void setCLKernels() {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_framebuffer_width), &c_framebuffer_width));
     #endif
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_blending_color),    &c_blending_color));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_blending_data),     &c_blending_data));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_color),       &c_clear_color));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_depth),       &c_clear_depth));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_stencil),     &c_clear_stencil));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_deferred_clear),    &c_deferred_clear));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_depth_data),    &c_depth_data));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),       &c_max_subtris));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_tile_segs),     &c_max_tile_segs));
