@@ -4,15 +4,6 @@
 #include "glsc2/src/kernels/common.cl"
 #endif
 
-#define DEPTH_FUNC_NEVER                            0
-#define DEPTH_FUNC_LESS                             1
-#define DEPTH_FUNC_EQUAL                            2
-#define DEPTH_FUNC_LEQUAL                           3
-#define DEPTH_FUNC_GREATER                          4
-#define DEPTH_FUNC_NOTEQUAL                         5
-#define DEPTH_FUNC_GEQUAL                           6
-#define DEPTH_FUNC_ALWAYS                           7
-
 
 #define GL_KEEP                           0x1E00
 #define GL_ZERO                           0
@@ -151,34 +142,4 @@ inline void local_1dim_update_tile_z_min(uint c_render_mode_flags, ushort* tile_
         *tile_z_min = local_1dim_reduce_min_ui(z, l_temp);
         *tile_z_upd = false;
     }
-}
-
-
-void stencil_operation(uint operation, int ref, uint mask, global uchar* stencil_buffer) {
-  switch(operation) {
-    case GL_KEEP:
-      return;
-    case GL_ZERO:
-      *stencil_buffer = (*stencil_buffer & ~mask) | (0 & mask);
-      return;
-    case GL_REPLACE:
-      *stencil_buffer = (*stencil_buffer & ~mask) | (ref & mask);
-      return;
-    case GL_INCR:
-      if (*stencil_buffer < 0xFFu) *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer + 1) & mask);
-      return;
-    case GL_DECR:
-      if (*stencil_buffer > 0x00u) *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer - 1) & mask);
-      else *stencil_buffer = mask & (*stencil_buffer);
-      return;
-    case GL_INVERT:
-      *stencil_buffer = (*stencil_buffer & ~mask) | (~(*stencil_buffer) & mask);
-      return;
-    case GL_INCR_WRAP:
-      *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer + 1) & mask);
-      return;
-    case GL_DECR_WRAP:
-      *stencil_buffer = (*stencil_buffer & ~mask) | ((*stencil_buffer - 1) & mask);
-      return;
-  }
 }

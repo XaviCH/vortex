@@ -21,6 +21,7 @@ typedef struct {
     GLsizei stride;
     void *pointer;
     GLuint binding;
+    cl_mem mem;
 } vertex_attrib_pointer_t;
 
 typedef union {
@@ -163,7 +164,7 @@ typedef struct {
 } stencil_function_t;
 
 typedef struct { 
-    GLenum sfail,  dpfail,  dppasss; 
+    GLenum sfail,  dpfail,  dpass; 
 } stencil_operation_t;
 
 typedef struct { 
@@ -217,5 +218,29 @@ typedef struct {
     GLenum front_face, cull_face;
     GLfloat line_width;
 } rasterization_data_t;
+
+typedef struct {
+    cl_mem bin_counter, num_bin_segs, num_subtris;
+    cl_mem coarse_counter, num_active_tiles, num_tile_segs;
+    cl_mem fine_counter;
+} rasterization_atomic_mem_container_t;
+
+typedef struct {
+    cl_mem tri_data, tri_header, tri_subtris, vertex_buffer;
+    cl_mem bin_first_seg, bin_secount, bin_sedata, bin_senext, bin_total;
+    cl_mem active_tiles, tile_first_seg, tile_seg_count, tile_seg_data, tile_seg_next;
+} rasterization_global_mem_container_t;
+
+typedef struct {
+    cl_mem tri_header, tri_data, vertex_buffer;
+} rasterization_texture_mem_container_t;
+
+typedef struct {
+
+    rasterization_atomic_mem_container_t    atomics;
+    rasterization_global_mem_container_t    globals;
+    rasterization_texture_mem_container_t   textures;
+
+} rasterization_mem_container_t;
 
 #endif

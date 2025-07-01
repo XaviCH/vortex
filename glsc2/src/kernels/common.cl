@@ -1,5 +1,5 @@
-#ifndef COMMON_CL
-#define COMMON_CL
+#ifndef KERNELS_COMMON_CL
+#define KERNELS_COMMON_CL
 
 #ifdef __COMPILER_RELATIVE_PATH__
 #include "../constants.device.h"

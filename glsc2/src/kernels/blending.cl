@@ -14,49 +14,49 @@ inline uint get_blending_func_alpha_dst     (uint c_blending_data) { return (c_b
 inline void apply_blend_color_func(uint func, const float4* src, const float4* dst, const float4* color, float4* out) {
   switch (func) {
     default:
-    case GL_ZERO:
+    case BLEND_ZERO:
       out->xyz = 0;
       break;
-    case GL_ONE:
+    case BLEND_ONE:
       out->xyz = 1;
       break;
-    case GL_SRC_COLOR:
+    case BLEND_SRC_COLOR:
       out->xyz = src->xyz;
       break;
-    case GL_ONE_MINUS_SRC_COLOR:
+    case BLEND_ONE_MINUS_SRC_COLOR:
       out->xyz = 1 - src->xyz;
       break;
-    case GL_DST_COLOR:
+    case BLEND_DST_COLOR:
       out->xyz = dst->xyz;
       break;
-    case GL_ONE_MINUS_DST_COLOR:
+    case BLEND_ONE_MINUS_DST_COLOR:
       out->xyz = 1 - dst->xyz;
       break;
-    case GL_SRC_ALPHA:
+    case BLEND_SRC_ALPHA:
       out->xyz = src->w;
       break;
-    case GL_ONE_MINUS_SRC_ALPHA:
+    case BLEND_ONE_MINUS_SRC_ALPHA:
       out->xyz = 1 - src->w;
       break;
-    case GL_DST_ALPHA:
+    case BLEND_DST_ALPHA:
       out->xyz = dst->w;
       break;
-    case GL_ONE_MINUS_DST_ALPHA:
+    case BLEND_ONE_MINUS_DST_ALPHA:
       out->xyz = 1 - dst->w;
       break;
-    case GL_CONSTANT_COLOR:
+    case BLEND_CONSTANT_COLOR:
       out->xyz = color->xyz;
       break;
-    case GL_ONE_MINUS_CONSTANT_COLOR:
+    case BLEND_ONE_MINUS_CONSTANT_COLOR:
       out->xyz = 1 - color->xyz;
       break;
-    case GL_CONSTANT_ALPHA:
+    case BLEND_CONSTANT_ALPHA:
       out->xyz = color->w;
       break;
-    case GL_ONE_MINUS_CONSTANT_ALPHA:
+    case BLEND_ONE_MINUS_CONSTANT_ALPHA:
       out->xyz = 1 - color->w;
       break;
-    case GL_SRC_ALPHA_SATURATE:
+    case BLEND_SRC_ALPHA_SATURATE:
       out->xyz = min(src->w, 1 - dst->w);
       break;
   }
@@ -65,49 +65,49 @@ inline void apply_blend_color_func(uint func, const float4* src, const float4* d
 inline void apply_blend_alpha_func(uint func, const float4* src, const float4* dst, const float4* color, float4* out) {
   switch (func) {
     default:
-    case GL_ZERO:
+    case BLEND_ZERO:
       out->w = 0;
       break;
-    case GL_ONE:
+    case BLEND_ONE:
       out->w = 0;
       break;
-    case GL_SRC_COLOR:
+    case BLEND_SRC_COLOR:
       out->w = src->w;
       break;
-    case GL_ONE_MINUS_SRC_COLOR:
+    case BLEND_ONE_MINUS_SRC_COLOR:
       out->w = 1 - src->w;
       break;
-    case GL_DST_COLOR:
+    case BLEND_DST_COLOR:
       out->w = dst->w;
       break;
-    case GL_ONE_MINUS_DST_COLOR:
+    case BLEND_ONE_MINUS_DST_COLOR:
       out->w = 1 - dst->w;
       break;
-    case GL_SRC_ALPHA:
+    case BLEND_SRC_ALPHA:
       out->w = src->w;
       break;
-    case GL_ONE_MINUS_SRC_ALPHA:
+    case BLEND_ONE_MINUS_SRC_ALPHA:
       out->w = 1 - src->w;
       break;
-    case GL_DST_ALPHA:
+    case BLEND_DST_ALPHA:
       out->w = dst->w;
       break;
-    case GL_ONE_MINUS_DST_ALPHA:
+    case BLEND_ONE_MINUS_DST_ALPHA:
       out->w = 1 - dst->w;
       break;
-    case GL_CONSTANT_COLOR:
+    case BLEND_CONSTANT_COLOR:
       out->w = color->w;
       break;
-    case GL_ONE_MINUS_CONSTANT_COLOR:
+    case BLEND_ONE_MINUS_CONSTANT_COLOR:
       out->w = 1 - color->w;
       break;
-    case GL_CONSTANT_ALPHA:
+    case BLEND_CONSTANT_ALPHA:
       out->w = color->w;
       break;
-    case GL_ONE_MINUS_CONSTANT_ALPHA:
+    case BLEND_ONE_MINUS_CONSTANT_ALPHA:
       out->w = 1 - color->w;
       break;
-    case GL_SRC_ALPHA_SATURATE:
+    case BLEND_SRC_ALPHA_SATURATE:
       out->w = 1;
       break;
   }
@@ -161,25 +161,25 @@ inline uint blend(
   apply_blend_alpha_func(blending_func_alpha_dst, &srcColor, &dstColor, &conColor, &wdstColor);
 
   switch (blending_eq_color) {
-    case GL_FUNC_ADD:
+    case BLEND_FUNC_ADD:
       outColor.xyz = srcColor.xyz * wsrcColor.xyz + dstColor.xyz * wdstColor.xyz;
       break;
-    case GL_FUNC_SUBTRACT:
+    case BLEND_FUNC_SUBTRACT:
       outColor.xyz = srcColor.xyz * wsrcColor.xyz - dstColor.xyz * wdstColor.xyz;
       break;
-    case GL_FUNC_REVERSE_SUBTRACT:
+    case BLEND_FUNC_REVERSE_SUBTRACT:
       outColor.xyz = dstColor.xyz * wdstColor.xyz - srcColor.xyz * wsrcColor.xyz;
       break;
   }
 
   switch (blending_eq_alpha) {
-    case GL_FUNC_ADD:
+    case BLEND_FUNC_ADD:
       outColor.w = srcColor.w * wsrcColor.w + dstColor.w * wdstColor.w;
       break;
-    case GL_FUNC_SUBTRACT:
+    case BLEND_FUNC_SUBTRACT:
       outColor.w = srcColor.w * wsrcColor.w - dstColor.w * wdstColor.w;
       break;
-    case GL_FUNC_REVERSE_SUBTRACT:
+    case BLEND_FUNC_REVERSE_SUBTRACT:
       outColor.w = dstColor.w * wdstColor.w - srcColor.w * wsrcColor.w;
       break;
   }

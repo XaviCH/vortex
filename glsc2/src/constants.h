@@ -19,6 +19,8 @@
 
 //------------------------------------------------------------------------
 
+// CONFIGURABLE
+
 #define CR_MAXVIEWPORT_LOG2     11      // ViewportSize / PixelSize. Max value for any viewport axis
 #define CR_SUBPIXEL_LOG2        4       // PixelSize / SubpixelSize. ??
 
@@ -36,14 +38,8 @@
 #define CR_BIN_SEG_LOG2         9       // 32-bit entries.
 #define CR_TILE_SEG_LOG2        5       // 32-bit entries.
 
-#define CR_MAXSUBTRIS_LOG2      24      // Triangle structs. Dictated by CoarseRaster.
+#define CR_MAXSUBTRIS_LOG2      24 // 24 reduced to 14     // Triangle structs. Dictated by CoarseRaster.
 #define CR_COARSE_QUEUE_LOG2    10      // Triangles.
-
-#define CR_SETUP_OPT_BLOCKS     8
-#define CR_BIN_WARPS            16
-#define CR_COARSE_WARPS         16      // Must be a power of two.
-#define CR_FINE_MAX_WARPS       20      // Absolute maximum for 48KB of shared mem.
-#define CR_FINE_OPT_WARPS       20      // Preferred value.
 
 //------------------------------------------------------------------------
 
@@ -66,8 +62,16 @@
 #define CR_BIN_SEG_SIZE         (1 << CR_BIN_SEG_LOG2)
 #define CR_TILE_SEG_SIZE        (1 << CR_TILE_SEG_LOG2)
 
-#define CR_MAXSUBTRIS_SIZE      (1 << CR_MAXSUBTRIS_LOG2)
+#define CR_MAXSUBTRIS_SIZE    (1 << CR_MAXSUBTRIS_LOG2)
 #define CR_COARSE_QUEUE_SIZE    (1 << CR_COARSE_QUEUE_LOG2)
+
+// ---
+
+#define CONF_MAX_TRIS       (1 << 12)
+#define CONF_MAX_SUBTRIS    (CONF_MAX_TRIS + 4096)
+#define CONF_MAX_BIN_SEGS   (CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE + 4096)
+#define CONF_MAX_TILE_SEGS   (CR_MAXTILES_SQR + 4096)
+
 
 //------------------------------------------------------------------------
 // When evaluating interpolated Z/W/U/V at pixel centers, we introduce an
@@ -113,25 +117,45 @@
 #define DEPTH_FUNC_GEQUAL                           6
 #define DEPTH_FUNC_ALWAYS                           7
 
-// Blending
-#define GL_FUNC_ADD                       0
-#define GL_FUNC_SUBTRACT                  1
-#define GL_FUNC_REVERSE_SUBTRACT          2
+// Stencil
 
-#define GL_ZERO                           0
-#define GL_ONE                            1
-#define GL_SRC_COLOR                      2
-#define GL_ONE_MINUS_SRC_COLOR            3
-#define GL_SRC_ALPHA                      4
-#define GL_ONE_MINUS_SRC_ALPHA            5
-#define GL_DST_ALPHA                      6
-#define GL_ONE_MINUS_DST_ALPHA            7
-#define GL_DST_COLOR                      8
-#define GL_ONE_MINUS_DST_COLOR            9
-#define GL_SRC_ALPHA_SATURATE             10
-#define GL_CONSTANT_COLOR                 11
-#define GL_ONE_MINUS_CONSTANT_COLOR       12
-#define GL_CONSTANT_ALPHA                 13
-#define GL_ONE_MINUS_CONSTANT_ALPHA       14
+#define STENCIL_FUNC_NEVER                            0
+#define STENCIL_FUNC_LESS                             1
+#define STENCIL_FUNC_EQUAL                            2
+#define STENCIL_FUNC_LEQUAL                           3
+#define STENCIL_FUNC_GREATER                          4
+#define STENCIL_FUNC_NOTEQUAL                         5
+#define STENCIL_FUNC_GEQUAL                           6
+#define STENCIL_FUNC_ALWAYS                           7
+
+#define STENCIL_OP_KEEP                           0
+#define STENCIL_OP_ZERO                           1
+#define STENCIL_OP_REPLACE                        2
+#define STENCIL_OP_INCR                           3
+#define STENCIL_OP_DECR                           4
+#define STENCIL_OP_INVERT                         5
+#define STENCIL_OP_INCR_WRAP                      6
+#define STENCIL_OP_DECR_WRAP                      7
+
+// Blending
+#define BLEND_FUNC_ADD                       0
+#define BLEND_FUNC_SUBTRACT                  1
+#define BLEND_FUNC_REVERSE_SUBTRACT          2
+
+#define BLEND_ZERO                           0
+#define BLEND_ONE                            1
+#define BLEND_SRC_COLOR                      2
+#define BLEND_ONE_MINUS_SRC_COLOR            3
+#define BLEND_SRC_ALPHA                      4
+#define BLEND_ONE_MINUS_SRC_ALPHA            5
+#define BLEND_DST_ALPHA                      6
+#define BLEND_ONE_MINUS_DST_ALPHA            7
+#define BLEND_DST_COLOR                      8
+#define BLEND_ONE_MINUS_DST_COLOR            9
+#define BLEND_SRC_ALPHA_SATURATE             10
+#define BLEND_CONSTANT_COLOR                 11
+#define BLEND_ONE_MINUS_CONSTANT_COLOR       12
+#define BLEND_CONSTANT_ALPHA                 13
+#define BLEND_ONE_MINUS_CONSTANT_ALPHA       14
 
 #endif
