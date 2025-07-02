@@ -35,6 +35,16 @@ GLenum gl_error = GL_NO_ERROR;
         return;                                 \
     })
 
+#define RETURN_ERROR_WITH_VALUE(error, value)                     \
+    ({                                          \
+        if(gl_error == GL_NO_ERROR) {           \
+            gl_error = error;                   \
+            printf("OpenGL error generated (%d | %x) in %s at %s:%d.\n", gl_error, gl_error, __func__, __FILE__, __LINE__);    \
+            exit(error);                        \
+        }                                       \
+        return value;                                 \
+    })
+
 #define RETURN_ERROR_WITH_MESSAGE(error, message) \
     ({                                            \
         if(gl_error == GL_NO_ERROR) {           \
@@ -98,11 +108,11 @@ scissor_data_t _scissor_data = {
 stencil_data_t _stencil_data = {
     .front = {
         .function = { .func = GL_ALWAYS, .ref = 0, .mask = 1, },
-        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dppasss = GL_KEEP }
+        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dpass = GL_KEEP }
     },
     .back = {
         .function = { .func = GL_ALWAYS, .ref = 0, .mask = 1, },
-        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dppasss = GL_KEEP }
+        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dpass = GL_KEEP }
     },
 };
 
@@ -143,12 +153,13 @@ extern unsigned char KERNEL_READNPIXELS_BIN[];
 extern unsigned char KERNEL_STRIDED_WRITE_BIN[];
 extern unsigned char KERNEL_CLEAR_BIN[];
 
-program_container_t _programs;
+rasterization_program_container_t _rasterization_programs;
 rasterization_mem_container_t _rasterization_mem;
+active_deferred_clear_t _deferred_clear;
 
-#include <kernels/triangle_setup.ocl.c>
-#include <kernels/bin_raster.ocl.c>
-#include <kernels/coarse_raster.ocl.c>
+#include "kernels/triangle_setup.ocl.c"
+#include "kernels/bin_raster.ocl.c"
+#include "kernels/coarse_raster.ocl.c"
 
 __attribute__((constructor))
 void __context_constructor__() {
@@ -170,17 +181,17 @@ void __context_constructor__() {
     strided_write_program                   = createProgramWithBinary(KERNEL_STRIDED_WRITE_BIN,                    sizeof(KERNEL_STRIDED_WRITE_BIN));
     clear_program                           = createProgramWithBinary(KERNEL_CLEAR_BIN,                            sizeof(KERNEL_CLEAR_BIN));
 
-    _programs.triangle_setup   = createProgramWithBinary(triangle_setup_ocl, triangle_setup_ocl_len);
-    _programs.bin_raster       = createProgramWithBinary(bin_raster_ocl, bin_raster_ocl_len);
-    _programs.coarse_raster    = createProgramWithBinary(coarse_raster_ocl, coarse_raster_ocl_len);
+    _rasterization_programs.triangle_setup   = createProgramWithBinary(triangle_setup_ocl, triangle_setup_ocl_len);
+    _rasterization_programs.bin_raster       = createProgramWithBinary(bin_raster_ocl, bin_raster_ocl_len);
+    _rasterization_programs.coarse_raster    = createProgramWithBinary(coarse_raster_ocl, coarse_raster_ocl_len);
 
-    buildProgram(_programs.triangle_setup);
-    buildProgram(_programs.bin_raster);
-    buildProgram(_programs.coarse_raster);
+    buildProgram(_rasterization_programs.triangle_setup);
+    buildProgram(_rasterization_programs.bin_raster);
+    buildProgram(_rasterization_programs.coarse_raster);
 
-    _kernels.triangle_setup     = createKernel(_programs.triangle_setup, "triangle_setup");
-    _kernels.bin_raster         = createKernel(_programs.bin_raster, "bin_raster");
-    _kernels.coarse_raster      = createKernel(_programs.coarse_raster, "coarse_raster");
+    _kernels.triangle_setup     = createKernel(_rasterization_programs.triangle_setup, "triangle_setup");
+    _kernels.bin_raster         = createKernel(_rasterization_programs.bin_raster, "bin_raster");
+    _kernels.coarse_raster      = createKernel(_rasterization_programs.coarse_raster, "coarse_raster");
 
     buildProgram(depth_program);
     buildProgram(scissor_test_program);
@@ -499,7 +510,7 @@ inline GLenum gl_equation_to_blend_equation (GLenum mode) {
     case GL_FUNC_ADD:               return BLEND_FUNC_ADD;
     case GL_FUNC_SUBTRACT:          return BLEND_FUNC_SUBTRACT;
     case GL_FUNC_REVERSE_SUBTRACT:  return BLEND_FUNC_REVERSE_SUBTRACT;
-    default:                        RETURN_ERROR(GL_INVALID_ENUM);
+    default:                        RETURN_ERROR_WITH_VALUE(GL_INVALID_ENUM, -1);
     }
 }
 
@@ -612,9 +623,7 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) {
     return GL_FRAMEBUFFER_COMPLETE;
 }
 
-GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
-    if (_enableds.pixel_ownership) NOT_IMPLEMENTED;
-
+void force_clear(GLbitfield mask) {
     typedef struct {
         cl_mem mem;
         uint32_t width, internalformat;
@@ -671,6 +680,25 @@ GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
     setKernelArg(_kernels.clear,18, sizeof(cl_uint), &mask_depth);
     setKernelArg(_kernels.clear,19, sizeof(cl_uint), &_masks.stencil);
     enqueueNDRangeKernel(getCommandQueue(), _kernels.clear, COLOR_ATTACHMENT0.height * COLOR_ATTACHMENT0.width);
+} 
+
+GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) {
+    if (_enableds.pixel_ownership) NOT_IMPLEMENTED;
+
+    if (mask & GL_COLOR_BUFFER_BIT != 0) {
+        if (_deferred_clear.colorbuffer) NOT_IMPLEMENTED;
+        _deferred_clear.colorbuffer = GL_TRUE;
+    }
+
+    if (mask & GL_DEPTH_BUFFER_BIT != 0) {
+        if (_deferred_clear.depthbuffer) NOT_IMPLEMENTED;
+        _deferred_clear.depthbuffer = GL_TRUE;
+    }
+
+    if (mask & GL_STENCIL_BUFFER_BIT != 0) {
+        if (_deferred_clear.stencilbuffer) NOT_IMPLEMENTED;
+        _deferred_clear.stencilbuffer = GL_TRUE;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
@@ -1107,10 +1135,10 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     setKernelArg(depth_kernel,10, sizeof(cl_uint), &_depth_func);
     setKernelArg(depth_kernel,11, sizeof(cl_int),  &_stencil_data.front.function.ref);
     setKernelArg(depth_kernel,12, sizeof(cl_uint), &_stencil_data.front.operation.dpfail);
-    setKernelArg(depth_kernel,13, sizeof(cl_uint), &_stencil_data.front.operation.dppasss);
+    setKernelArg(depth_kernel,13, sizeof(cl_uint), &_stencil_data.front.operation.dpass);
     setKernelArg(depth_kernel,14, sizeof(cl_int),  &_stencil_data.back.function.ref);
     setKernelArg(depth_kernel,15, sizeof(cl_uint), &_stencil_data.back.operation.dpfail);
-    setKernelArg(depth_kernel,16, sizeof(cl_uint), &_stencil_data.back.operation.dppasss);
+    setKernelArg(depth_kernel,16, sizeof(cl_uint), &_stencil_data.back.operation.dpass);
 
     /* Blending Kernel Set Up */
     cl_kernel blending_kernel = _kernels.blending;
@@ -1281,7 +1309,7 @@ cl_command_queue _rasterization_command_queues[NUM_GROUP];
 cl_mem _rasterization_bin_data[NUM_GROUP];
 
 inline cl_uint get_vertex_size() {
-    return sizeof(cl_float4) * (_programs[_current_program].varying_size + 1)
+    return sizeof(cl_float4) * (_programs[_current_program].varying_size + 1);
 }
 
 inline cl_uint get_render_mode_flags() {
@@ -1298,6 +1326,7 @@ inline cl_uint get_render_mode_flags() {
         if (_rasterization_data.cull_face == GL_BACK || _rasterization_data.cull_face == GL_FRONT_AND_BACK)
             render_mode_flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
     }
+    return render_mode_flags;
 }
 
  typedef struct {
@@ -1311,11 +1340,15 @@ typedef struct {
 } framebuffer_data_t; 
 
 
-inline framebuffer_data_t get_framebuffer_data() {
+framebuffer_data_t get_framebuffer_data() {
+
     attachment_t *color, *depth, *stencil;
     color   = &FRAMEBUFFER.color_attachment0;
     depth   = &FRAMEBUFFER.depth_attachment;
     stencil = &FRAMEBUFFER.stencil_attachment;
+
+    framebuffer_data_t framebuffer;
+    return framebuffer;
     
     if (color->position) {
         if (color->target == GL_RENDERBUFFER) {
@@ -1374,6 +1407,15 @@ inline framebuffer_data_t get_framebuffer_data() {
             framebuffer.height = stencilbuffer->height; 
         }
     }
+
+    return framebuffer;
+}
+
+inline uint32_t get_deferred_clear() {
+    return 
+        (_deferred_clear.colorbuffer ? (1 << 0) : 0) |
+        (_deferred_clear.depthbuffer ? (1 << 1) : 0) |
+        (_deferred_clear.stencilbuffer ? (1 << 2) : 0) ;
 }
 
 inline uint32_t get_fragment_arg_offset() {
@@ -1407,7 +1449,7 @@ inline uint32_t get_blending_color() {
         _blend_data.color.green, 
         _blend_data.color.blue, 
         _blend_data.color.alpha
-    )
+    );
 }
 inline uint32_t get_blending_data() {
     uint32_t blend_data = 0;
@@ -1428,7 +1470,7 @@ inline uint32_t get_clear_color() {
         _clear_data.color.green, 
         _clear_data.color.blue, 
         _clear_data.color.alpha
-    )
+    );
 }
 inline uint16_t get_clear_depth() {
     return (uint16_t)(_clear_data.depth*0xFFFFu);
@@ -1467,7 +1509,6 @@ inline uint32_t get_stencil_data() {
     stencil_data &= (_stencil_data.front.function.ref       & 0xFFu) << 16;
     stencil_data &= (_stencil_data.front.function.mask      & 0xFFu) << 24;
 
-    _masks.stencil
     return stencil_data;
 }
 
@@ -1541,7 +1582,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     cl_uint c_viewport_height = framebuffer.height;
     cl_uint c_viewport_width = framebuffer.width;
 
-    enqueueWriteBuffer(command_queue, a_num_subtris, 1, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
     cl_mem g_index_buffer = createBuffer(CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, (end-start)*sizeof_type(type), indices);
 
     CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_index_buffer),      &g_index_buffer));
@@ -1568,12 +1609,17 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     arg_offset = 0;
     #endif
 
-    cl_uint c_height_bins;
-    cl_uint c_num_bins;
-    cl_uint c_width_bins;
+    cl_uint c_height_pixels = (c_viewport_height + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
+    cl_uint c_width_pixels = (c_viewport_width + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
 
-    enqueueWriteBuffer(command_queue, a_bin_counter, 1, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, a_num_bin_segs, 1, 0, sizeof(zero), &zero);
+    cl_uint c_height_tiles = c_height_pixels >> CR_TILE_LOG2;
+    cl_uint c_width_tiles = c_width_pixels >> CR_TILE_LOG2;
+    cl_uint c_height_bins = (c_height_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
+    cl_uint c_width_bins = (c_width_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
+    cl_uint c_num_bins =  c_width_bins * c_height_bins;
+
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.bin_counter, 0, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, 0, 0, sizeof(zero), &zero);
     
     CL_CHECK(clSetKernelArg(kernel, 11 + arg_offset, sizeof(c_height_bins),       &c_height_bins));
     CL_CHECK(clSetKernelArg(kernel, 14 + arg_offset, sizeof(c_num_bins),          &c_num_bins));
@@ -1590,9 +1636,8 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
 
     // Coarse Raster
     kernel = _kernels.coarse_raster;
-    cl_uint c_deferred_clear = 0; // TODO
-    cl_uint c_height_tiles;
-    cl_uint c_width_tiles;
+    cl_uint c_deferred_clear = get_deferred_clear(); // TODO
+    
 
     #ifdef CONF_COARSE_IMAGE_ENABLED
     arg_offset = 1;
@@ -1600,10 +1645,10 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     arg_offset = 0;
     #endif
 
-    enqueueWriteBuffer(command_queue, a_coarse_counter, 1, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, a_num_active_tiles, 1, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, a_num_bin_segs, 1, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, a_num_tile_segs, 1, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.coarse_counter, 0, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_active_tiles, 0, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, 0, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_tile_segs, 0, 0, sizeof(zero), &zero);
 
     CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_deferred_clear),    &c_deferred_clear));
     CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_height_tiles),      &c_height_tiles));
@@ -1622,6 +1667,11 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     kernel = CURRENT_PROGRAM.fragment_kernel;
     arg_offset = get_fragment_arg_offset();
 
+    #ifdef CONF_FINE_IMAGE_ENABLED
+    arg_offset +=1;
+    #endif
+    printf("arg_offset = %d\n", arg_offset);
+
     cl_uint   c_blending_color = get_blending_color();
     cl_uint   c_blending_data = get_blending_data(); 
     cl_uint   c_clear_color = get_clear_color(); 
@@ -1631,16 +1681,18 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     cl_uint   c_depth_data = get_depth_data(); 
     cl_uint   c_stencil_data = get_stencil_data(); 
 
-    enqueueWriteBuffer(command_queue, a_fine_counter, 1, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.fine_counter, 0, 0, sizeof(zero), &zero);
 
-    #ifndef CONF_FINE_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_blending_color),    &c_blending_color));
-    CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_blending_data),     &c_blending_data));
-    CL_CHECK(clSetKernelArg(kernel, 19 + arg_offset, sizeof(c_clear_color),       &c_clear_color));
-    CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_clear_depth),       &c_clear_depth));
-    CL_CHECK(clSetKernelArg(kernel, 21 + arg_offset, sizeof(c_clear_stencil),     &c_clear_stencil));
+    CL_CHECK(clSetKernelArg(kernel, 11 + arg_offset, sizeof(cl_mem),    &framebuffer.color.mem));
+    CL_CHECK(clSetKernelArg(kernel, 12 + arg_offset, sizeof(cl_mem),    &framebuffer.depth.mem));
+    CL_CHECK(clSetKernelArg(kernel, 13 + arg_offset, sizeof(cl_mem),    &framebuffer.stencil.mem));
+
+    CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_blending_color),    &c_blending_color));
+    CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_blending_data),     &c_blending_data));
+    CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_clear_color),       &c_clear_color));
+    CL_CHECK(clSetKernelArg(kernel, 19 + arg_offset, sizeof(c_clear_depth),       &c_clear_depth));
+    CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_clear_stencil),     &c_clear_stencil));
+    CL_CHECK(clSetKernelArg(kernel, 21 + arg_offset, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
     CL_CHECK(clSetKernelArg(kernel, 22 + arg_offset, sizeof(c_deferred_clear),    &c_deferred_clear));
     CL_CHECK(clSetKernelArg(kernel, 23 + arg_offset, sizeof(c_depth_data),    &c_depth_data));
 
@@ -1654,7 +1706,6 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
-
 
     // release dynamic buffers
     clReleaseMemObject(g_index_buffer);
@@ -2003,6 +2054,8 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
     if (_programs[program].program) RETURN_ERROR(GL_INVALID_OPERATION);
     // TODO: Check binaryFormat
+    cl_uint vertex_kernel_num_args, fragment_kernel_num_args;
+
     if (binaryFormat == POCL_BINARY) {
         _programs[program].program=createProgramWithBinary(binary, length); // TODO: NOT HERE, but check to send Host OpenCL programs
         buildProgram(_programs[program].program);
@@ -2012,11 +2065,9 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         _programs[program].vertex_kernel            = createKernel(_programs[program].program, VERTEX_SHADER_FNAME);
         _programs[program].fragment_kernel          = createKernel(_programs[program].program, FRAGMENT_SHADER_FNAME);
 
-        cl_uint kernel_num_args;
-
-        clGetKernelInfo(_programs[program].vertex_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_num_args, NULL);
+        clGetKernelInfo(_programs[program].vertex_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_kernel_num_args, NULL);
         
-        for(cl_uint arg=0; arg < kernel_num_args; ++arg) {
+        for(cl_uint arg=0; arg < vertex_kernel_num_args; ++arg) {
             cl_kernel_arg_address_qualifier addr_qualifier;
             cl_kernel_arg_type_qualifier type_qualifier;
             cl_kernel_arg_access_qualifier access_qualifier;
@@ -2072,11 +2123,12 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
             printf("names: %s\n", arg_data->name); 
         }
 
-        clGetKernelInfo(_programs[program].fragment_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_num_args, NULL);
-        printf("kernel args frag: %d", kernel_num_args);
+        clGetKernelInfo(_programs[program].fragment_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &fragment_kernel_num_args, NULL);
+        fragment_kernel_num_args -=1;
+        printf("kernel args frag: %d\n", fragment_kernel_num_args);
         uint32_t n_images = 0, n_samplers = 0;
 
-        for(cl_uint arg=0; arg < kernel_num_args; ++arg) {
+        for(cl_uint arg=0; arg < fragment_kernel_num_args; ++arg) {
             cl_kernel_arg_address_qualifier addr_qualifier;
             cl_kernel_arg_type_qualifier type_qualifier;
             cl_kernel_arg_access_qualifier access_qualifier;
@@ -2129,6 +2181,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
                     // TODO: type checker
                 }
             } else if (type == GL_FLOAT && addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_CONST) {
+                /*
                 int find = -1;
                 for(int varying=0; varying <_programs[program].varying_size; ++varying) {
                     if (strcmp(name, _programs[program].varying_data[varying].name) == 0) {
@@ -2143,6 +2196,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
                 }
                 arg_data = _programs[program].varying_data + find;
                 exist = 1;
+                */
             } else if (type == SAMPLER2D_T) {
                 arg_data = _programs[program].sampler_data + n_samplers;
                 ++n_samplers;
@@ -2150,7 +2204,9 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
             } else if (type == IMAGE_T) {
                 arg_data = _programs[program].image_data + n_images;
                 ++n_images;
-            } else {
+            } else  {
+                // errors on the compiler
+                if (strcmp(name, "test") == 0) continue;
                 _programs[program].last_load_attempt = GL_FALSE;
                 strcpy(_programs[program].log, "Failed load attempt");
                 return;
@@ -2174,6 +2230,46 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
             return;
         }
     } else NOT_IMPLEMENTED;
+
+
+    #ifdef CONF_FINE_IMAGE_ENABLED
+    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args-1, sizeof(cl_mem), &_rasterization_mem.textures.vertex_buffer));
+    #else 
+    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args-1, sizeof(cl_mem), &_rasterization_mem.globals.vertex_buffer));
+    #endif
+
+    _programs[program].fragment_kernel = createKernel(_programs[program].program, "fine_raster_single_sample");
+    cl_kernel kernel = _programs[program].fragment_kernel;
+
+
+    CL_CHECK(clSetKernelArg(kernel, 0 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.atomics.fine_counter));
+    CL_CHECK(clSetKernelArg(kernel, 1 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.atomics.num_active_tiles));
+    CL_CHECK(clSetKernelArg(kernel, 2 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.atomics.num_bin_segs));
+    CL_CHECK(clSetKernelArg(kernel, 3 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.atomics.num_subtris));
+    CL_CHECK(clSetKernelArg(kernel, 4 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.atomics.num_tile_segs));
+    CL_CHECK(clSetKernelArg(kernel, 5 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.active_tiles));
+    CL_CHECK(clSetKernelArg(kernel, 6 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.tile_first_seg));
+    CL_CHECK(clSetKernelArg(kernel, 7 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.tile_seg_count));
+    CL_CHECK(clSetKernelArg(kernel, 8 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.tile_seg_data));
+    CL_CHECK(clSetKernelArg(kernel, 9 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.tile_seg_next));
+    CL_CHECK(clSetKernelArg(kernel, 10 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.tri_header));
+    #ifdef CONF_FINE_IMAGE_ENABLED
+    NOT_IMPLEMENTED;
+    #else
+    CL_CHECK(clSetKernelArg(kernel, 14 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.tri_data));
+    CL_CHECK(clSetKernelArg(kernel, 15 + fragment_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.vertex_buffer));
+    #endif
+
+    cl_int offset = 0;
+    #ifdef CONF_FINE_IMAGE_ENABLED
+    offset = 1;
+    #endif
+    cl_int    c_max_bin_segs = CONF_MAX_BIN_SEGS;
+    cl_int    c_max_subtris = CONF_MAX_SUBTRIS;
+    cl_int    c_max_tile_segs = CONF_MAX_TILE_SEGS;
+    CL_CHECK(clSetKernelArg(kernel, 24 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_bin_segs));
+    CL_CHECK(clSetKernelArg(kernel, 25 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_subtris));
+    CL_CHECK(clSetKernelArg(kernel, 26 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_tile_segs));
 
 }
 
@@ -2269,13 +2365,20 @@ GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum interna
     case GL_STENCIL_INDEX8:
         size = sizeof(uint8_t[width][height]);
         break;
+    case GL_RGBA8:
+        size = sizeof(uint32_t[width][height]);
+        break;
     default:
         NOT_IMPLEMENTED; // Check what error throw
     }
 
     // TODO: if (size > remaining_memory) RETURN_ERROR(GL_OUT_OF_MEMORY);
 
+    #ifdef DEVICE_IMAGE_ENABLED
+    NOT_IMPLEMENTED;
+    #else
     _renderbuffers[_renderbuffer_binding].mem               = createBuffer(MEM_READ_WRITE, size, NULL);
+    #endif
     _renderbuffers[_renderbuffer_binding].internalformat    = internalformat;
     _renderbuffers[_renderbuffer_binding].width             = width;
     _renderbuffers[_renderbuffer_binding].height            = height;
@@ -2335,7 +2438,7 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
             .func = gl_function_to_stencil_function(func),
             .ref = ref,
             .mask = mask,
-        }
+        };
         break;
     default:
         RETURN_ERROR(GL_INVALID_ENUM); // TODO: Check this error
@@ -2376,14 +2479,14 @@ inline GLenum gl_operation_to_stencil_operation(GLenum operation) {
         case GL_DECR:       return STENCIL_OP_DECR;
         case GL_INVERT:     return STENCIL_OP_INVERT;
         case GL_INCR_WRAP:  return STENCIL_OP_INCR_WRAP;
-        case GL_DECR:       return STENCIL_OP_DECR;
+        case GL_DECR_WRAP:  return STENCIL_OP_DECR_WRAP;
     }
     RETURN_ERROR(GL_INVALID_ENUM);
     return -1;
 } 
 
 GL_APICALL void GL_APIENTRY glStencilOp (GLenum fail, GLenum zfail, GLenum zpass) {
-    glStencilOpSeparate(GL_FRONT_AND_BACK)
+    glStencilOpSeparate(GL_FRONT_AND_BACK, fail, zfail, zpass);
 }
 
 GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
@@ -2716,8 +2819,10 @@ GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v) {
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
+    printf("index=%d\n", index);
     if (index >= MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
     if (size > 4 || size <=0) RETURN_ERROR(GL_INVALID_VALUE);
+    printf("stride=%d\n", stride);
     if (stride < 0) RETURN_ERROR(GL_INVALID_VALUE);
     if (type < GL_BYTE || type > GL_FLOAT) RETURN_ERROR(GL_INVALID_VALUE);
 
