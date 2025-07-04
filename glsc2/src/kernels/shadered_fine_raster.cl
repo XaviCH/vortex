@@ -1,26 +1,23 @@
 #ifndef SHADER
 
 #ifdef __COMPILER_RELATIVE_PATH__
-#include "shaders/color.cl"
+#include "shaders/color_tex.cl"
 #else
-#include "glsc2/src/kernels/shaders/color.cl"
+#include "glsc2/src/kernels/shaders/color_tex.cl"
 #endif
 
 #endif
-
 
 #ifdef __COMPILER_RELATIVE_PATH__
-#include "blending.cl"
-#include "common.cl"
-#include "depth.cl"
-#include "stencil.cl"
-#include "shaders/common.cl"
+#include <blending.cl>
+#include <common.cl>
+#include <depth.cl>
+#include <stencil.cl>
 #else
 #include "glsc2/src/kernels/blending.cl"
 #include "glsc2/src/kernels/common.cl"
 #include "glsc2/src/kernels/depth.cl"
 #include "glsc2/src/kernels/stencil.cl"
-#include "glsc2/src/kernels/shaders/common.cl"
 #endif
 
 
@@ -187,7 +184,7 @@ inline float3 compute_barys(
 //------------------------------------------------------------------------
 
 inline bool run_fragment_shader(
-    KERNEL_FRAGMENT_INPUT
+    FS_KERNEL_PARAMS
 
     fragment_shader_output_t* output,
     int data_idx, int pixel_x, int pixel_y,
@@ -199,8 +196,6 @@ inline bool run_fragment_shader(
     global const float4* vertex_buffer
     #endif
 ) {
-    fragment_shader_input_t input;
-    
     // Fetch primitive data.
     uint4 t1, t2, t3;
     #ifdef CONF_FINE_IMAGE_ENABLED
@@ -221,7 +216,7 @@ inline bool run_fragment_shader(
     float3 bary = compute_barys(&wpleq, &upleq, &vpleq, (pixel_x * 2 + 1), (pixel_y * 2 + 1));
 
     return gl_fragment_shader(
-        KERNEL_FRAGMENT_INPUT_NAMES
+        FS_KERNEL_ARGS
         output, vertex_buffer, vert_idx, bary 
         );
 }
@@ -570,7 +565,7 @@ inline void execute_ROP_single_sample(
 //------------------------------------------------------------------------
 
 kernel void fine_raster_single_sample(
-    KERNEL_FRAGMENT_INPUT
+    FS_KERNEL_PARAMS
 
     global int* a_fine_counter,
     global const int* a_num_active_tiles,
@@ -721,17 +716,25 @@ kernel void fine_raster_single_sample(
                 #ifdef CONF_FINE_IMAGE_ENABLED
                 w_tile_color[get_local_id(0)]       = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y}));
                 w_tile_color[get_local_id(0) + 32]  = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x/4,surf_y+4}));
-                w_tile_depth[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
-                w_tile_depth[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
-                w_tile_stencil[get_local_id(0)]       = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y}).x;
-                w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y+4}).x;
+                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
+                    w_tile_depth[get_local_id(0)]       = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y}).x;
+                    w_tile_depth[get_local_id(0) + 32]  = read_imageui(t_depth_buffer,(int2){surf_x/4,surf_y+4}).x;
+                }
+                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+                    w_tile_stencil[get_local_id(0)]       = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y}).x;
+                    w_tile_stencil[get_local_id(0) + 32]  = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y+4}).x;
+                }
                 #else
                 w_tile_color[get_local_id(0)]       = read_tex_from_buffer(g_color_buffer, surf_x/4 + surf_y*c_viewport_width, c_color_buffer_mode);
                 w_tile_color[get_local_id(0) + 32]  = read_tex_from_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_viewport_width, c_color_buffer_mode);
-                w_tile_depth[get_local_id(0)]       = g_depth_buffer[surf_x/4 + surf_y*c_viewport_width];
-                w_tile_depth[get_local_id(0) + 32]  = g_depth_buffer[surf_x/4 + (surf_y + 4)*c_viewport_width];
-                w_tile_stencil[get_local_id(0)]       = g_stencil_buffer[surf_x/4 + surf_y*c_viewport_width];
-                w_tile_stencil[get_local_id(0) + 32]  = g_stencil_buffer[surf_x/4 + (surf_y + 4)*c_viewport_width];
+                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
+                    w_tile_depth[get_local_id(0)]       = g_depth_buffer[surf_x/4 + surf_y*c_viewport_width];
+                    w_tile_depth[get_local_id(0) + 32]  = g_depth_buffer[surf_x/4 + (surf_y + 4)*c_viewport_width];
+                }
+                if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+                    w_tile_stencil[get_local_id(0)]       = g_stencil_buffer[surf_x/4 + surf_y*c_viewport_width];
+                    w_tile_stencil[get_local_id(0) + 32]  = g_stencil_buffer[surf_x/4 + (surf_y + 4)*c_viewport_width];
+                }
                 #endif
             }
         }
@@ -952,7 +955,7 @@ kernel void fine_raster_single_sample(
                 {
                     // run fragment shader
                     fragment_pass = run_fragment_shader(
-                        KERNEL_FRAGMENT_INPUT_NAMES
+                        FS_KERNEL_ARGS
 
                         &fragment_shader_output,
                         data_idx, pixel_x, pixel_y,
@@ -999,17 +1002,25 @@ kernel void fine_raster_single_sample(
             #ifdef CONF_FINE_IMAGE_ENABLED
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, uint_to_uint4(w_tile_color[get_local_id(0)], TEX_RGBA8));
             write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, uint_to_uint4(w_tile_color[get_local_id(0) + 32], TEX_RGBA8));
-            write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
-            write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
-            write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y}, w_tile_stencil[get_local_id(0)]);
-            write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_stencil[get_local_id(0) + 32]);
+            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
+                write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
+                write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
+            }
+            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+                write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y}, w_tile_stencil[get_local_id(0)]);
+                write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_stencil[get_local_id(0) + 32]);
+            }
             #else
             write_tex_to_buffer(g_color_buffer, surf_x/4 + surf_y*c_viewport_width, c_color_buffer_mode, w_tile_color[get_local_id(0)]);
             write_tex_to_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_viewport_width, c_color_buffer_mode, w_tile_color[get_local_id(0) + 32]);
-            g_depth_buffer[surf_x/4 + surf_y*c_viewport_width] = w_tile_depth[get_local_id(0)];
-            g_depth_buffer[surf_x/4 + (surf_y+4)*c_viewport_width] = w_tile_depth[get_local_id(0) + 32];
-            g_stencil_buffer[surf_x/4 + surf_y*c_viewport_width] = w_tile_stencil[get_local_id(0)];
-            g_stencil_buffer[surf_x/4 + (surf_y+4)*c_viewport_width] = w_tile_stencil[get_local_id(0) + 32];
+            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
+                g_depth_buffer[surf_x/4 + surf_y*c_viewport_width] = w_tile_depth[get_local_id(0)];
+                g_depth_buffer[surf_x/4 + (surf_y+4)*c_viewport_width] = w_tile_depth[get_local_id(0) + 32];
+            }
+            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+                g_stencil_buffer[surf_x/4 + surf_y*c_viewport_width] = w_tile_stencil[get_local_id(0)];
+                g_stencil_buffer[surf_x/4 + (surf_y+4)*c_viewport_width] = w_tile_stencil[get_local_id(0) + 32];
+            }
             #endif
         }
         

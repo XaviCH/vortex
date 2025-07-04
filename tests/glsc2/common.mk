@@ -79,13 +79,17 @@ endif
 
 OBJS := $(addsuffix .o, $(notdir $(SRCS)))
 
-all: $(PROJECT) kernel.pocl
+all: $(PROJECT)
  
 kernel.pocl: kernel.cl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o kernel.pocl kernel.cl
 
 kernel.ocl: kernel.cl
 	$(VORTEX_GLSC_PATH)/clcompiler kernel.cl kernel.ocl -DC_OPENCL_HOST -cl-kernel-arg-info
+
+%.glsl.o: %.glsl.cl
+	$(VORTEX_GLSC_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -D'DEVICE_SUB_GROUP_SUPPORT=0' -D'DEVICE_IMAGE_SUPPORT=0' -I$(VORTEX_GLSC_PATH)/src/kernels -cl-kernel-arg-info
+
 
 %.cc.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@

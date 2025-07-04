@@ -1,5 +1,5 @@
-#ifndef _TYPES_DEVICE_H
-#define _TYPES_DEVICE_H
+#ifndef TYPES_DEVICE_H
+#define TYPES_DEVICE_H
 
 typedef struct
 {
@@ -35,6 +35,37 @@ typedef struct
     unsigned int vi0;    // Vertex indices.
     unsigned int vi1;
     unsigned int vi2;
-} triangle_data_t; 
+} triangle_data_t;
+
+/*
+typedef struct
+{
+    unsigned int blending : 1;
+    unsigned int cull_back : 1;
+    unsigned int cull_front : 1;
+    unsigned int depth_test : 1;
+    unsigned int dithering : 1;
+    unsigned int lerp  : 1;
+    unsigned int scissor_test : 1;
+    unsigned int stencil_test : 1;
+    unsigned int polygon_offset_fill : 1;
+} render_mode_t;
+*/
+
+typedef struct {
+    unsigned short width, height, misc;
+    /*
+    unsigned int internalformat : 4;
+    unsigned int s : 2;
+    unsigned int t : 2;
+    unsigned int min_filter : 3;
+    unsigned int mag_filter : 1;
+    */
+} sampler2D_t;
+
+unsigned short get_sampler2D_internalformat(sampler2D_t sampler2D) { return sampler2D.misc & 0xFu; }
+void           set_sampler2D_internalformat(sampler2D_t sampler2D, unsigned short internalformat) { sampler2D.misc = (sampler2D.misc & 0xF0u) | (internalformat & 0xFu); }
+
+
 
 #endif
