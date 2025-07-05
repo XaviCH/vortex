@@ -452,25 +452,53 @@ unsigned int sizeof_type(GLenum type) {
     NOT_IMPLEMENTED;
 } 
 
+GLenum _error;
+
+#ifdef DEBUG
+#define CASE(enum) case enum: strcpy(error_name, #enum); break;
+
+#define SET_GL_ERROR(error) \
+    { \
+        _error = error; \
+        char error_name[32]; \
+        switch (error) { \
+            CASE(GL_INVALID_ENUM); \
+            CASE(GL_INVALID_OPERATION); \
+            CASE(GL_INVALID_VALUE); \
+            default: strcpy(error_name, "UNKNOWN"); break; \
+        } \
+        printf("DEBUG: %s throws a %s at %s:%d\n", __func__, error_name, __FILE__, __LINE__); \
+        exit(error); \
+    }
+
+#undef CASE
+#else
+#define SET_GL_ERROR(error) \
+    { _error = error; }
+#endif
+
 /************ OpenGL Interface Implementations ************\
  * 
  * 
 */
-GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) {
-    if (texture < GL_TEXTURE0) RETURN_ERROR(GL_INVALID_ENUM);
-    
-    uint32_t id = texture - GL_TEXTURE0; 
-    if (id >= MAX_COMBINED_TEXTURE_IMAGE_UNITS) RETURN_ERROR(GL_INVALID_OPERATION);
-    
-    _current_active_texture = id;
+// TODO: Dependant texture throws this if (id >= MAX_COMBINED_TEXTURE_IMAGE_UNITS) RETURN_ERROR(GL_INVALID_OPERATION);
+GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) 
+{
+    _current_active_texture = texture - GL_TEXTURE0;
+    if (_current_active_texture >= MAX_COMBINED_TEXTURE_IMAGE_UNITS) 
+        SET_GL_ERROR(GL_INVALID_ENUM);
 }
 
-GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) {
-    if (!_buffers[buffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
-    
-    if (target == GL_ARRAY_BUFFER) {
+GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) 
+{
+    if (target == GL_ARRAY_BUFFER) 
+    {
         _buffer_binding = buffer;
-    } else NOT_IMPLEMENTED;
+        if (buffer != 0 && !_buffers[buffer].used) 
+            SET_GL_ERROR(GL_INVALID_OPERATION);
+    } 
+    else 
+        SET_GL_ERROR(GL_INVALID_ENUM);
 }
 
 GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) {
@@ -529,21 +557,21 @@ GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum mode
 inline GLenum gl_function_to_blend_function (GLenum factor) {
     switch (factor)
     {
-        case GL_ZERO:                       BLEND_ZERO;                           
-        case GL_ONE:                        BLEND_ONE;                            
-        case GL_SRC_COLOR:                  BLEND_SRC_COLOR;                      
-        case GL_ONE_MINUS_SRC_COLOR:        BLEND_ONE_MINUS_SRC_COLOR;            
-        case GL_SRC_ALPHA:                  BLEND_SRC_ALPHA;                      
-        case GL_ONE_MINUS_SRC_ALPHA:        BLEND_ONE_MINUS_SRC_ALPHA;            
-        case GL_DST_ALPHA:                  BLEND_DST_ALPHA;                      
-        case GL_ONE_MINUS_DST_ALPHA:        BLEND_ONE_MINUS_DST_ALPHA;            
-        case GL_DST_COLOR:                  BLEND_DST_COLOR;                      
-        case GL_ONE_MINUS_DST_COLOR:        BLEND_ONE_MINUS_DST_COLOR;            
-        case GL_SRC_ALPHA_SATURATE:         BLEND_SRC_ALPHA_SATURATE;             
-        case GL_CONSTANT_COLOR:             BLEND_CONSTANT_COLOR;                 
-        case GL_ONE_MINUS_CONSTANT_COLOR:   BLEND_ONE_MINUS_CONSTANT_COLOR;       
-        case GL_CONSTANT_ALPHA:             BLEND_CONSTANT_ALPHA;                 
-        case GL_ONE_MINUS_CONSTANT_ALPHA:   BLEND_ONE_MINUS_CONSTANT_ALPHA;       
+        case GL_ZERO:                       return BLEND_ZERO;                           
+        case GL_ONE:                        return BLEND_ONE;                            
+        case GL_SRC_COLOR:                  return BLEND_SRC_COLOR;                      
+        case GL_ONE_MINUS_SRC_COLOR:        return BLEND_ONE_MINUS_SRC_COLOR;            
+        case GL_SRC_ALPHA:                  return BLEND_SRC_ALPHA;                      
+        case GL_ONE_MINUS_SRC_ALPHA:        return BLEND_ONE_MINUS_SRC_ALPHA;            
+        case GL_DST_ALPHA:                  return BLEND_DST_ALPHA;                      
+        case GL_ONE_MINUS_DST_ALPHA:        return BLEND_ONE_MINUS_DST_ALPHA;            
+        case GL_DST_COLOR:                  return BLEND_DST_COLOR;                      
+        case GL_ONE_MINUS_DST_COLOR:        return BLEND_ONE_MINUS_DST_COLOR;            
+        case GL_SRC_ALPHA_SATURATE:         return BLEND_SRC_ALPHA_SATURATE;             
+        case GL_CONSTANT_COLOR:             return BLEND_CONSTANT_COLOR;                 
+        case GL_ONE_MINUS_CONSTANT_COLOR:   return BLEND_ONE_MINUS_CONSTANT_COLOR;       
+        case GL_CONSTANT_ALPHA:             return BLEND_CONSTANT_ALPHA;                 
+        case GL_ONE_MINUS_CONSTANT_ALPHA:   return BLEND_ONE_MINUS_CONSTANT_ALPHA;       
         default:                            RETURN_ERROR(GL_INVALID_ENUM);
     }
 }
@@ -1602,7 +1630,6 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[0] = end - start;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL));
 
-
     // Triangle Setup
     kernel = _kernels.triangle_setup;
     cl_uint c_num_tris = count / 3;
@@ -1612,10 +1639,10 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     cl_uint c_viewport_height = framebuffer.height;
     cl_uint c_viewport_width = framebuffer.width;
 
-    size_t size = c_vertex_size*end;
-    float* vertex_buffer = (float*) malloc(size);
-    CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
-    for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) printf("[%d]:%f, ", i, vertex_buffer[i]);
+    // size_t size = c_vertex_size*end;
+    // float* vertex_buffer = (float*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
+    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) printf("[%d]:%f, ", i, vertex_buffer[i]);
 
     enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
     cl_mem g_index_buffer = createBuffer(CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, (count)*sizeof_type(type)*2, indices);
@@ -1633,12 +1660,13 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, _kernels.triangle_setup, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
 
-    printf("vertex_size=%d",c_vertex_size);
+    // printf("vertex_size=%d\n",c_vertex_size);
+    // printf("varying=%d\n",_programs[_current_program].varying_size);
 
-    size = sizeof(triangle_data_t[c_num_tris]);
-    triangle_data_t* triangle_data = (triangle_data_t*) malloc(size);
-    CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.tri_data, CL_TRUE, 0, size, triangle_data, 0, NULL, NULL));
-    for(int i=0; i<c_num_tris; ++i) printf("[%d]:%d,%d,%d\n", i, triangle_data[i].vi0, triangle_data[i].vi1, triangle_data[i].vi2);
+    // size = sizeof(triangle_data_t[c_num_tris]);
+    // triangle_data_t* triangle_data = (triangle_data_t*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.tri_data, CL_TRUE, 0, size, triangle_data, 0, NULL, NULL));
+    // for(int i=0; i<c_num_tris; ++i) printf("[%d]:%d,%d,%d\n", i, triangle_data[i].vi0, triangle_data[i].vi1, triangle_data[i].vi2);
 
     // Bin Raster
     kernel = _kernels.bin_raster;
@@ -2075,14 +2103,14 @@ GL_APICALL void GL_APIENTRY glGetnUniformiv (GLuint program, GLint location, GLs
 }
 
 GL_APICALL GLint GL_APIENTRY glGetUniformLocation (GLuint program, const GLchar *name) {
-    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
+    if (!program) RETURN_ERROR(GL_INVALID_OPERATION);
     
-    for(size_t uniform=0; uniform<CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (strcmp(name, CURRENT_PROGRAM.uniforms_data[uniform].name) == 0) return uniform;
+    for(size_t uniform=0; uniform<_programs[program].active_uniforms; ++uniform) {
+        if (strcmp(name, _programs[program].uniforms_data[uniform].name) == 0) return uniform;
     }
 
-    for(size_t sampler=0; sampler<CURRENT_PROGRAM.texture_unit_size; ++sampler) {
-        if (strcmp(name, CURRENT_PROGRAM.sampler_data[sampler].name) == 0) return CURRENT_PROGRAM.active_uniforms+sampler;
+    for(size_t sampler=0; sampler<_programs[program].texture_unit_size; ++sampler) {
+        if (strcmp(name, _programs[program].sampler_data[sampler].name) == 0) return _programs[program].active_uniforms+sampler;
     }
 
     return -1;
@@ -2147,11 +2175,13 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         _programs[program].fragment_kernel          = createKernel(_programs[program].program, FRAGMENT_SHADER_FNAME);
 
         clGetKernelInfo(_programs[program].vertex_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_kernel_num_args, NULL);
-        
+        vertex_kernel_num_args -= 1; // vertex_buffer do not included
+
+        cl_kernel_arg_address_qualifier addr_qualifier;
+        cl_kernel_arg_type_qualifier type_qualifier;
+        cl_kernel_arg_access_qualifier access_qualifier;
+
         for(cl_uint arg=0; arg < vertex_kernel_num_args; ++arg) {
-            cl_kernel_arg_address_qualifier addr_qualifier;
-            cl_kernel_arg_type_qualifier type_qualifier;
-            cl_kernel_arg_access_qualifier access_qualifier;
             char name[ARG_NAME_SIZE];
             char type_name[32];
             uint32_t size, type;
@@ -2318,7 +2348,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         // varying data
         cl_kernel varying_kernel = createKernel(_programs[program].program, "gl_varying_data");
         cl_uint varying_num_args;
-        clGetKernelInfo(_programs[program].fragment_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &varying_num_args, NULL);
+        clGetKernelInfo(varying_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &varying_num_args, NULL);
         
         _programs[program].varying_size = varying_num_args - 1;
 
@@ -2326,9 +2356,9 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
 
     #ifdef CONF_FINE_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args-1, sizeof(cl_mem), &_rasterization_mem.textures.vertex_buffer));
+    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.textures.vertex_buffer));
     #else 
-    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args-1, sizeof(cl_mem), &_rasterization_mem.globals.vertex_buffer));
+    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.vertex_buffer));
     #endif
 
     _programs[program].fragment_kernel = createKernel(_programs[program].program, "fine_raster_single_sample");
@@ -2915,10 +2945,8 @@ GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v) {
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
-    printf("index=%d\n", index);
     if (index >= MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
     if (size > 4 || size <=0) RETURN_ERROR(GL_INVALID_VALUE);
-    printf("stride=%d\n", stride);
     if (stride < 0) RETURN_ERROR(GL_INVALID_VALUE);
     if (type < GL_BYTE || type > GL_FLOAT) RETURN_ERROR(GL_INVALID_VALUE);
 

@@ -1,5 +1,11 @@
-#ifndef KERNELS_SHADERS_COMMON_H
-#define KERNELS_SHADERS_COMMON_H
+/**
+ * Generic macros
+ * 
+ * TODO: Simplify macros to more generic ones.
+ */
+
+#ifndef KERNELS_SHADERS_MACROS_H
+#define KERNELS_SHADERS_MACROS_H
 
 // A preprocessor argument counter
 #define COUNT(...) COUNT_I(__VA_ARGS__, 9, 8, 7, 6, 5, 4, 3, 2, 1,)

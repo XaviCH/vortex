@@ -86,8 +86,8 @@
 #define MAX_INFO_SIZE 256
 #define MAX_UNIFORM_SIZE sizeof(float[4][4]) // Limited to a matf4x4
 
-#define VERTEX_SHADER_FNAME "main_vs"
-#define FRAGMENT_SHADER_FNAME "main_fs"
+#define VERTEX_SHADER_FNAME "gl_vertex_shader"
+#define FRAGMENT_SHADER_FNAME "gl_tmp_fragment_shader"
 #define PERSPECTIVE_DIVISION_SHADER_FNAME "gl_perspective_division"
 #define VIEWPORT_DIVISION_SHADER_FNAME "gl_viewport_division"
 

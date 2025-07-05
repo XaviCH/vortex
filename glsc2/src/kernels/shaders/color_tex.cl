@@ -9,11 +9,10 @@
 #define FS_UNIFORM_SAMPLER2D mytexture
 
 #ifdef __COMPILER_RELATIVE_PATH__
-#include "common_.cl"
+#include "wrapper.cl"
 #else
-#include "glsc2/src/kernels/shaders/common_.cl"
+#include "glsc2/src/kernels/shaders/wrapper.cl"
 #endif
-
 
 VS_MAIN({
     gl_Position    = (float4){position, 1};

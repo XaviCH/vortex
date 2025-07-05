@@ -1,25 +1,23 @@
 /**
- * TODO: 
- *
- *
+ * Wrapper to simplify creating a shader using OpenCL
+ * 
+ * TODO: Add GLSL typing and built-in functions
  */
 
-#ifndef KERNELS_SHADERS_COMMON_CL
-#define KERNELS_SHADERS_COMMON_CL
+#ifndef KERNELS_SHADERS_WRAPPER_CL
+#define KERNELS_SHADERS_WRAPPER_CL
 
 #ifdef __COMPILER_RELATIVE_PATH__
-#include "common.h"
+#include "macros.h"
+#include "types.cl"
 #include "../../types.device.h"
 #else
-#include "glsc2/src/kernels/shaders/common.h"
+#include "glsc2/src/kernels/shaders/macros.h"
+#include "glsc2/src/kernels/shaders/types.cl"
 #include "glsc2/src/types.device.h"
 #endif
 
 // Utils
-
-typedef float2 vec2;
-typedef float3 vec3;
-typedef float4 vec4;
 
 #ifdef CONF_FINE_IMAGE_ENABLED
 #define KERNEL_ARG_VERTEX_BUFFER write_only image1d_buffer_t vertex_buffer
@@ -27,12 +25,6 @@ typedef write_only image1d_buffer_t vertex_buffer_t;
 #else
 #define KERNEL_ARG_VERTEX_BUFFER global float4* vertex_buffer
 typedef global float4* vertex_buffer_t;
-#endif
-
-#ifdef CONF_FINE_IMAGE_ENABLED
-typedef read_only image2d_t image2D_t;
-#else
-typedef const global uchar* image2D_t;
 #endif
 
 float4 mul(float16 mat, float4 vec) {

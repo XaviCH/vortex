@@ -89,7 +89,7 @@ typedef struct {
 
 typedef struct {
     cl_program triangle_setup, bin_raster, coarse_raster;
-} program_container_t;
+} rasterization_program_container_t;
 
 typedef struct {
     GLboolean depth_test, stencil_test, scissor_test, pixel_ownership, dither, blend, cull_face, polygon_offset_fill;
@@ -100,7 +100,7 @@ typedef struct {
 } color_mask_t;
 
 typedef struct {
-    GLuint front, back;
+    uint8_t front, back;
 } stencil_mask_t;
 
 typedef struct {
@@ -210,6 +210,10 @@ typedef struct {
 } clear_data_t;
 
 typedef struct {
+    GLboolean colorbuffer, depthbuffer, stencilbuffer;
+} active_deferred_clear_t;
+
+typedef struct {
     GLfloat factor, units
 } polygon_offset_t;
 
@@ -227,12 +231,14 @@ typedef struct {
 
 typedef struct {
     cl_mem tri_data, tri_header, tri_subtris, vertex_buffer;
-    cl_mem bin_first_seg, bin_secount, bin_sedata, bin_senext, bin_total;
+    cl_mem bin_first_seg, bin_seg_count, bin_seg_data, bin_seg_next, bin_total;
     cl_mem active_tiles, tile_first_seg, tile_seg_count, tile_seg_data, tile_seg_next;
+    cl_mem depthbuffer, stencilbuffer;
 } rasterization_global_mem_container_t;
 
 typedef struct {
     cl_mem tri_header, tri_data, vertex_buffer;
+    cl_mem depthbuffer, stencilbuffer;
 } rasterization_texture_mem_container_t;
 
 typedef struct {
