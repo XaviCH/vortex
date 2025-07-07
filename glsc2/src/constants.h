@@ -97,6 +97,8 @@
 #define RENDER_MODE_FLAG_ENABLE_CULL_FRONT   (1 << 4)
 #define RENDER_MODE_FLAG_ENABLE_CULL_BACK    (1 << 5)
 #define RENDER_MODE_FLAG_ENABLE_STENCIL      (1 << 6)
+#define RENDER_MODE_FLAG_TRIANGLE_FAN        (1 << 7)
+#define RENDER_MODE_FLAG_TRIANGLE_STRIP      (1 << 8)
 
 // Texture modes
 #define TEX_R8                              0
@@ -157,5 +159,9 @@
 #define BLEND_ONE_MINUS_CONSTANT_COLOR       12
 #define BLEND_CONSTANT_ALPHA                 13
 #define BLEND_ONE_MINUS_CONSTANT_ALPHA       14
+
+// Render modes
+
+
 
 #endif

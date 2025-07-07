@@ -189,9 +189,10 @@ void __context_constructor__() {
     buildProgram(_rasterization_programs.bin_raster);
     buildProgram(_rasterization_programs.coarse_raster);
 
-    _kernels.triangle_setup     = createKernel(_rasterization_programs.triangle_setup, "triangle_setup");
-    _kernels.bin_raster         = createKernel(_rasterization_programs.bin_raster, "bin_raster");
-    _kernels.coarse_raster      = createKernel(_rasterization_programs.coarse_raster, "coarse_raster");
+    _kernels.triangle_setup_arrays  = createKernel(_rasterization_programs.triangle_setup, "triangle_setup_arrays");
+    _kernels.triangle_setup_range   = createKernel(_rasterization_programs.triangle_setup, "triangle_setup_range");
+    _kernels.bin_raster             = createKernel(_rasterization_programs.bin_raster, "bin_raster");
+    _kernels.coarse_raster          = createKernel(_rasterization_programs.coarse_raster, "coarse_raster");
 
     buildProgram(depth_program);
     buildProgram(scissor_test_program);
@@ -314,8 +315,20 @@ void __context_constructor__() {
     cl_kernel kernel;
 
     cl_uint c_max_subtris = CONF_MAX_SUBTRIS;
+    kernel = _kernels.triangle_setup_arrays;
+    CL_CHECK(clSetKernelArg(kernel, 0, sizeof(cl_mem),       &_rasterization_mem.atomics.num_subtris));
+    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(cl_mem),        &_rasterization_mem.globals.tri_header));
+    CL_CHECK(clSetKernelArg(kernel, 2, sizeof(cl_mem),          &_rasterization_mem.globals.tri_data));
+    CL_CHECK(clSetKernelArg(kernel, 3, sizeof(cl_mem),       &_rasterization_mem.globals.tri_subtris));
+    #ifdef CONF_SETUP_IMAGE_ENABLED
+    CL_CHECK(clSetKernelArg(kernel, 4, sizeof(cl_mem),     &_rasterization_mem.textures.vertex_buffer)); 
+    #else 
+    CL_CHECK(clSetKernelArg(kernel, 4, sizeof(cl_mem),     &_rasterization_mem.globals.vertex_buffer));
+    #endif
+    CL_CHECK(clSetKernelArg(kernel, 6, sizeof(c_max_subtris),       &c_max_subtris));
 
-    kernel = _kernels.triangle_setup;
+
+    kernel = _kernels.triangle_setup_range;
     CL_CHECK(clSetKernelArg(kernel, 0, sizeof(cl_mem),       &_rasterization_mem.atomics.num_subtris));
     CL_CHECK(clSetKernelArg(kernel, 2, sizeof(cl_mem),        &_rasterization_mem.globals.tri_header));
     CL_CHECK(clSetKernelArg(kernel, 3, sizeof(cl_mem),          &_rasterization_mem.globals.tri_data));
@@ -326,6 +339,7 @@ void __context_constructor__() {
     CL_CHECK(clSetKernelArg(kernel, 5, sizeof(cl_mem),     &_rasterization_mem.globals.vertex_buffer));
     #endif
     CL_CHECK(clSetKernelArg(kernel, 7, sizeof(c_max_subtris),       &c_max_subtris));
+
 
     kernel = _kernels.bin_raster;
     uint32_t arg_offset = 0;
@@ -491,43 +505,54 @@ GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture)
 
 GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) 
 {
-    if (target == GL_ARRAY_BUFFER) 
-    {
-        _buffer_binding = buffer;
+    if (target == GL_ARRAY_BUFFER) {
         if (buffer != 0 && !_buffers[buffer].used) 
             SET_GL_ERROR(GL_INVALID_OPERATION);
+
+        _buffer_binding = buffer;
     } 
     else 
         SET_GL_ERROR(GL_INVALID_ENUM);
 }
 
-GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) {
-    if (!_framebuffers[framebuffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
-
+GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) 
+{
     if (target == GL_FRAMEBUFFER) {
+        if (!_framebuffers[framebuffer].used) 
+            SET_GL_ERROR(GL_INVALID_OPERATION);
+
         _framebuffer_binding = framebuffer;
-    } else NOT_IMPLEMENTED;
+    } else 
+        SET_GL_ERROR(GL_INVALID_ENUM);
 }
 
-GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuffer) {
-    if (!_renderbuffers[renderbuffer].used) RETURN_ERROR(GL_INVALID_OPERATION);
-
+GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuffer) 
+{
     if (target == GL_RENDERBUFFER) {
+        if (!_renderbuffers[renderbuffer].used) 
+            SET_GL_ERROR(GL_INVALID_OPERATION);
+
         _renderbuffer_binding = renderbuffer;
-    } else NOT_IMPLEMENTED;
+    } else
+        SET_GL_ERROR(GL_INVALID_ENUM);
 }
 
-GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) {
-    if (!_textures[texture].used) RETURN_ERROR(GL_INVALID_OPERATION);
-
+GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) 
+{
     if (target == GL_TEXTURE_2D) {
-        _active_textures[_current_active_texture].binding = texture;
+        if (!_textures[texture].used) 
+            RETURN_ERROR(GL_INVALID_OPERATION);
+
+        _active_textures[_current_active_texture].binding = texture; // TODO: Texture unit maybe is unrelated with target.
         _texture_binding = texture;
-    } else NOT_IMPLEMENTED;
+    } else 
+        SET_GL_ERROR(GL_INVALID_ENUM);
+    
 }
 
-GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    _blend_data.color = (blend_color_t) {
+GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) 
+{
+    _blend_data.color = (blend_color_t) { // TODO: Compress it to 32 bits
         .red = red,
         .green = green,
         .blue = blue,
@@ -535,26 +560,32 @@ GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat bl
     };
 }
 
-inline GLenum gl_equation_to_blend_equation (GLenum mode) {
+inline GLenum gl_equation_to_blend_equation (GLenum mode) 
+{
     switch (mode)
     {
     case GL_FUNC_ADD:               return BLEND_FUNC_ADD;
     case GL_FUNC_SUBTRACT:          return BLEND_FUNC_SUBTRACT;
     case GL_FUNC_REVERSE_SUBTRACT:  return BLEND_FUNC_REVERSE_SUBTRACT;
-    default:                        RETURN_ERROR_WITH_VALUE(GL_INVALID_ENUM, -1);
+    default:                        SET_GL_ERROR(GL_INVALID_ENUM); return mode;
     }
 }
 
-GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode) {
+GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode) 
+{
     glBlendEquationSeparate(mode, mode);
 }
 
-GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha) {
-    _blend_data.equation.modeRGB = gl_equation_to_blend_equation(modeRGB);
-    _blend_data.equation.modeAlpha = gl_equation_to_blend_equation(modeAlpha);
+GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha) 
+{
+    _blend_data.equation = (blend_equation_t) {
+        .modeRGB    = gl_equation_to_blend_equation(modeRGB),
+        .modeAlpha  = gl_equation_to_blend_equation(modeAlpha),
+    };
 }
 
-inline GLenum gl_function_to_blend_function (GLenum factor) {
+inline GLenum gl_function_to_blend_function (GLenum factor) 
+{
     switch (factor)
     {
         case GL_ZERO:                       return BLEND_ZERO;                           
@@ -572,47 +603,73 @@ inline GLenum gl_function_to_blend_function (GLenum factor) {
         case GL_ONE_MINUS_CONSTANT_COLOR:   return BLEND_ONE_MINUS_CONSTANT_COLOR;       
         case GL_CONSTANT_ALPHA:             return BLEND_CONSTANT_ALPHA;                 
         case GL_ONE_MINUS_CONSTANT_ALPHA:   return BLEND_ONE_MINUS_CONSTANT_ALPHA;       
-        default:                            RETURN_ERROR(GL_INVALID_ENUM);
+        default:                            SET_GL_ERROR(GL_INVALID_ENUM); return factor;
     }
 }
 
-GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) {
+GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) 
+{
     glBlendFuncSeparate(sfactor, sfactor, dfactor, dfactor);
 }
 
-GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) {
+GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) 
+{
     _blend_data.func = (blend_func_t) {
-        .srcRGB = gl_function_to_blend_function(sfactorRGB), 
-        .srcAlpha = gl_function_to_blend_function(sfactorAlpha),
-        .dstRGB = gl_function_to_blend_function(dfactorRGB), 
-        .dstAlpha = gl_function_to_blend_function(dfactorAlpha),
+        .srcRGB     = gl_function_to_blend_function(sfactorRGB), 
+        .srcAlpha   = gl_function_to_blend_function(sfactorAlpha),
+        .dstRGB     = gl_function_to_blend_function(dfactorRGB), 
+        .dstAlpha   = gl_function_to_blend_function(dfactorAlpha),
     };
 }
 
-GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage) {
-
+GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage) 
+{
     if (target == GL_ARRAY_BUFFER) {
-        if (usage == GL_STATIC_DRAW) {
-            _buffers[_buffer_binding].mem = createBuffer(MEM_READ_ONLY | MEM_COPY_HOST_PTR, size, data);
+        cl_int error;
+        cl_mem_flags mem_flags = CL_MEM_READ_ONLY;
+        if (data != NULL)
+            mem_flags |= CL_MEM_COPY_HOST_PTR;
+
+        cl_mem buffer_mem = clCreateBuffer(_getContext(), mem_flags, size, data, &error);
+        if (error == CL_OUT_OF_RESOURCES) {
+            SET_GL_ERROR(GL_OUT_OF_MEMORY);
+            return;
         }
-        else if (usage == GL_DYNAMIC_DRAW || usage == GL_STREAM_DRAW) {
-            _buffers[_buffer_binding].mem = createBuffer(MEM_READ_WRITE | MEM_COPY_HOST_PTR, size, data);
-        }
-    } else NOT_IMPLEMENTED;
+        CL_CHECK(error);
+
+        _buffers[_buffer_binding].mem = buffer_mem;
+        _buffers[_buffer_binding].size = size;
+        _buffers[_buffer_binding].usage = usage;
+    } else 
+        SET_GL_ERROR(GL_INVALID_ENUM);
 }
 
-GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data) {
-    
-    if (target == GL_ARRAY_BUFFER) {
-        cl_command_queue command_queue = getCommandQueue(); 
-        cl_int error = clEnqueueWriteBuffer(command_queue, _buffers[_buffer_binding].mem, CL_TRUE, offset, size, data, 0, NULL, NULL);
-        if (error == CL_INVALID_VALUE) RETURN_ERROR(GL_INVALID_VALUE);
-    } else NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data) 
+{
+    if (target != GL_ARRAY_BUFFER) {
+        SET_GL_ERROR(GL_INVALID_ENUM);
+        return;
+    }
+    if (_buffer_binding == 0) {
+        SET_GL_ERROR(GL_INVALID_OPERATION);
+        return;
+    }
+    if (offset < 0 || size < 0 ) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    } 
+    if (offset + size > _buffers[_buffer_binding].size) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    }
+    cl_command_queue command_queue = getCommandQueue(); 
+    CL_CHECK(clEnqueueWriteBuffer(command_queue, _buffers[_buffer_binding].mem, CL_TRUE, offset, size, data, 0, NULL, NULL));
 }
 
-GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) {
+GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) 
+{
     if (target != GL_FRAMEBUFFER) {
-        gl_error = GL_INVALID_ENUM;
+        SET_GL_ERROR(GL_INVALID_ENUM);
         return 0;
     };
 
@@ -658,6 +715,8 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) {
  * 
  */
 void clear_framebuffer() {
+    printf("Force clear framebuffer\n");
+    /*
     typedef struct {
         cl_mem mem;
         uint32_t width, internalformat;
@@ -719,6 +778,7 @@ void clear_framebuffer() {
     setKernelArg(_kernels.clear,18, sizeof(cl_uint), &mask_depth);
     setKernelArg(_kernels.clear,19, sizeof(cl_uint), &_masks.stencil);
     enqueueNDRangeKernel(getCommandQueue(), _kernels.clear, COLOR_ATTACHMENT0.height * COLOR_ATTACHMENT0.width);
+    */
 } 
 
 GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) 
@@ -726,9 +786,9 @@ GL_APICALL void GL_APIENTRY glClear (GLbitfield mask)
     if (mask & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT) == 0)
         RETURN_ERROR(GL_INVALID_VALUE);
 
-    _deferred_clear.colorbuffer   |= ((mask & GL_COLOR_BUFFER_BIT)   != 0);
-    _deferred_clear.depthbuffer   |= ((mask & GL_DEPTH_BUFFER_BIT)   != 0); 
-    _deferred_clear.stencilbuffer |= ((mask & GL_STENCIL_BUFFER_BIT) != 0); 
+    _deferred_clear.colorbuffer   = (mask & GL_COLOR_BUFFER_BIT)   != 0;
+    _deferred_clear.depthbuffer   = (mask & GL_DEPTH_BUFFER_BIT)   != 0; 
+    _deferred_clear.stencilbuffer = (mask & GL_STENCIL_BUFFER_BIT) != 0; 
 }
 
 GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) 
@@ -775,17 +835,18 @@ GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint leve
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL GLuint GL_APIENTRY glCreateProgram (void){
-    static GLuint program = 1; // Pointer to the next available program.
+GL_APICALL GLuint GL_APIENTRY glCreateProgram (void)
+{
+    static GLuint program = 1;
 
     if (program < MAX_PROGRAMS) return program++;
 
-    // TODO: Checkout documentation about this behaviour
-    printf("No more programs available.\n");
-    exit(program);
+    SET_GL_ERROR(GL_OUT_OF_MEMORY);
+    return 0;
 }
 
-GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) {
+GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) 
+{
     switch (mode)
     {
     case GL_FRONT:
@@ -794,37 +855,37 @@ GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) {
         _rasterization_data.cull_face = mode;
         return;
     default:
-        RETURN_ERROR(GL_INVALID_ENUM); // TODO: Checkout error;
+        SET_GL_ERROR(GL_INVALID_ENUM);
     }
 }
 
 inline GLenum gl_function_to_depth_function (GLenum func) {
     switch (func)
     {
-        case GL_NEVER:     return DEPTH_FUNC_NEVER;
-        case GL_LESS:      return DEPTH_FUNC_LESS;
-        case GL_EQUAL:     return DEPTH_FUNC_EQUAL;
-        case GL_LEQUAL:    return DEPTH_FUNC_LEQUAL;
-        case GL_GREATER:   return DEPTH_FUNC_GREATER;
-        case GL_NOTEQUAL:  return DEPTH_FUNC_NOTEQUAL;
-        case GL_GEQUAL:    return DEPTH_FUNC_GEQUAL;
-        case GL_ALWAYS:    return DEPTH_FUNC_ALWAYS;
+        case GL_NEVER:      return DEPTH_FUNC_NEVER;
+        case GL_LESS:       return DEPTH_FUNC_LESS;
+        case GL_EQUAL:      return DEPTH_FUNC_EQUAL;
+        case GL_LEQUAL:     return DEPTH_FUNC_LEQUAL;
+        case GL_GREATER:    return DEPTH_FUNC_GREATER;
+        case GL_NOTEQUAL:   return DEPTH_FUNC_NOTEQUAL;
+        case GL_GEQUAL:     return DEPTH_FUNC_GEQUAL;
+        case GL_ALWAYS:     return DEPTH_FUNC_ALWAYS;
+        default:            SET_GL_ERROR(GL_INVALID_ENUM); return func;
     }
-    RETURN_ERROR(GL_INVALID_ENUM);
-    return -1;
 } 
 
-GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) {
+GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) 
+{
     _depth_func = gl_function_to_depth_function(func);
 }
 
 GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) {
     NOT_IMPLEMENTED;
-
     _masks.depth = flag;
 }
 
 GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) {
+    NOT_IMPLEMENTED;
     _depth_range = (depth_range_t) {.n=n, .f=f};
 }
 
@@ -858,432 +919,6 @@ GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) {
     if (index >= GL_MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
 
     _vertex_attrib_enable[index] = 0;
-}
-
-GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) {
-    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
-
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
-
-    if (first < 0) RETURN_ERROR(GL_INVALID_VALUE);
-
-    // if (first != 0) NOT_IMPLEMENTED;
-    if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
-
-    /* ---- General vars ---- */
-    
-    cl_int tmp_err; 
-    cl_buffer_region region;
-
-    /* -- Get Framebuffer Data -- */
-    typedef struct {
-        cl_mem mem;
-        GLenum internalformat;
-    } buffer_data_t; 
-    
-    typedef struct {
-        buffer_data_t color, depth, stencil;
-        GLsizei width, height;
-    } framebuffer_data_t; 
-
-    framebuffer_data_t framebuffer;
-
-    {
-        attachment_t *color, *depth, *stencil;
-        color   = &FRAMEBUFFER.color_attachment0;
-        depth   = &FRAMEBUFFER.depth_attachment;
-        stencil = &FRAMEBUFFER.stencil_attachment;
-        
-        if (color->position) {
-            if (color->target == GL_RENDERBUFFER) {
-                renderbuffer_t *colorbuffer = &_renderbuffers[color->position];
-                framebuffer.color = (buffer_data_t) {
-                    .mem = colorbuffer->mem,
-                    .internalformat = colorbuffer->internalformat,
-                };
-                framebuffer.width = colorbuffer->width;
-                framebuffer.height = colorbuffer->height; 
-            } else {
-                texture_t *colorbuffer = &_textures[color->position];
-                framebuffer.color = (buffer_data_t) {
-                    .mem = colorbuffer->mem,
-                    .internalformat = colorbuffer->internalformat,
-                };
-                framebuffer.width = colorbuffer->width;
-                framebuffer.height = colorbuffer->height; 
-            }
-        }
-        if (depth->position) {
-            if (depth->target == GL_RENDERBUFFER) {
-                renderbuffer_t *depthbuffer = &_renderbuffers[depth->position];
-                framebuffer.depth = (buffer_data_t) {
-                    .mem = depthbuffer->mem,
-                    .internalformat = depthbuffer->internalformat,
-                };
-                framebuffer.width = depthbuffer->width;
-                framebuffer.height = depthbuffer->height; 
-            } else {
-                texture_t *depthbuffer = &_textures[depth->position];
-                framebuffer.depth = (buffer_data_t) {
-                    .mem = depthbuffer->mem,
-                    .internalformat = depthbuffer->internalformat,
-                };
-                framebuffer.width = depthbuffer->width;
-                framebuffer.height = depthbuffer->height; 
-            }
-        }
-        if (stencil->position) {
-            if (stencil->target == GL_RENDERBUFFER) {
-                renderbuffer_t *stencilbuffer = &_renderbuffers[stencil->position];
-                framebuffer.stencil = (buffer_data_t) {
-                    .mem = stencilbuffer->mem,
-                    .internalformat = stencilbuffer->internalformat,
-                };
-                framebuffer.width = stencilbuffer->width;
-                framebuffer.height = stencilbuffer->height; 
-            } else {
-                texture_t *stencilbuffer = &_textures[stencil->position];
-                framebuffer.stencil = (buffer_data_t) {
-                    .mem = stencilbuffer->mem,
-                    .internalformat = stencilbuffer->internalformat,
-                };
-                framebuffer.width = stencilbuffer->width;
-                framebuffer.height = stencilbuffer->height; 
-            }
-        }
-    }
-
-    /* -- Pipeline data -- */
-    
-    GLsizei num_vertices, num_fragments;
-    
-    num_vertices = count-first;
-    num_fragments = framebuffer.width * framebuffer.height;
-
-    GLsizei num_primitives = num_vertices;
-    if (mode==GL_LINES) num_primitives /= 2;
-    else if (mode==GL_TRIANGLES) num_primitives /= 3;
-
-    /* ---- Setup Per-Vertex Buffers ---- */
-
-    // User input defined vertex array
-    cl_mem vertex_array_mem[MAX_VERTEX_ATTRIBS];
-    cl_mem temp_mem[MAX_VERTEX_ATTRIBS];
-
-    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-
-        if (_vertex_attrib_enable[attrib]) {
-            vertex_attrib_pointer_t *pointer = &_vertex_attribs[attrib].pointer;
-            size_t buffer_in_size = num_vertices*sizeof_type(pointer->type)*pointer->size+pointer->stride;
-
-            //cl_command_queue command_queue = createCommandQueue(0);
-            
-            if (pointer->binding) {
-                region.origin = (uint64_t) pointer->pointer, 
-                region.size = buffer_in_size;
-                temp_mem[attrib] = clCreateSubBuffer(_buffers[pointer->binding].mem, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &tmp_err);
-            } else {
-                temp_mem[attrib] = createBuffer(MEM_READ_WRITE | MEM_COPY_HOST_PTR, buffer_in_size, pointer->pointer);
-            }
-            vertex_array_mem[attrib] = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_vertices, NULL);
-
-            cl_uint normalized = pointer->normalized;
-
-            setKernelArg(_kernels.strided_write, 0, sizeof(pointer->size),       &pointer->size);
-            setKernelArg(_kernels.strided_write, 1, sizeof(pointer->type),       &pointer->type);
-            setKernelArg(_kernels.strided_write, 2, sizeof(cl_uint),             &normalized);
-            setKernelArg(_kernels.strided_write, 3, sizeof(pointer->stride),     &pointer->stride);
-            setKernelArg(_kernels.strided_write, 4, sizeof(cl_mem),              &temp_mem[attrib]);
-            setKernelArg(_kernels.strided_write, 5, sizeof(cl_mem),              &vertex_array_mem[attrib]);
-            
-            enqueueNDRangeKernel(_vertex_attrib_command_queues[attrib], _kernels.strided_write, num_vertices);
-
-        }
-    }
-    
-    cl_mem vertex_out_buffer    = createBuffer(CL_MEM_READ_WRITE,   sizeof(float[4])*num_vertices*CURRENT_PROGRAM.varying_size, NULL);
-    cl_mem gl_Positions         = createBuffer(MEM_READ_WRITE,      sizeof(float[4])*num_vertices,                              NULL);
-
-    /* ---- Set Up Per-Vertex Kernels ---- */
-    //printf("Vertex Kernel Set Up.");
-    cl_kernel vertex_kernel = CURRENT_PROGRAM.vertex_kernel;
-
-    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
-            setKernelArg(vertex_kernel, 
-                CURRENT_PROGRAM.uniforms_data[uniform].vertex_location, 
-                sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
-                &CURRENT_PROGRAM.uniforms_mem[uniform]
-            );
-        }
-    }
-    for(int attrib = 0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        if (_vertex_attrib_state[attrib] == VEC4) {
-            setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(vertex_attrib_t), &_vertex_attribs[attrib]);
-        } else {
-            setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(cl_mem), &vertex_array_mem[attrib]);
-        }
-    }
-
-    // TODO: Locations of out are consecutive and are the last ones, change it to accept more types 
-    unsigned int vertex_out_location = CURRENT_PROGRAM.active_uniforms + CURRENT_PROGRAM.active_vertex_attribs;
-
-    region.size = num_vertices*sizeof(float[4]);
-    for(int out=0; out < CURRENT_PROGRAM.varying_size; ++out) {
-        region.origin = sizeof(float[4])*num_vertices*out;
-        cl_mem subbuffer = clCreateSubBuffer(vertex_out_buffer,CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &tmp_err);
-        setKernelArg(vertex_kernel, CURRENT_PROGRAM.varying_data[out].vertex_location, sizeof(cl_mem), &subbuffer);
-    }
-    setKernelArg(vertex_kernel, CURRENT_PROGRAM.gl_position_location, sizeof(gl_Positions), &gl_Positions);
-
-    // Perspective Division Kernel Set Up
-    setKernelArg(_kernels.perspective_division, 0, sizeof(gl_Positions), &gl_Positions);
-
-    // Viewport Division Kernel Set Up
-    setKernelArg(_kernels.viewport_division, 0, sizeof(gl_Positions), &gl_Positions);
-    setKernelArg(_kernels.viewport_division, 1, sizeof(_viewport),    &_viewport);
-    setKernelArg(_kernels.viewport_division, 2, sizeof(_depth_range), &_depth_range);
-
-    /* ---- Set Up Per-Fragment Buffers ---- */
-    cl_mem fragment_in_buffer, gl_FragCoord, gl_Discard, gl_FragColor, facing_buffer;
-    
-    fragment_in_buffer  = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_fragments*CURRENT_PROGRAM.varying_size, NULL);
-    gl_FragCoord        = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_fragments,                              NULL);
-    gl_Discard          = createBuffer(MEM_READ_WRITE, sizeof(uint8_t)*num_fragments,                               NULL);
-    gl_FragColor        = createBuffer(MEM_READ_WRITE, sizeof(float[4])*num_fragments,                              NULL);
-    facing_buffer       = createBuffer(MEM_READ_WRITE, sizeof(uint8_t)*num_fragments,                               NULL);
-
-    /* ---- Set Up Per-Fragment Kernels ---- */
-    cl_kernel fragment_kernel;
-
-    // Rasterization Kernel Set Up
-    cl_int cull_face, front_face, enabled_culling, enabled_polygon_offset_fill;
-    cull_face = _rasterization_data.cull_face;
-    front_face = _rasterization_data.front_face;
-    enabled_culling = _enableds.cull_face;
-    enabled_polygon_offset_fill = _enableds.polygon_offset_fill;
-
-    cl_kernel rasterization_kernel;
-    switch (mode)
-    {
-    case GL_TRIANGLES:      rasterization_kernel = _kernels.rasterization.triangles;        break;
-    case GL_TRIANGLE_FAN:   rasterization_kernel = _kernels.rasterization.triangle_fan;     break;
-    case GL_TRIANGLE_STRIP: rasterization_kernel = _kernels.rasterization.triangle_strip;   break;
-    default: NOT_IMPLEMENTED;
-    }
-
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 0, sizeof(cl_mem), &gl_Positions));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 1, sizeof(cl_mem), &vertex_out_buffer));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 2, sizeof(cl_mem), &gl_FragCoord));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 3, sizeof(cl_mem), &fragment_in_buffer));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 4, sizeof(cl_mem), &facing_buffer));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 5, sizeof(cl_mem), &gl_Discard));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 6, sizeof(cl_uint), &CURRENT_PROGRAM.varying_size));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 7, sizeof(cl_uint), &first));
-    // CL_CHECK(clSetKernelArg(kernel, 8, sizeof(cl_uint), &primitive_id)); declared on the loop
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 9, sizeof(cl_int), &front_face));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 10, sizeof(cl_int), &cull_face));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 11, sizeof(cl_float), &_rasterization_data.polygon_offset.factor));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 12, sizeof(cl_float), &_rasterization_data.polygon_offset.units));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 13, sizeof(cl_int), &enabled_culling));
-    CL_CHECK(clSetKernelArg(rasterization_kernel, 14, sizeof(cl_int), &enabled_polygon_offset_fill));
-
-    // Fragment Kernel Set Up
-    fragment_kernel = CURRENT_PROGRAM.fragment_kernel;
-    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (CURRENT_PROGRAM.uniforms_data[uniform].fragment_location != -1) {
-            setKernelArg(fragment_kernel, 
-                CURRENT_PROGRAM.uniforms_data[uniform].fragment_location, 
-                sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
-                &CURRENT_PROGRAM.uniforms_mem[uniform]
-            );
-        }
-    }
-    for(int sampler = 0; sampler < CURRENT_PROGRAM.texture_unit_size; ++sampler) {
-
-        texture_t *texture_unit = _textures + _active_textures[CURRENT_PROGRAM.sampler_value[sampler]].binding;
-
-        texture_unit->wraps.s;
-
-        sampler2D_t sampler2D = {
-            .width = texture_unit->width,
-            .height = texture_unit->height,
-            // .internalformat = texture_unit->internalformat,
-            // .wraps = texture_unit->wraps,
-        };
-
-        setKernelArg(fragment_kernel,
-            CURRENT_PROGRAM.sampler_data[sampler].fragment_location,
-            sizeof(sampler2D_t),
-            &sampler2D
-        );
-
-        setKernelArg(fragment_kernel,
-            CURRENT_PROGRAM.image_data[sampler].fragment_location,
-            sizeof(texture_unit->mem),
-            &texture_unit->mem
-        );
-    }
-
-    // Texture vars
-    region.size = num_fragments*sizeof(float[4]);
-    for(int in=0; in < CURRENT_PROGRAM.varying_size; ++in) {
-        region.origin = sizeof(float[4])*num_fragments*in;
-        cl_mem subbuffer = clCreateSubBuffer(fragment_in_buffer,CL_MEM_READ_WRITE, CL_BUFFER_CREATE_TYPE_REGION, &region, &tmp_err);
-        setKernelArg(fragment_kernel, CURRENT_PROGRAM.varying_data[in].fragment_location, sizeof(cl_mem), &subbuffer);
-    }
-    // Required fragment args
-    setKernelArg(fragment_kernel, CURRENT_PROGRAM.gl_fragcolor_location, sizeof(gl_FragColor), &gl_FragColor);
-    // Optional fragment args
-    if (CURRENT_PROGRAM.gl_fragcoord_location) 
-        setKernelArg(fragment_kernel, CURRENT_PROGRAM.gl_fragcoord_location, sizeof(gl_FragCoord), &gl_FragCoord);
-    if (CURRENT_PROGRAM.gl_discard_location) 
-        setKernelArg(fragment_kernel, CURRENT_PROGRAM.gl_discard_location, sizeof(gl_Discard),   &gl_Discard);
-    
-    /* Scissor Test Kernel Set Up */
-    cl_kernel scissor_kernel = _kernels.scissor_test;
-    setKernelArg(scissor_kernel, 0, sizeof(cl_mem),   &gl_FragCoord);
-    setKernelArg(scissor_kernel, 1, sizeof(cl_mem),   &gl_Discard);
-    setKernelArg(scissor_kernel, 2, sizeof(cl_int),   &_scissor_data.left);
-    setKernelArg(scissor_kernel, 3, sizeof(cl_int),   &_scissor_data.bottom);
-    setKernelArg(scissor_kernel, 4, sizeof(cl_uint),  &_scissor_data.width);
-    setKernelArg(scissor_kernel, 5, sizeof(cl_uint),  &_scissor_data.height);
-
-    // Dummy objects set up
-    cl_int cl_error;
-    cl_mem dummy_stencil_mem = clCreateBuffer(_getContext(), CL_MEM_READ_WRITE, 200, NULL, &cl_error);
-    CHECK_CL(cl_error);
-    cl_mem dummy_depth_mem = clCreateBuffer(_getContext(), CL_MEM_READ_WRITE, 200, NULL, &cl_error);
-    CHECK_CL(cl_error);
-
-    // Stencil Kernel Set Up
-    cl_kernel stencil_kernel = _kernels.stencil_test;
-    setKernelArg(stencil_kernel, 0, sizeof(cl_mem),  &facing_buffer);
-    setKernelArg(stencil_kernel, 1, sizeof(cl_mem),  &gl_Discard);
-    setKernelArg(stencil_kernel, 2, sizeof(cl_mem),  _enableds.stencil_test ? &framebuffer.stencil.mem : &dummy_stencil_mem);
-    setKernelArg(stencil_kernel, 3, sizeof(cl_uint), &_masks.stencil.front);
-    setKernelArg(stencil_kernel, 4, sizeof(cl_uint), &_masks.stencil.back);
-    setKernelArg(stencil_kernel, 5, sizeof(cl_uint), &_stencil_data.front.function.func);
-    setKernelArg(stencil_kernel, 6, sizeof(cl_int),  &_stencil_data.front.function.ref);
-    setKernelArg(stencil_kernel, 7, sizeof(cl_uint), &_stencil_data.front.function.mask);
-    setKernelArg(stencil_kernel, 8, sizeof(cl_uint), &_stencil_data.front.operation.sfail);
-    setKernelArg(stencil_kernel, 9, sizeof(cl_uint), &_stencil_data.back.function.func);
-    setKernelArg(stencil_kernel,10, sizeof(cl_int),  &_stencil_data.back.function.ref);
-    setKernelArg(stencil_kernel,11, sizeof(cl_uint), &_stencil_data.back.function.mask);
-    setKernelArg(stencil_kernel,12, sizeof(cl_uint), &_stencil_data.back.operation.sfail);
-
-    // Depth Kernel Set Up
-    cl_uint depth_test, stencil_test;
-    depth_test = _enableds.depth_test;
-    stencil_test = _enableds.stencil_test;
-
-    cl_kernel depth_kernel = _kernels.depth_test;
-    setKernelArg(depth_kernel, 0, sizeof(cl_mem), &gl_FragCoord);
-    setKernelArg(depth_kernel, 1, sizeof(cl_mem), &facing_buffer);
-    setKernelArg(depth_kernel, 2, sizeof(cl_mem), &gl_Discard);
-    setKernelArg(depth_kernel, 3, sizeof(cl_mem), _enableds.depth_test ? &framebuffer.depth.mem : &dummy_depth_mem);
-    setKernelArg(depth_kernel, 4, sizeof(cl_mem), _enableds.stencil_test ? &framebuffer.stencil.mem : &dummy_stencil_mem);
-    setKernelArg(depth_kernel, 5, sizeof(cl_uint), &depth_test);
-    setKernelArg(depth_kernel, 6, sizeof(cl_uint), &stencil_test);
-    setKernelArg(depth_kernel, 7, sizeof(cl_uchar), &_masks.depth);
-    setKernelArg(depth_kernel, 8, sizeof(cl_uint), &_masks.stencil.front);
-    setKernelArg(depth_kernel, 9, sizeof(cl_uint), &_masks.stencil.back);
-    setKernelArg(depth_kernel,10, sizeof(cl_uint), &_depth_func);
-    setKernelArg(depth_kernel,11, sizeof(cl_int),  &_stencil_data.front.function.ref);
-    setKernelArg(depth_kernel,12, sizeof(cl_uint), &_stencil_data.front.operation.dpfail);
-    setKernelArg(depth_kernel,13, sizeof(cl_uint), &_stencil_data.front.operation.dpass);
-    setKernelArg(depth_kernel,14, sizeof(cl_int),  &_stencil_data.back.function.ref);
-    setKernelArg(depth_kernel,15, sizeof(cl_uint), &_stencil_data.back.operation.dpfail);
-    setKernelArg(depth_kernel,16, sizeof(cl_uint), &_stencil_data.back.operation.dpass);
-
-    /* Blending Kernel Set Up */
-    cl_kernel blending_kernel = _kernels.blending;
-    setKernelArg(blending_kernel,  0, sizeof(cl_mem), &gl_FragColor);
-    setKernelArg(blending_kernel,  1, sizeof(cl_mem), &gl_Discard);
-    setKernelArg(blending_kernel,  2, sizeof(cl_mem), &framebuffer.color.mem);
-    setKernelArg(blending_kernel,  3, sizeof(cl_uint), &framebuffer.color.internalformat);
-    setKernelArg(blending_kernel,  4, sizeof(cl_uint), &_blend_data.equation.modeRGB);
-    setKernelArg(blending_kernel,  5, sizeof(cl_uint), &_blend_data.equation.modeAlpha);
-    setKernelArg(blending_kernel,  6, sizeof(cl_uint), &_blend_data.func.srcRGB);
-    setKernelArg(blending_kernel,  7, sizeof(cl_uint), &_blend_data.func.srcAlpha);
-    setKernelArg(blending_kernel,  8, sizeof(cl_uint), &_blend_data.func.dstRGB);
-    setKernelArg(blending_kernel,  9, sizeof(cl_uint), &_blend_data.func.dstAlpha);
-    setKernelArg(blending_kernel, 10, sizeof(cl_float4), &_blend_data.color);
-
-    // Color Kernel Set Up
-    cl_kernel dithering_kernel = _kernels.dithering;
-    setKernelArg(dithering_kernel, 0, sizeof(cl_mem),    &gl_FragColor);
-    setKernelArg(dithering_kernel, 1, sizeof(cl_mem),    &gl_FragCoord);
-    setKernelArg(dithering_kernel, 2, sizeof(cl_mem),    &gl_Discard);
-    setKernelArg(dithering_kernel, 3, sizeof(cl_mem),    &framebuffer.color.mem);
-    setKernelArg(dithering_kernel, 4, sizeof(cl_uint),   &framebuffer.color.internalformat);
-    setKernelArg(dithering_kernel, 5, sizeof(cl_uchar4), &_masks.color);
-    setKernelArg(dithering_kernel, 6, sizeof(cl_uchar),  &_enableds.dither);
-
-    /* ---- Enqueue Kernels ---- */
-    cl_command_queue command_queue = getCommandQueue();
-
-    //PRINT_BUFFER_F(vertex_array_mem[0], num_vertices, float, 4);
-    
-    size_t ver_gw_offset[1] = {first};
-    size_t ver_gw_size[1]   = {count};
-
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, vertex_kernel, 1, ver_gw_offset, ver_gw_size, NULL, 0, NULL, NULL));
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, _kernels.perspective_division, 1, ver_gw_offset, ver_gw_size, NULL, 0, NULL, NULL));
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, _kernels.viewport_division, 1, ver_gw_offset, ver_gw_size, NULL, 0, NULL, NULL));
-
-    //PRINT_BUFFER_F(gl_Positions, num_vertices, float, 4);
-
-    size_t ras_gw_size[2] = {framebuffer.width, framebuffer.height};
-
-    for(GLsizei primitive=0; primitive < num_primitives; ++primitive) {
-        CL_CHECK(clSetKernelArg(rasterization_kernel, 8, sizeof(cl_uint), &primitive));
-
-        //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
-        CL_CHECK(clEnqueueNDRangeKernel(command_queue, rasterization_kernel, 2, NULL, ras_gw_size, NULL, 0, NULL, NULL));
-
-        //PRINT_BUFFER_I(gl_Discard, num_fragments, uint8_t, 1);
-
-        enqueueNDRangeKernel(command_queue, fragment_kernel, num_fragments);
-
-        // TODO: Pixel Ownership, is controled by the context provider
-        if (_enableds.scissor_test) 
-            enqueueNDRangeKernel(command_queue, scissor_kernel, num_fragments);
-        // TODO: Multisample Pre Operations, is controlled by the context provider
-        if (_enableds.stencil_test) {
-            //PRINT_BUFFER_I(framebuffer.stencil.mem, num_fragments, uint8_t, 1);
-            enqueueNDRangeKernel(command_queue, stencil_kernel, num_fragments); // Also manage write on stencilbuffer
-            //PRINT_BUFFER_I(framebuffer.stencil.mem, num_fragments, uint8_t, 1);
-        }
-        if (_enableds.stencil_test || _enableds.depth_test) 
-            enqueueNDRangeKernel(command_queue, depth_kernel, num_fragments); // Also manage write on depthbuffer and on stencilbuffer
-        if (_enableds.blend)
-            enqueueNDRangeKernel(command_queue, blending_kernel, num_fragments);
-
-        enqueueNDRangeKernel(command_queue, dithering_kernel, num_fragments); // Also manage write on colorbuffer
-        // TODO: Multisample Post Operations, is controlled by the context provider
-
-    }
-
-    //PRINT_BUFFER_F(gl_FragColor, num_fragments, float, 4);  
-    //PRINT_BUFFER_I(framebuffer.color.mem, num_fragments, uint8_t, 2);  
-    CHECK_CL(clReleaseMemObject(vertex_out_buffer));
-    CHECK_CL(clReleaseMemObject(fragment_in_buffer));
-    CHECK_CL(clReleaseMemObject(gl_Positions));
-    CHECK_CL(clReleaseMemObject(gl_FragCoord));
-    CHECK_CL(clReleaseMemObject(gl_Discard));
-    CHECK_CL(clReleaseMemObject(gl_FragColor));
-    CHECK_CL(clReleaseMemObject(facing_buffer));
-    CHECK_CL(clReleaseMemObject(dummy_stencil_mem));
-    CHECK_CL(clReleaseMemObject(dummy_depth_mem));
-
-    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        if (_vertex_attrib_enable[attrib]) {
-            CHECK_CL(clReleaseMemObject(temp_mem[attrib]));
-            CHECK_CL(clReleaseMemObject(vertex_array_mem[attrib]));
-        }
-    }
-
 }
 
 #define IS_DRAW_MODE(_MODE) \
@@ -1368,7 +1003,7 @@ inline cl_uint get_vertex_size() {
     return sizeof(cl_float4) * (_programs[_current_program].varying_size + 1);
 }
 
-inline cl_uint get_render_mode_flags() {
+inline cl_uint get_render_mode_flags(GLenum mode) {
     cl_uint render_mode_flags = RENDER_MODE_FLAG_ENABLE_LERP;
     if (_enableds.depth_test)
         render_mode_flags |= RENDER_MODE_FLAG_ENABLE_DEPTH;
@@ -1382,6 +1017,13 @@ inline cl_uint get_render_mode_flags() {
         if (_rasterization_data.cull_face == GL_BACK || _rasterization_data.cull_face == GL_FRONT_AND_BACK)
             render_mode_flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
     }
+    
+    if (mode == GL_TRIANGLE_FAN) {
+        render_mode_flags |= RENDER_MODE_FLAG_TRIANGLE_FAN;
+    } else if (mode == GL_TRIANGLE_STRIP) {
+        render_mode_flags |= RENDER_MODE_FLAG_TRIANGLE_STRIP;
+    }
+
     return render_mode_flags;
 }
 
@@ -1554,6 +1196,16 @@ inline uint32_t get_depth_data() {
     return depth_data;
 }
 
+inline uint get_num_tris(GLenum mode, GLsizei count) {
+    switch (mode)
+    {
+        default:
+        case GL_TRIANGLES: return count / 3;
+        case GL_TRIANGLE_FAN: return count - 2;
+        case GL_TRIANGLE_STRIP: return count - 2;
+    }
+}
+
 inline uint32_t get_stencil_data() {
     uint32_t stencil_data = 0;
 
@@ -1567,32 +1219,13 @@ inline uint32_t get_stencil_data() {
     return stencil_data;
 }
 
-GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
-    if (!IS_DRAW_MODE(mode)) RETURN_ERROR(GL_INVALID_ENUM);
-    if (count < 0) RETURN_ERROR(GL_INVALID_VALUE);
-    if (end < start) RETURN_ERROR(GL_INVALID_VALUE);
-    if (type != GL_UNSIGNED_SHORT) RETURN_ERROR(GL_INVALID_ENUM); // Maybe implementation dependant
-
-
-    if (start != 0) NOT_IMPLEMENTED;
-    if (count == 0) return;
-    // CL objects
-    cl_int cl_error;
-    cl_command_queue command_queue = getCommandQueue(); // TODO: Get the queue
-
-    size_t global_work_size[2], local_work_size[2];
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-    
-    if (mode != GL_TRIANGLES) NOT_IMPLEMENTED;
-    cl_kernel kernel;
-    cl_uint zero = 0;
-
-    framebuffer_data_t framebuffer = get_framebuffer_data();
-
-    // Vertex Shader
+void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
     cl_mem vertex_array_mem[MAX_VERTEX_ATTRIBS];
-
-    kernel = _programs[_current_program].vertex_kernel;
+    cl_command_queue command_queue = getCommandQueue();
+    
+    cl_kernel kernel = _programs[_current_program].vertex_kernel;
+    size_t global_work_size[1];
+    global_work_size[0] = end - start;
 
     for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
 
@@ -1608,7 +1241,6 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
         }
     }
 
-
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
         if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
             setKernelArg(kernel, 
@@ -1618,6 +1250,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
             );
         }
     }
+
     for(int attrib = 0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
         if (_vertex_attrib_state[attrib] == VEC4) {
             NOT_IMPLEMENTED;
@@ -1630,46 +1263,30 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[0] = end - start;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL));
 
-    // Triangle Setup
-    kernel = _kernels.triangle_setup;
-    cl_uint c_num_tris = count / 3;
-    cl_uint c_render_mode_flags = get_render_mode_flags();
+    // TODO: Assign statically this memory
+    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
+        if (_vertex_attrib_enable[attrib] && !_vertex_attribs[attrib].pointer.binding) {
+            CHECK_CL(clReleaseMemObject(vertex_array_mem[attrib]));
+        }
+    }
+
+}
+
+void run_bin_raster(GLenum mode, GLsizei count) {
+    cl_command_queue command_queue = getCommandQueue();
+
+    cl_kernel kernel = _kernels.bin_raster;
+    size_t global_work_size[2], local_work_size[2];
+    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
+
+    framebuffer_data_t framebuffer = get_framebuffer_data();
+    cl_uint zero = 0;
+
+    cl_uint c_num_tris = get_num_tris(mode, count);
     cl_uint c_samples_log2 = 0; // number of samples per pixel
     cl_uint c_vertex_size = get_vertex_size();
     cl_uint c_viewport_height = framebuffer.height;
     cl_uint c_viewport_width = framebuffer.width;
-
-    // size_t size = c_vertex_size*end;
-    // float* vertex_buffer = (float*) malloc(size);
-    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
-    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) printf("[%d]:%f, ", i, vertex_buffer[i]);
-
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
-    cl_mem g_index_buffer = createBuffer(CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, (count)*sizeof_type(type)*2, indices);
-
-    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_index_buffer),      &g_index_buffer));
-    CL_CHECK(clSetKernelArg(kernel, 6, sizeof(c_num_tris),          &c_num_tris));
-    CL_CHECK(clSetKernelArg(kernel, 8, sizeof(c_render_mode_flags), &c_render_mode_flags));
-    CL_CHECK(clSetKernelArg(kernel, 9, sizeof(c_samples_log2),      &c_samples_log2));
-    CL_CHECK(clSetKernelArg(kernel, 10, sizeof(c_vertex_size),       &c_vertex_size));
-    CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, 12, sizeof(c_viewport_width),    &c_viewport_width));
-
-    local_work_size[1] = CONF_SETUP_SUB_GROUPS;
-    global_work_size[0] = local_work_size[0] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
-    global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, _kernels.triangle_setup, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
-
-    // printf("vertex_size=%d\n",c_vertex_size);
-    // printf("varying=%d\n",_programs[_current_program].varying_size);
-
-    // size = sizeof(triangle_data_t[c_num_tris]);
-    // triangle_data_t* triangle_data = (triangle_data_t*) malloc(size);
-    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.tri_data, CL_TRUE, 0, size, triangle_data, 0, NULL, NULL));
-    // for(int i=0; i<c_num_tris; ++i) printf("[%d]:%d,%d,%d\n", i, triangle_data[i].vi0, triangle_data[i].vi1, triangle_data[i].vi2);
-
-    // Bin Raster
-    kernel = _kernels.bin_raster;
 
     uint32_t arg_offset;
     #ifdef CONF_BIN_IMAGE_ENABLED
@@ -1701,12 +1318,35 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[0] =  local_work_size[0] * CR_BIN_STREAMS_SIZE;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+}
 
+void run_coarse_raster(GLenum mode, GLsizei count) {
+    cl_command_queue command_queue = getCommandQueue();
 
-    // Coarse Raster
-    kernel = _kernels.coarse_raster;
+    cl_kernel kernel = _kernels.coarse_raster;
+    size_t global_work_size[2], local_work_size[2];
+    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
+
+    framebuffer_data_t framebuffer = get_framebuffer_data();
+    cl_uint zero = 0;
+
+    cl_uint c_num_tris = get_num_tris(mode, count);
+    cl_uint c_samples_log2 = 0; // number of samples per pixel
+    cl_uint c_vertex_size = get_vertex_size();
+    cl_uint c_viewport_height = framebuffer.height;
+    cl_uint c_viewport_width = framebuffer.width;
     cl_uint c_deferred_clear = get_deferred_clear();
 
+    cl_uint c_height_pixels = (c_viewport_height + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
+    cl_uint c_width_pixels = (c_viewport_width + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
+
+    cl_uint c_height_tiles = c_height_pixels >> CR_TILE_LOG2;
+    cl_uint c_width_tiles = c_width_pixels >> CR_TILE_LOG2;
+    cl_uint c_height_bins = (c_height_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
+    cl_uint c_width_bins = (c_width_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
+    cl_uint c_num_bins =  c_width_bins * c_height_bins;
+
+    uint32_t arg_offset;
     #ifdef CONF_COARSE_IMAGE_ENABLED
     arg_offset = 1;
     #else
@@ -1730,14 +1370,38 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+}
 
-    // ROP shaders
-    kernel = CURRENT_PROGRAM.fragment_kernel;
-    arg_offset = get_fragment_arg_offset();
+void run_fragment_shader(GLenum mode) {
+    cl_command_queue command_queue = getCommandQueue();
+    cl_kernel kernel = CURRENT_PROGRAM.fragment_kernel;
+
+    size_t global_work_size[2], local_work_size[2];
+    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
+    uint32_t arg_offset = get_fragment_arg_offset();
+
+    framebuffer_data_t framebuffer = get_framebuffer_data();
+    cl_uint zero = 0;
 
     #ifdef CONF_FINE_IMAGE_ENABLED
     arg_offset +=1;
     #endif
+
+    cl_uint c_samples_log2 = 0; // number of samples per pixel
+    cl_uint c_render_mode_flags = get_render_mode_flags(mode);
+    cl_uint c_vertex_size = get_vertex_size();
+    cl_uint c_viewport_height = framebuffer.height;
+    cl_uint c_viewport_width = framebuffer.width;
+    cl_uint c_deferred_clear = get_deferred_clear();
+
+    cl_uint c_height_pixels = (c_viewport_height + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
+    cl_uint c_width_pixels = (c_viewport_width + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
+
+    cl_uint c_height_tiles = c_height_pixels >> CR_TILE_LOG2;
+    cl_uint c_width_tiles = c_width_pixels >> CR_TILE_LOG2;
+    cl_uint c_height_bins = (c_height_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
+    cl_uint c_width_bins = (c_width_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
+    cl_uint c_num_bins =  c_width_bins * c_height_bins;
 
     cl_uint   c_blending_color = get_blending_color();
     cl_uint   c_blending_data = get_blending_data(); 
@@ -1808,21 +1472,168 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+}
 
-    {
-        _deferred_clear.colorbuffer = GL_FALSE;
-        if (_enableds.depth_test) _deferred_clear.depthbuffer = GL_FALSE;
-        if (_enableds.stencil_test) _deferred_clear.stencilbuffer = GL_FALSE;
+void reset_deferred_clear() {
+    _deferred_clear.colorbuffer = GL_FALSE;
+    if (_enableds.depth_test) _deferred_clear.depthbuffer = GL_FALSE;
+    if (_enableds.stencil_test) _deferred_clear.stencilbuffer = GL_FALSE;
 
-    }
+}
 
-    // release dynamic buffers
+GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) {
+    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
+
+    if (first < 0) RETURN_ERROR(GL_INVALID_VALUE);
+
+    // if (first != 0) NOT_IMPLEMENTED;
+    if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
+
+    // CL objects
+    cl_int cl_error;
+    cl_command_queue command_queue = getCommandQueue(); // TODO: Get the queue
+
+    size_t global_work_size[2], local_work_size[2];
+    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
+    
+    if (mode != GL_TRIANGLES && mode != GL_TRIANGLE_FAN && mode != GL_TRIANGLE_STRIP) NOT_IMPLEMENTED;
+    cl_kernel kernel;
+    cl_uint zero = 0;
+
+    framebuffer_data_t framebuffer = get_framebuffer_data();
+
+    // Vertex Shader
+    printf("vertex\n");
+    run_vertex_shader(first, count, count);
+    printf("shader\n");
+    
+    // size_t size = c_vertex_size*end;
+    // float* vertex_buffer = (float*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
+    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) printf("[%d]:%f, ", i, vertex_buffer[i]);
+
+    // Triangle Setup Range
+    kernel = _kernels.triangle_setup_arrays;
+    cl_uint c_num_tris = get_num_tris(mode, count);
+    cl_uint c_render_mode_flags = get_render_mode_flags(mode);
+    cl_uint c_samples_log2 = 0; // number of samples per pixel
+    cl_uint c_vertex_size = get_vertex_size();
+    cl_uint c_viewport_height = framebuffer.height;
+    cl_uint c_viewport_width = framebuffer.width;
+
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
+
+    CL_CHECK(clSetKernelArg(kernel, 5, sizeof(c_num_tris),          &c_num_tris));
+    CL_CHECK(clSetKernelArg(kernel, 7, sizeof(c_render_mode_flags), &c_render_mode_flags));
+    CL_CHECK(clSetKernelArg(kernel, 8, sizeof(c_samples_log2),      &c_samples_log2));
+    CL_CHECK(clSetKernelArg(kernel, 9, sizeof(c_vertex_size),       &c_vertex_size));
+    CL_CHECK(clSetKernelArg(kernel, 10, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_width),    &c_viewport_width));
+
+    local_work_size[1] = CONF_SETUP_SUB_GROUPS;
+    global_work_size[0] = local_work_size[0] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
+    global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+
+    // printf("vertex_size=%d\n",c_vertex_size);
+    // printf("varying=%d\n",_programs[_current_program].varying_size);
+
+    // size = sizeof(triangle_data_t[c_num_tris]);
+    // triangle_data_t* triangle_data = (triangle_data_t*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.tri_data, CL_TRUE, 0, size, triangle_data, 0, NULL, NULL));
+    // for(int i=0; i<c_num_tris; ++i) printf("[%d]:%d,%d,%d\n", i, triangle_data[i].vi0, triangle_data[i].vi1, triangle_data[i].vi2);
+
+    // Bin Raster
+    run_bin_raster(mode, count);
+
+    // Coarse Raster
+    run_coarse_raster(mode, count);
+
+    // ROP shaders
+    run_fragment_shader(mode);
+
+    // Update state
+    reset_deferred_clear();
+}
+
+GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) {
+    if (!IS_DRAW_MODE(mode)) RETURN_ERROR(GL_INVALID_ENUM);
+    if (count < 0) RETURN_ERROR(GL_INVALID_VALUE);
+    if (end < start) RETURN_ERROR(GL_INVALID_VALUE);
+    if (type != GL_UNSIGNED_SHORT) RETURN_ERROR(GL_INVALID_ENUM); // Maybe implementation dependant
+
+
+    if (start != 0) NOT_IMPLEMENTED;
+    if (count == 0) return;
+
+    // CL objects
+    cl_int cl_error;
+    cl_command_queue command_queue = getCommandQueue(); // TODO: Get the queue
+
+    size_t global_work_size[2], local_work_size[2];
+    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
+    
+    if (mode != GL_TRIANGLES && mode != GL_TRIANGLE_FAN && mode != GL_TRIANGLE_STRIP) NOT_IMPLEMENTED;
+    cl_kernel kernel;
+    cl_uint zero = 0;
+
+    framebuffer_data_t framebuffer = get_framebuffer_data();
+
+    // Vertex Shader
+    run_vertex_shader(start, end, count);
+    
+    // size_t size = c_vertex_size*end;
+    // float* vertex_buffer = (float*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
+    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) printf("[%d]:%f, ", i, vertex_buffer[i]);
+
+    // Triangle Setup Range
+    kernel = _kernels.triangle_setup_range;
+    cl_uint c_num_tris = get_num_tris(mode, count);
+    cl_uint c_render_mode_flags = get_render_mode_flags(mode);
+    cl_uint c_samples_log2 = 0; // number of samples per pixel
+    cl_uint c_vertex_size = get_vertex_size();
+    cl_uint c_viewport_height = framebuffer.height;
+    cl_uint c_viewport_width = framebuffer.width;
+
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
+    cl_mem g_index_buffer = createBuffer(CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, (count)*sizeof_type(type)*2, indices);
+
+    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_index_buffer),      &g_index_buffer));
+    CL_CHECK(clSetKernelArg(kernel, 6, sizeof(c_num_tris),          &c_num_tris));
+    CL_CHECK(clSetKernelArg(kernel, 8, sizeof(c_render_mode_flags), &c_render_mode_flags));
+    CL_CHECK(clSetKernelArg(kernel, 9, sizeof(c_samples_log2),      &c_samples_log2));
+    CL_CHECK(clSetKernelArg(kernel, 10, sizeof(c_vertex_size),       &c_vertex_size));
+    CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 12, sizeof(c_viewport_width),    &c_viewport_width));
+
+    local_work_size[1] = CONF_SETUP_SUB_GROUPS;
+    global_work_size[0] = local_work_size[0] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
+    global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
     clReleaseMemObject(g_index_buffer);
-    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        if (_vertex_attrib_enable[attrib] && !_vertex_attribs[attrib].pointer.binding) {
-            CHECK_CL(clReleaseMemObject(vertex_array_mem[attrib]));
-        }
-    }
+
+    // printf("vertex_size=%d\n",c_vertex_size);
+    // printf("varying=%d\n",_programs[_current_program].varying_size);
+
+    // size = sizeof(triangle_data_t[c_num_tris]);
+    // triangle_data_t* triangle_data = (triangle_data_t*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.tri_data, CL_TRUE, 0, size, triangle_data, 0, NULL, NULL));
+    // for(int i=0; i<c_num_tris; ++i) printf("[%d]:%d,%d,%d\n", i, triangle_data[i].vi0, triangle_data[i].vi1, triangle_data[i].vi2);
+
+    // Bin Raster
+    run_bin_raster(mode, count);
+
+    // Coarse Raster
+    run_coarse_raster(mode, count);
+
+    // ROP shaders
+    run_fragment_shader(mode);
+
+    // Update state
+    reset_deferred_clear();
 };
 
 GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
@@ -1957,7 +1768,7 @@ GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers) {
     }
 }
 
-GL_APICALL void GL_APIENTRY glGenerateMipmap (GLenum target) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glGenerateMipmap (GLenum target) {}; // NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glGenFramebuffers (GLsizei n, GLuint *framebuffers) {
     GLuint id = 1; // _id = 0 is reserved for ARRAY_BUFFER
@@ -2062,6 +1873,7 @@ GL_APICALL void GL_APIENTRY glGetIntegerv (GLenum pname, GLint *data) {
     case GL_IMPLEMENTATION_COLOR_READ_TYPE:
         *data = GL_UNSIGNED_SHORT_4_4_4_4;
         break;
+    case GL_FRAMEBUFFER_BINDING: *data = _framebuffer_binding; return;
     default:
         NOT_IMPLEMENTED;
     }
@@ -2166,6 +1978,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
     cl_uint vertex_kernel_num_args, fragment_kernel_num_args;
 
     if (binaryFormat == POCL_BINARY) {
+        printf("DEBUG: Linking program=%d.\n", program);
         _programs[program].program=createProgramWithBinary(binary, length); // TODO: NOT HERE, but check to send Host OpenCL programs
         buildProgram(_programs[program].program);
         // TODO: Check this logic
@@ -2277,7 +2090,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
             if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT && type != IMAGE_T) {
                 int find = -1;
-                for(int uniform; _programs[program].active_uniforms; ++uniform) {
+                for(int uniform; uniform < _programs[program].active_uniforms; ++uniform) {
                     if (strcmp(&name[1], _programs[program].uniforms_data[uniform].name) == 0) {
                         find = uniform;
                         break;
@@ -2576,7 +2389,6 @@ GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask) {
 }
 
 GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask) {
-    NOT_IMPLEMENTED;
     switch (face) {
     case GL_FRONT:
     case GL_BACK:
@@ -2898,6 +2710,8 @@ GL_APICALL void GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizei count, G
 }
 GL_APICALL void GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
+
+    printf("location=%d, count=%d, transpose=%d, value=%x, mem=%x\n", location, count, transpose, value, CURRENT_PROGRAM.uniforms_mem[location]);
 
     GENERIC_UNIFORM_V(16,GL_FLOAT,GLfloat);
 }

@@ -13,6 +13,9 @@ LIB_NAME = libGLSCv2
 clcompiler: src/clcompiler.c
 	$(CC) -o $@ $< -lOpenCL -Iinclude
 
+glslcompiler: src/glslcompiler.c
+	$(CC) -o $@ $< -lOpenCL -Iinclude -D'INSTALL_DIR="/home/xavier/repositories/vortex"'
+
 libGLSCv2.opencl.so: src/glsc2.opencl.o
 	$(CC) $< -shared -o $(LIB_NAME).opencl.so -lOpenCL
 

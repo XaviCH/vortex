@@ -222,17 +222,17 @@ inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, uint c_
     }
 }
 
-/**
-    Size is expected to be equal of number of triangles, greater size would not break the kernel
-    Each thread process a triangle, 
-    total size expected to be equal to the total size of triangles to be processed.
-*/
-kernel
-__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, CONF_SETUP_SUB_GROUPS, 1)))
-void triangle_setup(
+bool is_render_mode_flag_triangle_fan(const uint c_render_mode_flags) {
+    return (c_render_mode_flags & RENDER_MODE_FLAG_TRIANGLE_FAN) != 0; 
+}
+
+bool is_render_mode_flag_triangle_strip(const uint c_render_mode_flags) {
+    return (c_render_mode_flags & RENDER_MODE_FLAG_TRIANGLE_STRIP) != 0; 
+}
+
+inline void triangle_setup(
     global int* a_num_subtris,
 
-    global const int* g_index_buffer,
     global CRTriangleHeader* g_tri_header, 
     global CRTriangleData* g_tri_data,
     global uchar* g_tri_subtris,
@@ -249,17 +249,11 @@ void triangle_setup(
     const int c_samples_log2,
     const int c_vertex_size,
     const int c_viewport_height,
-    const int c_viewport_width
+    const int c_viewport_width,
+    int3 vidx,
+    local float* bary 
 )
 {
-    // Store bary buffer in local mem if fits 
-
-    #ifdef CONF_SETUP_LOCAL_MEM_ENABLED
-    local float s_bary[CONF_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
-    local float* bary = s_bary[get_local_linear_id()];
-    #else
-    private float bary[18];
-    #endif
 
     int2 p0, p1, p2, lo, hi, d1, d2;
     float3 rcpW;
@@ -267,15 +261,10 @@ void triangle_setup(
 
     // Pick a task.
 
-    int task_idx = get_global_linear_id(); // get_local_id(0) + 32 * (get_local_id(1) + CR_SETUP_WARPS * (get_group_id(0) + get_num_groups(0) * get_group_id(1)));
-    
-    if (task_idx >= c_num_tris)
-        return;
+    int task_idx = get_global_linear_id();
 
     // Read vertices.
-    
-    global const int* index_buffer = g_index_buffer + task_idx*3;
-    int3 vidx = {*index_buffer, *(index_buffer+1), *(index_buffer+2)}; // int3 is an int4 in Opencl check
+
     int stride = c_vertex_size / sizeof(float4);
 
     float4 v0, v1, v2;
@@ -420,3 +409,158 @@ void triangle_setup(
 }
 
 //------------------------------------------------------------------------
+
+/**
+ *  Arrays render mode
+ *
+ */
+kernel
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, CONF_SETUP_SUB_GROUPS, 1)))
+void triangle_setup_arrays(
+    global int* a_num_subtris,
+
+    global CRTriangleHeader* g_tri_header, 
+    global CRTriangleData* g_tri_data,
+    global uchar* g_tri_subtris,
+
+    #ifdef CONF_SETUP_IMAGE_ENABLED
+    read_only image1d_buffer_t t_vertex_buffer,
+    #else
+    global const float4* t_vertex_buffer,
+    #endif 
+
+    const int c_num_tris,
+    const int c_max_subtris,
+    const uint c_render_mode_flags,
+    const int c_samples_log2,
+    const int c_vertex_size,
+    const int c_viewport_height,
+    const int c_viewport_width
+)
+{
+    local float s_bary[CONF_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
+
+    local float* bary = s_bary[get_local_linear_id()];
+
+    // Pick a task.
+
+    int task_idx = get_global_linear_id();
+    
+    if (task_idx >= c_num_tris)
+        return;
+
+    // Pick vertices
+
+    int3 vidx;
+    if (is_render_mode_flag_triangle_fan(c_render_mode_flags)) {
+        vidx = (int3){0, task_idx + 1, task_idx + 2};
+    } else if (is_render_mode_flag_triangle_strip(c_render_mode_flags)) {
+        uint offset = 2 * (task_idx%2);
+        vidx = (int3){task_idx + offset, task_idx + 1, task_idx + 2 - offset};
+    } else {
+        vidx = (int3){task_idx*3 + 0, task_idx*3 + 1, task_idx*3 + 2};
+    }
+
+    // Read vertices.
+
+    triangle_setup(
+        a_num_subtris,
+        g_tri_header, 
+        g_tri_data,
+        g_tri_subtris,
+        t_vertex_buffer,
+        c_num_tris, 
+        c_max_subtris,
+        c_render_mode_flags,
+        c_samples_log2,
+        c_vertex_size,
+        c_viewport_height,
+        c_viewport_width,
+        vidx,
+        bary
+    );
+}
+
+/**
+ *  Range render mode
+ *
+ */
+kernel
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, CONF_SETUP_SUB_GROUPS, 1)))
+void triangle_setup_range(
+    global int* a_num_subtris,
+
+    global const int* g_index_buffer,
+    global CRTriangleHeader* g_tri_header, 
+    global CRTriangleData* g_tri_data,
+    global uchar* g_tri_subtris,
+
+    #ifdef CONF_SETUP_IMAGE_ENABLED
+    read_only image1d_buffer_t t_vertex_buffer,
+    #else
+    global const float4* t_vertex_buffer,
+    #endif 
+
+    const int c_num_tris, 
+    const int c_max_subtris,
+    const uint c_render_mode_flags,
+    const int c_samples_log2,
+    const int c_vertex_size,
+    const int c_viewport_height,
+    const int c_viewport_width
+)
+{
+    local float s_bary[CONF_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
+
+    local float* bary = s_bary[get_local_linear_id()];
+
+    // Pick a task.
+
+    int task_idx = get_global_linear_id();
+    
+    if (task_idx >= c_num_tris)
+        return;
+
+    // Pick vertices
+
+    int3 vidx;
+    if (is_render_mode_flag_triangle_fan(c_render_mode_flags)) {
+        vidx = (int3){
+            g_index_buffer[0], 
+            g_index_buffer[task_idx + 1], 
+            g_index_buffer[task_idx + 2]
+        };
+    } else if (is_render_mode_flag_triangle_strip(c_render_mode_flags)) {
+        uint offset = 2 * (task_idx%2);
+        vidx = (int3){
+            g_index_buffer[task_idx + offset], 
+            g_index_buffer[task_idx + 1], 
+            g_index_buffer[task_idx + 2 - offset]
+        };
+    } else {
+        vidx = (int3){
+            g_index_buffer[task_idx*3 + 0], 
+            g_index_buffer[task_idx*3 + 1], 
+            g_index_buffer[task_idx*3 + 2]
+        };
+    }
+
+    // Read vertices.
+
+    triangle_setup(
+        a_num_subtris,
+        g_tri_header, 
+        g_tri_data,
+        g_tri_subtris,
+        t_vertex_buffer,
+        c_num_tris, 
+        c_max_subtris,
+        c_render_mode_flags,
+        c_samples_log2,
+        c_vertex_size,
+        c_viewport_height,
+        c_viewport_width,
+        vidx,
+        bary
+    );
+}

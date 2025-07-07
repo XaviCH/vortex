@@ -84,7 +84,7 @@ typedef struct {
     rasterization_kernel_container_t rasterization;
     readnpixels_kernel_container_t readnpixels;
     cl_kernel viewport_division, perspective_division, strided_write, depth_test, stencil_test, scissor_test, blending, clear, dithering;
-    cl_kernel triangle_setup, bin_raster, coarse_raster;
+    cl_kernel triangle_setup_arrays, triangle_setup_range, bin_raster, coarse_raster;
 } kernel_container_t;
 
 typedef struct {
@@ -135,7 +135,9 @@ typedef struct
 typedef struct {
     GLboolean used;
     GLenum target;
-    void* mem;
+    GLsizeiptr size;
+    GLenum usage;
+    cl_mem mem;
 } buffer_t;
 
 typedef struct {

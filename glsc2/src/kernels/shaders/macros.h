@@ -119,6 +119,18 @@
 /**
  * Vertex buffer getters
  */
+#define SET_VARYING_F1_CHAIN(...) GLUE(SET_VARYING_F1_CHAIN_,COUNT(__VA_ARGS__))(__VA_ARGS__)
+
+#define SET_VARYING_F1_CHAIN_1(a)     a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x;
+#define SET_VARYING_F1_CHAIN_2(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_1(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_3(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_2(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_4(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_3(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_5(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_4(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_6(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_5(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_7(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_6(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_8(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_7(__VA_ARGS__)
+#define SET_VARYING_F1_CHAIN_9(a,...) a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).x; SET_VARYING_F1_CHAIN_8(__VA_ARGS__)
+
 #define SET_VARYING_F2_CHAIN(...) GLUE(SET_VARYING_F2_CHAIN_,COUNT(__VA_ARGS__))(__VA_ARGS__)
 
 #define SET_VARYING_F2_CHAIN_1(a)     a = interpolate_varying(varying, vert_idx, bary, vertex_buffer).xy;
@@ -170,6 +182,19 @@
 #define SET_STRUCT_CHAIN_7(name, a,...) name.a=a; SET_STRUCT_CHAIN_6(name, __VA_ARGS__)
 #define SET_STRUCT_CHAIN_8(name, a,...) name.a=a; SET_STRUCT_CHAIN_7(name, __VA_ARGS__)
 #define SET_STRUCT_CHAIN_9(name, a,...) name.a=a; SET_STRUCT_CHAIN_8(name, __VA_ARGS__)
+
+// To name.a = (float4){a,value0, value1, value2}; 
+#define SET_STRUCT_F4_F1_CHAIN(name, value0, value1, value2, ...) GLUE(SET_STRUCT_F4_F1_CHAIN_,COUNT(__VA_ARGS__))(name, value0, value1, value2, __VA_ARGS__)
+
+#define SET_STRUCT_F4_F1_CHAIN_1(name, value0, value1, value2, a)     name.a= (float4){a,value0,value1, value2};
+#define SET_STRUCT_F4_F1_CHAIN_2(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_1(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_3(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_2(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_4(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_3(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_5(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_4(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_6(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_5(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_7(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_6(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_8(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_7(name, value0, value1, value2, __VA_ARGS__)
+#define SET_STRUCT_F4_F1_CHAIN_9(name, value0, value1, value2, a,...) name.a= (float4){a,value0,value1, value2}; SET_STRUCT_F4_F1_CHAIN_8(name, value0, value1, value2, __VA_ARGS__)
 
 // To name.a = (float4){a,value0, value1}; 
 #define SET_STRUCT_F4_F2_CHAIN(name, value0, value1, ...) GLUE(SET_STRUCT_F4_F2_CHAIN_,COUNT(__VA_ARGS__))(name, value0, value1, __VA_ARGS__)

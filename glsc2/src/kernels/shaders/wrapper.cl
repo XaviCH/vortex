@@ -37,6 +37,10 @@ float4 mul(float16 mat, float4 vec) {
   return result;
 }
 
+float mod(float x, float y) {
+    return x - y * floor(x/y);
+}
+
 float4 texture2D(sampler2D_t sampler, image2D_t image, float2 coord) {
     int width, height;
 
@@ -54,6 +58,20 @@ float4 texture2D(sampler2D_t sampler, image2D_t image, float2 coord) {
 #define TEXTURE2D(sampler, coord) texture2D(sampler, gl_image_##sampler, coord);
 
 // Varying definitions
+
+#ifdef VARYING_FLOAT
+#define PARAM_VARYING_FLOAT COMMA_CHAIN(float, VARYING_FLOAT)
+#define DEFINE_VARYING_FLOAT STRUCT_CHAIN(float, VARYING_FLOAT)
+#define OUTPUT_VARYING_FLOAT STRUCT_CHAIN(float4, VARYING_FLOAT)
+#define SET_STRUCT_VARYING_FLOAT SET_STRUCT_F4_F1_CHAIN(output, 0, 0, 1, VARYING_FLOAT)
+#define SET_VARYING_FLOAT SET_VARYING_F1_CHAIN(VARYING_FLOAT)
+#else
+#define PARAM_VARYING_FLOAT
+#define DEFINE_VARYING_FLOAT
+#define OUTPUT_VARYING_FLOAT
+#define SET_STRUCT_VARYING_FLOAT
+#define SET_VARYING_FLOAT
+#endif
 
 #ifdef VARYING_VEC2
 #define PARAM_VARYING_VEC2 COMMA_CHAIN(float2, VARYING_VEC2)
@@ -98,23 +116,38 @@ float4 texture2D(sampler2D_t sampler, image2D_t image, float2 coord) {
 #endif
 
 #define DEFINE_VARYINGS \
+    DEFINE_VARYING_FLOAT \
     DEFINE_VARYING_VEC2 \
     DEFINE_VARYING_VEC3 \
     DEFINE_VARYING_VEC4
 
+#define OUTPUT_VARYINGS \
+    OUTPUT_VARYING_FLOAT \
+    OUTPUT_VARYING_VEC2 \
+    OUTPUT_VARYING_VEC3 \
+    OUTPUT_VARYING_VEC4
+
+#define PARAM_VARYINGS \
+    PARAM_VARYING_FLOAT \
+    PARAM_VARYING_VEC2 \
+    PARAM_VARYING_VEC3 \
+    PARAM_VARYING_VEC4
+
+#define SET_STRUCT_VARYINGS \
+    SET_STRUCT_VARYING_FLOAT \
+    SET_STRUCT_VARYING_VEC2 \
+    SET_STRUCT_VARYING_VEC3 \
+    SET_STRUCT_VARYING_VEC4
+
 #define SET_VARYINGS \
     { \
     uint varying = 0; \
+    SET_VARYING_FLOAT \
     SET_VARYING_VEC2 \
     SET_VARYING_VEC3 \
     SET_VARYING_VEC4 \
     }
 
-typedef struct {
-    DEFINE_VARYING_VEC2
-    DEFINE_VARYING_VEC3
-    DEFINE_VARYING_VEC4
-} varying_attributes_t;
 
 // VS definitions
 
@@ -129,6 +162,8 @@ void __attribute__((overloadable)) set_attribute_from_kernel(global const float*
 void __attribute__((overloadable)) set_attribute_from_kernel(global const float* in, float4* out) {
     *out = ((global const float4*) in)[get_global_linear_id()];
 }
+
+//-------------
 
 #ifdef ATTRIBUTE_VEC2
 #define KERNEL_ARG_ATTRIBUTE_VEC2 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC2))
@@ -147,23 +182,99 @@ void __attribute__((overloadable)) set_attribute_from_kernel(global const float*
 #else
 #define KERNEL_ARG_ATTRIBUTE_VEC3
 #define DEFINE_ATTRIBUTE_VEC3
+#define SET_ATTRIBUTE_VEC3
+#endif
+
+#ifdef ATTRIBUTE_VEC4
+#define KERNEL_ARG_ATTRIBUTE_VEC4 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC4))
+#define DEFINE_ATTRIBUTE_VEC4 STRUCT_CHAIN(float4, ATTRIBUTE_VEC4)
+#define SET_ATTRIBUTE_VEC4 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC4)
+#else
+#define KERNEL_ARG_ATTRIBUTE_VEC4
+#define DEFINE_ATTRIBUTE_VEC4
+#define SET_ATTRIBUTE_VEC4
+#endif
+
+#define DEFINE_ATTRIBUTES \
+    DEFINE_ATTRIBUTE_VEC2 \
+    DEFINE_ATTRIBUTE_VEC3 \
+    DEFINE_ATTRIBUTE_VEC4
+
+#define KERNEL_ARG_ATTRIBUTES \
+    KERNEL_ARG_ATTRIBUTE_VEC2 \
+    KERNEL_ARG_ATTRIBUTE_VEC3 \
+    KERNEL_ARG_ATTRIBUTE_VEC4
+
+#define SET_ATTRIBUTES \
+    SET_ATTRIBUTE_VEC2 \
+    SET_ATTRIBUTE_VEC3 \
+    SET_ATTRIBUTE_VEC4
+
+//-------------------
+
+#ifdef VS_UNIFORM_FLOAT
+#define VS_KERNEL_ARG_UNIFORM_FLOAT COMMA_CHAIN(constant float*, JOIN_CHAIN(_,VS_UNIFORM_FLOAT))
+#define VS_DEFINE_UNIFORM_FLOAT STRUCT_CHAIN(float, VS_UNIFORM_FLOAT)
+#define VS_SET_UNIFORM_FLOAT SET_UNIFORM_CHAIN(VS_UNIFORM_FLOAT)
+#else
+#define VS_KERNEL_ARG_UNIFORM_FLOAT
+#define VS_DEFINE_UNIFORM_FLOAT
+#define VS_SET_UNIFORM_FLOAT
+#endif
+
+#ifdef VS_UNIFORM_INT2
+#define VS_KERNEL_ARG_UNIFORM_INT2 COMMA_CHAIN(constant int2*, JOIN_CHAIN(_,VS_UNIFORM_INT2))
+#define VS_DEFINE_UNIFORM_INT2 STRUCT_CHAIN(int2, VS_UNIFORM_INT2)
+#define VS_SET_UNIFORM_INT2 SET_UNIFORM_CHAIN(VS_UNIFORM_INT2)
+#else
+#define VS_KERNEL_ARG_UNIFORM_INT2
+#define VS_DEFINE_UNIFORM_INT2
+#define VS_SET_UNIFORM_INT2
+#endif
+
+#ifdef VS_UNIFORM_VEC4
+#define VS_KERNEL_ARG_UNIFORM_VEC4 COMMA_CHAIN(constant float4*, JOIN_CHAIN(_,VS_UNIFORM_VEC4))
+#define VS_DEFINE_UNIFORM_VEC4 STRUCT_CHAIN(float4, VS_UNIFORM_VEC4)
+#define VS_SET_UNIFORM_VEC4 SET_UNIFORM_CHAIN(VS_UNIFORM_VEC4)
+#else
+#define VS_KERNEL_ARG_UNIFORM_VEC4
+#define VS_DEFINE_UNIFORM_VEC4
+#define VS_SET_UNIFORM_VEC4
 #endif
 
 #ifdef VS_UNIFORM_MAT4
-#define KERNEL_ARG_VS_UNIFORM_MAT4 COMMA_CHAIN(constant float16*, JOIN_CHAIN(_,VS_UNIFORM_MAT4))
-#define DEFINE_VS_UNIFORM_MAT4 STRUCT_CHAIN(float16, VS_UNIFORM_MAT4)
-#define SET_VS_UNIFORM_MAT4 SET_UNIFORM_CHAIN(VS_UNIFORM_MAT4)
+#define VS_KERNEL_ARG_UNIFORM_MAT4 COMMA_CHAIN(constant float16*, JOIN_CHAIN(_,VS_UNIFORM_MAT4))
+#define VS_DEFINE_UNIFORM_MAT4 STRUCT_CHAIN(float16, VS_UNIFORM_MAT4)
+#define VS_SET_UNIFORM_MAT4 SET_UNIFORM_CHAIN(VS_UNIFORM_MAT4)
 #else
-#define KERNEL_ARG_VS_UNIFORM_MAT4
-#define DEFINE_VS_UNIFORM_MAT4
-#define SET_VS_UNIFORM_MAT4
+#define VS_KERNEL_ARG_UNIFORM_MAT4
+#define VS_DEFINE_UNIFORM_MAT4
+#define VS_SET_UNIFORM_MAT4
 #endif
+
+#define VS_DEFINE_UNIFORMS \
+    VS_DEFINE_UNIFORM_FLOAT \
+    VS_DEFINE_UNIFORM_INT2 \
+    VS_DEFINE_UNIFORM_VEC4 \
+    VS_DEFINE_UNIFORM_MAT4
+
+#define VS_KERNEL_ARG_UNIFORMS \
+    VS_KERNEL_ARG_UNIFORM_FLOAT \
+    VS_KERNEL_ARG_UNIFORM_INT2 \
+    VS_KERNEL_ARG_UNIFORM_VEC4 \
+    VS_KERNEL_ARG_UNIFORM_MAT4
+
+#define VS_SET_UNIFORMS \
+    VS_SET_UNIFORM_FLOAT \
+    VS_SET_UNIFORM_INT2 \
+    VS_SET_UNIFORM_VEC4 \
+    VS_SET_UNIFORM_MAT4
+
+//------------------------
 
 typedef struct {
     float4 gl_Position;
-    OUTPUT_VARYING_VEC2
-    OUTPUT_VARYING_VEC3
-    OUTPUT_VARYING_VEC4
+    OUTPUT_VARYINGS
 } vertex_shader_output_t;
 
 
@@ -190,30 +301,24 @@ inline void fill_vertex_buffer(
 
 #define VS_MAIN(...) \
     kernel void gl_vertex_shader( \
-        KERNEL_ARG_ATTRIBUTE_VEC2 \
-        KERNEL_ARG_ATTRIBUTE_VEC3 \
-        KERNEL_ARG_VS_UNIFORM_MAT4 \
+        KERNEL_ARG_ATTRIBUTES \
+        VS_KERNEL_ARG_UNIFORMS \
         KERNEL_ARG_VERTEX_BUFFER \
     ) { \
         /* Define accessible objects from vertex shader */ \
         float4 gl_Position; \
-        DEFINE_VARYING_VEC2 \
-        DEFINE_VARYING_VEC3 \
-        DEFINE_ATTRIBUTE_VEC2 \
-        DEFINE_ATTRIBUTE_VEC3 \
-        DEFINE_VS_UNIFORM_MAT4 \
+        DEFINE_VARYINGS \
+        DEFINE_ATTRIBUTES \
+        VS_DEFINE_UNIFORMS \
         /* Set values from buffers */ \
-        SET_ATTRIBUTE_VEC2 \
-        SET_ATTRIBUTE_VEC3 \
-        SET_VS_UNIFORM_MAT4 \
+        SET_ATTRIBUTES \
+        VS_SET_UNIFORMS \
         /* Run vertex shader */ \
         __VA_ARGS__ \
         /* Fill vertex buffer */ \
         vertex_shader_output_t output; \
         output.gl_Position = gl_Position; \
-        SET_STRUCT_VARYING_VEC2 \
-        SET_STRUCT_VARYING_VEC3 \
-        SET_STRUCT_VARYING_VEC4 \
+        SET_STRUCT_VARYINGS \
         fill_vertex_buffer(&output, vertex_buffer); \
     }
 
@@ -231,6 +336,30 @@ inline void fill_vertex_buffer(
 #define FS_SET_UNIFORM_FLOAT
 #endif
 
+#ifdef FS_UNIFORM_INT
+#define FS_KERNEL_PARAM_UNIFORM_INT COMMA_CHAIN(constant int*, JOIN_CHAIN(_,FS_UNIFORM_INT))
+#define FS_KERNEL_ARG_UNIFORM_INT COMMA_CHAIN(, JOIN_CHAIN(_,FS_UNIFORM_INT))
+#define FS_DEFINE_UNIFORM_INT STRUCT_CHAIN(int, FS_UNIFORM_INT)
+#define FS_SET_UNIFORM_INT SET_UNIFORM_CHAIN(FS_UNIFORM_INT)
+#else
+#define FS_KERNEL_PARAM_UNIFORM_INT
+#define FS_KERNEL_ARG_UNIFORM_INT
+#define FS_DEFINE_UNIFORM_INT
+#define FS_SET_UNIFORM_INT
+#endif
+
+#ifdef FS_UNIFORM_VEC4
+#define FS_KERNEL_PARAM_UNIFORM_VEC4 COMMA_CHAIN(constant float4*, JOIN_CHAIN(_,FS_UNIFORM_VEC4))
+#define FS_KERNEL_ARG_UNIFORM_VEC4 COMMA_CHAIN(, JOIN_CHAIN(_,FS_UNIFORM_VEC4))
+#define FS_DEFINE_UNIFORM_VEC4 STRUCT_CHAIN(float4, FS_UNIFORM_VEC4)
+#define FS_SET_UNIFORM_VEC4 SET_UNIFORM_CHAIN(FS_UNIFORM_VEC4)
+#else
+#define FS_KERNEL_PARAM_UNIFORM_VEC4
+#define FS_KERNEL_ARG_UNIFORM_VEC4
+#define FS_DEFINE_UNIFORM_VEC4
+#define FS_SET_UNIFORM_VEC4
+#endif
+
 #ifdef FS_UNIFORM_SAMPLER2D
 #define FS_KERNEL_PARAM_UNIFORM_SAMPLER2D PARAM_SAMPLER_CHAIN(sampler2D_t, image2D_t, FS_UNIFORM_SAMPLER2D)
 #define FS_KERNEL_ARG_UNIFORM_SAMPLER2D PARAM_SAMPLER_CHAIN( , ,FS_UNIFORM_SAMPLER2D)
@@ -239,21 +368,31 @@ inline void fill_vertex_buffer(
 #define FS_KERNEL_ARG_UNIFORM_SAMPLER2D
 #endif
 
+//------------
+
 #define FS_DEFINES \
     float4 gl_FragColor; \
     DEFINE_VARYINGS \
     FS_DEFINE_UNIFORM_FLOAT \
+    FS_DEFINE_UNIFORM_INT \
+    FS_DEFINE_UNIFORM_VEC4
 
 #define FS_SETS \
     SET_VARYINGS \
-    FS_SET_UNIFORM_FLOAT
+    FS_SET_UNIFORM_FLOAT \
+    FS_SET_UNIFORM_INT \
+    FS_SET_UNIFORM_VEC4
 
 #define FS_KERNEL_PARAMS \
     FS_KERNEL_PARAM_UNIFORM_FLOAT \
+    FS_KERNEL_PARAM_UNIFORM_INT \
+    FS_KERNEL_PARAM_UNIFORM_VEC4 \
     FS_KERNEL_PARAM_UNIFORM_SAMPLER2D
 
 #define FS_KERNEL_ARGS \
     FS_KERNEL_ARG_UNIFORM_FLOAT \
+    FS_KERNEL_ARG_UNIFORM_INT \
+    FS_KERNEL_ARG_UNIFORM_VEC4 \
     FS_KERNEL_ARG_UNIFORM_SAMPLER2D
 
 typedef struct {
@@ -321,9 +460,7 @@ kernel void gl_tmp_fragment_shader(
 }
 
 kernel void gl_varying_data(
-    PARAM_VARYING_VEC2
-    PARAM_VARYING_VEC3
-    PARAM_VARYING_VEC4
+    PARAM_VARYINGS
     private int test
 ) {
     return;
