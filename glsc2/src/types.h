@@ -84,11 +84,12 @@ typedef struct {
     rasterization_kernel_container_t rasterization;
     readnpixels_kernel_container_t readnpixels;
     cl_kernel viewport_division, perspective_division, strided_write, depth_test, stencil_test, scissor_test, blending, clear, dithering;
-    cl_kernel triangle_setup_arrays, triangle_setup_range, bin_raster, coarse_raster;
+    
+    cl_kernel triangle_setup_arrays, triangle_setup_range, bin_raster, coarse_raster, force_clear;
 } kernel_container_t;
 
 typedef struct {
-    cl_program triangle_setup, bin_raster, coarse_raster;
+    cl_program triangle_setup, bin_raster, coarse_raster, force_clear;
 } rasterization_program_container_t;
 
 typedef struct {
@@ -250,5 +251,15 @@ typedef struct {
     rasterization_texture_mem_container_t   textures;
 
 } rasterization_mem_container_t;
+
+typedef struct {
+    cl_mem mem;
+    GLenum internalformat;
+} buffer_data_t; 
+
+typedef struct {
+    buffer_data_t color, depth, stencil;
+    GLsizei width, height;
+} framebuffer_data_t; 
 
 #endif
