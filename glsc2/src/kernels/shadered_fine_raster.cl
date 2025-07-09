@@ -9,15 +9,17 @@
 #endif
 
 #ifdef __COMPILER_RELATIVE_PATH__
-#include <blending.cl>
-#include <common.cl>
-#include <depth.cl>
-#include <stencil.cl>
+#include "blending.cl"
+#include "common.cl"
+#include "depth.cl"
+#include "stencil.cl"
+#include "clear.cl"
 #else
 #include "glsc2/src/kernels/blending.cl"
 #include "glsc2/src/kernels/common.cl"
 #include "glsc2/src/kernels/depth.cl"
 #include "glsc2/src/kernels/stencil.cl"
+#include "glsc2/src/kernels/clear.cl"
 #endif
 
 
@@ -475,7 +477,11 @@ inline void execute_ROP_single_sample(
     blend_shader_output_t blend_shader_output;
 
     uint color = float4_to_uint(&fs_out->gl_FragColor);
-    bool discarded = false;
+
+    // per-fragment enabled operations
+    bool stencil_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0;
+    bool depth_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0;
+
     // blend_shader_input.needs_dst = false;
 
     #ifdef CONF_FINE_SUB_GROUP_RAW_ENABLED
@@ -491,7 +497,7 @@ inline void execute_ROP_single_sample(
         if ((*w_temp & getLaneMaskLt()) == 0) {
             
             // stencil test
-            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
+            if (stencil_test_enabled) {
                 if (!stencil_test(*ptr_stencil, c_stencil_data)) {
                     stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_sfail(c_stencil_data));
                     return;
@@ -499,14 +505,15 @@ inline void execute_ROP_single_sample(
             }
 
             // depth test
-            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
-                discarded = !depth_test(depth, *ptr_depth, c_depth_data);
-                if (discarded) {
-                    stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dfail(c_stencil_data));
+            if (depth_test_enabled) {
+                if (!depth_test(depth, *ptr_depth, c_depth_data)) {
+                    if (stencil_test_enabled)
+                        stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dfail(c_stencil_data));
                     return;
                 }
+                if (stencil_test_enabled)
+                    stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dpass(c_stencil_data));
                 *ptr_depth = depth;
-                stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dpass(c_stencil_data));
             }
 
             // blending
@@ -597,11 +604,13 @@ kernel void fine_raster_single_sample(
 
     const uint   c_blending_color,
     const uint   c_blending_data,
-    const uint   c_clear_color,
-    const ushort c_clear_depth,
-    const uchar  c_clear_stencil,
+    // const uint   c_clear_color,
+    // const ushort c_clear_depth,
+    // const uchar  c_clear_stencil,
+    const ulong  c_clear_write_values, 
+    const ushort c_clear_enabled_data,
     const uint   c_color_buffer_mode,
-    const int    c_deferred_clear,
+    // const int    c_deferred_clear,
     const uint   c_depth_data,
     const int    c_max_bin_segs,
     const int    c_max_subtris,
@@ -697,7 +706,66 @@ kernel void fine_raster_single_sample(
         if (!is_not_active)
         #endif
         {
-            // deferred clear => clear tile
+            // Copy and overwrite if required framebuffers
+            // TODO: Scissor test and dithering.
+
+            bool colorbuffer_needs_load =
+                (c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_MASK) != CLEAR_ENABLED_COLOR_CHANNEL_MASK;
+
+            bool depthbuffer_needs_load =
+                (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 &&
+                (c_clear_enabled_data & CLEAR_ENABLED_DEPTH_CHANNEL) == 0;
+
+            bool stencilbuffer_needs_load =
+                (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0 &&
+                (c_clear_enabled_data & CLEAR_ENABLED_STENCIL_CHANNEL_MASK) != CLEAR_ENABLED_STENCIL_CHANNEL_MASK;
+
+            #pragma unroll
+            for (int pixel = get_local_id(0); pixel < 64; pixel += get_local_size(0)) {
+                uint color;
+                ushort depth;
+                uchar stencil;
+                
+                int surf_x = (tile_x << CR_TILE_LOG2) + (pixel & (CR_TILE_SIZE - 1));
+                int surf_y = (tile_y << CR_TILE_LOG2) + (pixel >> CR_TILE_LOG2);
+                
+                if (colorbuffer_needs_load) {
+                    #ifdef DEVICE_IMAGE_ENABLED
+                        color = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x,surf_y}));
+                    #else
+                        color = read_tex_from_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode);
+                    #endif
+                }
+                color = clear_color(color, c_clear_write_values, c_clear_enabled_data);
+
+                if (depthbuffer_needs_load) {
+                    #ifdef DEVICE_IMAGE_ENABLED
+                        depth = read_imageui(t_depth_buffer,(int2){surf_x,surf_y}).x;
+                    #else
+                        depth = g_depth_buffer[surf_x + surf_y*c_viewport_width];
+                    #endif
+                } else {
+                    depth = clear_depth(c_clear_write_values, c_clear_enabled_data);
+                }
+
+                if (stencilbuffer_needs_load) {
+                    #ifdef DEVICE_IMAGE_ENABLED
+                        stencil = read_imageui(t_stencil_buffer,(int2){surf_x/4,surf_y}).x;
+                    #else
+                        stencil = g_stencil_buffer[surf_x/4 + surf_y*c_viewport_width];
+                    #endif
+                }
+                stencil = clear_stencil(stencil, c_clear_write_values, c_clear_enabled_data);
+
+                w_tile_color[pixel] = color; 
+                w_tile_depth[pixel] = depth;
+                w_tile_stencil[pixel] = stencil;
+            }
+
+
+
+
+            /*
             if (c_deferred_clear)
             {
                 w_tile_color[get_local_id(0)] = c_clear_color;
@@ -737,6 +805,7 @@ kernel void fine_raster_single_sample(
                 }
                 #endif
             }
+            */
         }
 
         // bound tile z

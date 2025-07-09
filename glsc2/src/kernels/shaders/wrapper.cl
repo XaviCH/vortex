@@ -10,10 +10,12 @@
 #ifdef __COMPILER_RELATIVE_PATH__
 #include "macros.h"
 #include "types.cl"
+#include "built_in.cl"
 #include "../../types.device.h"
 #else
 #include "glsc2/src/kernels/shaders/macros.h"
 #include "glsc2/src/kernels/shaders/types.cl"
+#include "glsc2/src/kernels/shaders/built_in.cl"
 #include "glsc2/src/types.device.h"
 #endif
 
@@ -26,20 +28,6 @@ typedef write_only image1d_buffer_t vertex_buffer_t;
 #define KERNEL_ARG_VERTEX_BUFFER global float4* vertex_buffer
 typedef global float4* vertex_buffer_t;
 #endif
-
-float4 mul(float16 mat, float4 vec) {
-  float4 result = 0;
-
-  for(int i=0; i<16; ++i) {
-    result[i%4] += mat[i]*vec[i/4]; 
-  }
-
-  return result;
-}
-
-float mod(float x, float y) {
-    return x - y * floor(x/y);
-}
 
 float4 texture2D(sampler2D_t sampler, image2D_t image, float2 coord) {
     int width, height;
