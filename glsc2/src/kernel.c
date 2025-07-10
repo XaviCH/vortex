@@ -67,8 +67,8 @@ int buildProgram(void *program) {
 void* createBuffer(uint64_t flags, size_t size, void* data){
 
     void *buffer = clCreateBuffer(_getContext(), flags, size, data, &_err);
-    
-    // printf("createBuffer() return=%p, error=%d\n", buffer, _err);
+    if (_err)
+        printf("createBuffer() return=%p, size=%d, error=%d\n", buffer, size, _err);
 
     return buffer;
 }
@@ -81,7 +81,7 @@ void* createKernel(void* program, const char* name) {
     // printf("createKernel() program=%p, name=%s\n", program, name);
     cl_kernel kernel = clCreateKernel((cl_program) program, name, &_err);
 
-    // printf("\treturn=%p, error=%d\n", kernel, _err);
+    if (_err) printf("createKernel\n\treturn=%p, error=%d\n", kernel, _err);
     return kernel;
 }
 
@@ -90,7 +90,7 @@ void setKernelArg(void* kernel, unsigned int location, size_t size, const void* 
     
     int err = clSetKernelArg((cl_kernel) kernel, location, size, value);
 
-    // printf("\terror=%d\n", err);
+    if (err) printf("setKernelArg\n\terror=%d\n", err);
 }
 
 // I decide to make it simple, but maybe it will need to be extendend in future.
@@ -100,19 +100,19 @@ void enqueueNDRangeKernel(void* commandQueue, void* kernel, const size_t global_
         (cl_command_queue) commandQueue, (cl_kernel) kernel,
         1, NULL, &global_work_size, NULL, 0, NULL, NULL);
     
-    // printf("\terror=%d\n", err);
+    if (err) printf("\terror=%d\n", err);
 }
 
 void enqueueReadBuffer(void* command_queue, void* buffer, size_t bufSize, void* data) {
 
     cl_int err = clEnqueueReadBuffer(command_queue, (cl_mem) buffer, CL_TRUE, 0, bufSize, data, 0, NULL, NULL);
-    // printf("error: %i\n", err);
+    if (err) printf("error: %i\n", err);
 }
 
 
 #define enqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr) ({                       \
     _err = clEnqueueWriteBuffer(command_queue, buffer, blocking_write, offset, size, ptr, 0, NULL, NULL);      \
-    if (_err) printf("error: %i\n", _err); \
+    if (_err) printf("error: %i, size=%d\n", _err, size ); \
     })
 
 // void enqueueWriteBuffer(void* command_queue, void* buffer, size_t size, const void* ptr) {

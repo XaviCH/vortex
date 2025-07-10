@@ -1284,12 +1284,12 @@ inline uint get_num_tris(GLenum mode, GLsizei count) {
 inline uint32_t get_stencil_data() {
     uint32_t stencil_data = 0;
 
-    stencil_data &= (_stencil_data.front.function.func      &  0xFu) <<  0;
-    stencil_data &= (_stencil_data.front.operation.sfail    &  0xFu) <<  4;
-    stencil_data &= (_stencil_data.front.operation.dpass    &  0xFu) <<  8;
-    stencil_data &= (_stencil_data.front.operation.dpfail   &  0xFu) << 12;
-    stencil_data &= (_stencil_data.front.function.ref       & 0xFFu) << 16;
-    stencil_data &= (_stencil_data.front.function.mask      & 0xFFu) << 24;
+    stencil_data |= (_stencil_data.front.function.func      &  0xFu) <<  0;
+    stencil_data |= (_stencil_data.front.operation.sfail    &  0xFu) <<  4;
+    stencil_data |= (_stencil_data.front.operation.dpass    &  0xFu) <<  8;
+    stencil_data |= (_stencil_data.front.operation.dpfail   &  0xFu) << 12;
+    stencil_data |= (_stencil_data.front.function.mask      & 0xFFu) << 16;
+    stencil_data |= (_stencil_data.front.function.ref       & 0xFFu) << 24;
 
     return stencil_data;
 }
@@ -1336,10 +1336,7 @@ void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
     }
 
     global_work_size[0] = end - start;
-    printf("gwz = %d\n", global_work_size[0]);
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL));
-    clFinish(command_queue);
-    printf("b\n");
 
     // TODO: Assign statically this memory
     for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
@@ -1527,9 +1524,9 @@ void run_fragment_shader(GLenum mode) {
         );
     }
 
-    CL_CHECK(clSetKernelArg(kernel, 11 + arg_offset, sizeof(cl_mem),    &framebuffer.color.mem));
-    CL_CHECK(clSetKernelArg(kernel, 12 + arg_offset, sizeof(cl_mem),   _enableds.depth_test ? &framebuffer.depth.mem : &_rasterization_mem.globals.depthbuffer));
-    CL_CHECK(clSetKernelArg(kernel, 13 + arg_offset, sizeof(cl_mem),   _enableds.stencil_test ? &framebuffer.stencil.mem : &_rasterization_mem.globals.stencilbuffer));
+    CL_CHECK(clSetKernelArg(kernel, 11 + arg_offset, sizeof(cl_mem),  &framebuffer.color.mem));
+    CL_CHECK(clSetKernelArg(kernel, 12 + arg_offset, sizeof(cl_mem),  &framebuffer.depth.mem));
+    CL_CHECK(clSetKernelArg(kernel, 13 + arg_offset, sizeof(cl_mem),  &framebuffer.stencil.mem));
 
     CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_blending_color),    &c_blending_color));
     CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_blending_data),     &c_blending_data));
@@ -1552,6 +1549,11 @@ void run_fragment_shader(GLenum mode) {
     global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+
+    // size_t size = framebuffer.width*framebuffer.height;
+    // uint16_t* depth_buffer = (uint16_t*) malloc(size);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, framebuffer.depth.mem, CL_TRUE, 0, size, depth_buffer, 0, NULL, NULL));
+    // for(int i=0; i<40; ++i) printf("[%d]:%d, ", i, depth_buffer[i]);
 }
 
 void reset_deferred_clear() {
@@ -1662,7 +1664,6 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     framebuffer_data_t framebuffer = get_framebuffer_data();
 
     // Vertex Shader
-    printf("vertex shader\n");
     run_vertex_shader(start, end, count);
     
     // size_t size = c_vertex_size*end;
@@ -1693,7 +1694,6 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     local_work_size[1] = CONF_SETUP_SUB_GROUPS;
     global_work_size[0] = local_work_size[0] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
     global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
-    printf("triangle setup range");
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
     clFinish(command_queue);
 
@@ -1708,19 +1708,13 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     // for(int i=0; i<c_num_tris; ++i) printf("[%d]:%d,%d,%d\n", i, triangle_data[i].vi0, triangle_data[i].vi1, triangle_data[i].vi2);
 
     // Bin Raster
-    printf("bin raster\n");
     run_bin_raster(mode, count);
-    clFinish(command_queue);
 
     // Coarse Raster
-    printf("coarse raster\n");
     run_coarse_raster(mode, count);
-    clFinish(command_queue);
 
     // ROP shaders
-    printf("fragment shader\n");
     run_fragment_shader(mode);
-    clFinish(command_queue);
 
     // Update state
     reset_deferred_clear();
@@ -2443,7 +2437,7 @@ inline GLenum gl_function_to_stencil_function(GLenum func) {
         case GL_GEQUAL:    return STENCIL_FUNC_GEQUAL;
         case GL_ALWAYS:    return STENCIL_FUNC_ALWAYS;
     }
-    RETURN_ERROR(GL_INVALID_ENUM);
+    SET_GL_ERROR(GL_INVALID_ENUM);
     return -1;
 } 
 
@@ -2509,7 +2503,7 @@ inline GLenum gl_operation_to_stencil_operation(GLenum operation) {
         case GL_INCR_WRAP:  return STENCIL_OP_INCR_WRAP;
         case GL_DECR_WRAP:  return STENCIL_OP_DECR_WRAP;
     }
-    RETURN_ERROR(GL_INVALID_ENUM);
+    SET_GL_ERROR(GL_INVALID_ENUM);
     return -1;
 } 
 
@@ -2578,7 +2572,9 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     
     if (_textures[_texture_binding].mem) RETURN_ERROR(GL_INVALID_OPERATION); 
     
-    #ifndef HOSTGPU
+    #ifdef DEVICE_IMAGE_ENABLED 
+    NOT_IMPLEMENTED;
+    #else 
 
     texture_t *texture = _textures + _active_textures[_current_active_texture].binding;
 
@@ -2595,7 +2591,8 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     }
 
     texture->mem = createBuffer(MEM_READ_ONLY, total_pixels*pixel_size, NULL);
-    #else 
+    #endif
+    /*    
     // https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_API.html#_mapping_to_external_image_formats
     cl_image_format format; 
     cl_image_desc desc;
@@ -2635,8 +2632,8 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     desc.image_type = CL_MEM_OBJECT_IMAGE2D;
     desc.num_mip_levels = levels - 1;
 
-    //[_texture_binding].mem = createImage(MEM_READ_ONLY, &format, &desc, NULL);
-    #endif
+    _texture[_texture_binding].mem = createImage(MEM_READ_ONLY, &format, &desc, NULL);
+    */
 }
 
 GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) NOT_IMPLEMENTED;
@@ -2687,11 +2684,16 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
         RETURN_ERROR(GL_INVALID_VALUE);
 
     // TODO subImage2d kernel
-    #ifndef HOSTGPU
+    #ifdef DEVICE_IMAGE_ENABLED
+
+    #else 
+
     if (texture_unit->internalformat == GL_RGBA8 && format == GL_RGBA && type == GL_UNSIGNED_BYTE && xoffset == 0 && yoffset == 0) {
         enqueueWriteBuffer(getCommandQueue(),texture_unit->mem, CL_TRUE, 0, width*height*sizeof(uint8_t[4]), pixels);
     } else NOT_IMPLEMENTED;
-    #else
+
+    #endif
+    /*
     size_t origin[2], region[2], pixel_size;
     origin[0] = xoffset;
     origin[1] = yoffset;
@@ -2709,6 +2711,7 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
 
     //enqueueWriteImage(getCommandQueue(), _textures[_texture_binding].mem, &origin, &region, pixel_size*width, 0, pixels);
     #endif
+    */
 }
 
 #define ERROR_CHECKER(_COUNT, _SIZE, _TYPE) ({                                                                          \

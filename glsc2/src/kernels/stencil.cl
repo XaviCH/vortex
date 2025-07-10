@@ -40,9 +40,8 @@ bool stencil_test(uchar stencil, uint c_stencil_data) {
 
 
 inline void stencil_operation(local volatile uchar* stencil_buf, uint c_stencil_data, uint operation) {
-  // uint operation   = get_stencil_operation  (c_stencil_data);
   uchar ref   = get_stencil_ref   (c_stencil_data);
-  uchar mask  = 0xFF; // get_stencil_mask  (c_stencil_data);
+  uchar mask  = get_stencil_mask  (c_stencil_data);
   
   switch(operation) {
     case STENCIL_OP_KEEP:

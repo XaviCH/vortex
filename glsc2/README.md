@@ -19,8 +19,10 @@ For compiling binaries.
 
 # TODO
 
+
 ## Add support for low level Nvidia CUDA API
 For non OpenCL supporter devices like Nvidia Xavier or Nvidia Orin add CUDA API calls instead of OpenCL.
+
 ## Build compiler for GLSL
 
 ## Add support for sub_group_size != 32
@@ -29,8 +31,16 @@ For non OpenCL supporter devices like Nvidia Xavier or Nvidia Orin add CUDA API 
 
 ## Optimize kernels depending on the hardware
 Fetch caracteristics of the hardware before compiling and then compile it.
+
 ## Optimize kernels depeding on OpenGL state
 
 ## Optimize device work enqueuing 
 The driver always tries to enqueue the work at API calls, this ends up on a lot of work waste and a lot of parallelization waste.
 The idea is to compact work, until it cannot be compacted more and then launch executions.
+
+## Add runtime checker to avoid runtime crash from OpenCL
+There are some calls that generates permanent errors to the OpenCL context.
+
+## Add multisampling
+
+## Add 
