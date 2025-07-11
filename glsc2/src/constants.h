@@ -185,5 +185,35 @@
         CLEAR_ENABLED_STENCIL_CHANNEL_MASK | \
     )
 
+// Vertex attributes
+#define VERTEX_ATTRIBUTE_TYPE_BYTE              0
+#define VERTEX_ATTRIBUTE_TYPE_UNSIGNED_BYTE     1
+#define VERTEX_ATTRIBUTE_TYPE_SHORT             2
+#define VERTEX_ATTRIBUTE_TYPE_UNSIGNED_SHORT    3
+#define VERTEX_ATTRIBUTE_TYPE_FLOAT             4
+
+#define VERTEX_ATTRIBUTE_SIZE_1                 0
+#define VERTEX_ATTRIBUTE_SIZE_2                 1
+#define VERTEX_ATTRIBUTE_SIZE_3                 2
+#define VERTEX_ATTRIBUTE_SIZE_4                 3
+
+#define VERTEX_ATTRIBUTE_TYPE_MASK              (0x7u << 0)
+#define VERTEX_ATTRIBUTE_SIZE_MASK              (0x3u << 3)
+#define VERTEX_ATTRIBUTE_ACTIVE_POINTER         (0x1u << 5)
+
+// texture wrap parameters
+#define TEXTURE_WRAP_CLAMP_TO_EDGE 0
+#define TEXTURE_WRAP_REPEAT 1
+#define TEXTURE_WRAP_MIRRORED_REPEAT 2
+
+// texture filter parameters
+#define TEXTURE_FILTER_NEAREST 0
+#define TEXTURE_FILTER_LINEAR 1
+#define TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST 2
+#define TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR 3
+#define TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST 4
+#define TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR 5
+
+
 
 #endif

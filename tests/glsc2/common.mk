@@ -47,15 +47,24 @@ CXXFLAGS += -I$(POCL_RT_PATH)/include
 CXXFLAGS += -I$(VORTEX_EGL_PATH)/include
 CXXFLAGS += -I$(VORTEX_GLSC_PATH)/include
 
-ifdef HOSTDRIVER
-	CXXFLAGS += -DC_OPENGL_HOST
-	LDFLAGS += -lGLESv2 -lEGL
-else ifdef HOSTGPU 
+driver ?= opencl
+# Driver assigment
+ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
 	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/libGLSCv2.opencl.so
 else
+ifeq ($(driver), gles)
+	CXXFLAGS += -DC_OPENGL_HOST
+	LDFLAGS += -lGLESv2 -lEGL
+else
+ifeq ($(driver), vortex)
 	CXXFLAGS += -DC_OPENCL_VORTEX
 	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/libGLSCv2.vortex.so $(VORTEX_EGL_PATH)/lib/egl.so
+else
+ERROR_MSG = ERROR: driver=$(driver) is not a valid driver, driver=[opencl|gles|vortex]
+-include error
+endif
+endif
 endif
 
 # Debugigng
@@ -78,8 +87,9 @@ endif
 endif
 
 OBJS := $(addsuffix .o, $(notdir $(SRCS)))
+CSHADERS := $(addsuffix .o, $(notdir $(SHADERS)))
 
-all: $(PROJECT)
+all: $(PROJECT) $(CSHADERS)
  
 kernel.pocl: kernel.cl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o kernel.pocl kernel.cl
@@ -87,9 +97,10 @@ kernel.pocl: kernel.cl
 kernel.ocl: kernel.cl
 	$(VORTEX_GLSC_PATH)/clcompiler kernel.cl kernel.ocl -DC_OPENCL_HOST -cl-kernel-arg-info
 
-%.glsl.o: %.glsl.cl
-	$(VORTEX_GLSC_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -D'DEVICE_SUB_GROUP_SUPPORT=0' -D'DEVICE_IMAGE_SUPPORT=0' -I$(VORTEX_GLSC_PATH)/src/kernels -cl-kernel-arg-info
+# build objects
 
+%.glsl.o: %.glsl
+	$(VORTEX_GLSC_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -I$(VORTEX_GLSC_PATH)/src/kernels/shaders -I$(VORTEX_GLSC_PATH)/src/kernels -cl-kernel-arg-info
 
 %.cc.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -100,13 +111,20 @@ kernel.ocl: kernel.cl
 %.c.o: %.c
 	$(CC) $(CXXFLAGS) -c $< -o $@
 
+# build executable
+
 $(PROJECT): $(OBJS)
 	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) $(LD_PROJECT_FLAGS) -o $@
+
+# commands
+
+run: $(PROJECT) $(CSHADERS)
+	./$(PROJECT) $(OPTS)
 
 run-hostdriver: $(PROJECT)
 	./$(PROJECT) $(OPTS)
 
-run-hostgpu: $(PROJECT) kernel.ocl
+run-hostgpu: $(PROJECT) $(CSHADERS)
 	./$(PROJECT) $(OPTS)
 
 run-simx: $(PROJECT) kernel.pocl   
@@ -128,32 +146,11 @@ endif
 display:
 	feh -Z -F --force-aliasing -Y image.ppm
 
-ifdef HOSTGPU
-run:
-	$(MAKE) clean
-	$(MAKE) run-hostgpu
-	$(MAKE) display
-else ifdef HOSTDRIVER
-run:
-	$(MAKE) clean
-	$(MAKE) run-hostdriver
-	$(MAKE) display
-else
-run: 
-	$(MAKE) clean
-	$(MAKE) run-simx
-	$(MAKE) display
-endif
-
-.depend: $(SRCS)
-	$(CXX) $(CXXFLAGS) -MM $^ > .depend;
-
 clean:
 	rm -rf $(PROJECT) *.o .depend
 
 clean-all: clean
 	rm -rf *.dump *.pocl *.ocl
 
-ifneq ($(MAKECMDGOALS),clean)
-    -include .depend
-endif
+error:
+	$(error $(ERROR_MSG))

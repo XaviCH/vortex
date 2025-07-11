@@ -92,17 +92,34 @@
 /**
  * Kernel setters
  */
+#define SET_ATTRIBUTE(a) \
+{ \
+    float4 gl_vertex_attribute; \
+    if ((vertex_attribute_datas[gl_attribute_location].misc & VERTEX_ATTRIBUTE_ACTIVE_POINTER) != 0) { \
+        gl_vertex_attribute = gl_get_vertex_attribute_from_pointer((global void *) _##a, vertex_attribute_datas[gl_attribute_location]); \
+    } else { \
+        gl_vertex_attribute = vertex_attributes[gl_attribute_location]; \
+    } \
+    set_attribute_from_float4(gl_vertex_attribute,&a); \
+    gl_attribute_location += 1; \
+}
+
 #define SET_ATTRIBUTE_CHAIN(...) GLUE(SET_ATTRIBUTE_CHAIN_,COUNT(__VA_ARGS__))(__VA_ARGS__)
 
-#define SET_ATTRIBUTE_CHAIN_1(a)     set_attribute_from_kernel(_##a,&a);
-#define SET_ATTRIBUTE_CHAIN_2(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_1(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_3(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_2(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_4(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_3(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_5(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_4(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_6(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_5(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_7(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_6(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_8(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_7(__VA_ARGS__)
-#define SET_ATTRIBUTE_CHAIN_9(a,...) set_attribute_from_kernel(_##a,&a); SET_ATTRIBUTE_CHAIN_8(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_1(a)     SET_ATTRIBUTE(a);
+#define SET_ATTRIBUTE_CHAIN_2(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_1(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_3(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_2(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_4(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_3(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_5(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_4(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_6(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_5(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_7(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_6(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_8(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_7(__VA_ARGS__)
+#define SET_ATTRIBUTE_CHAIN_9(a,...) SET_ATTRIBUTE(a); SET_ATTRIBUTE_CHAIN_8(__VA_ARGS__)
+
+
+
+
+
 
 #define SET_UNIFORM_CHAIN(...) GLUE(SET_UNIFORM_CHAIN_,COUNT(__VA_ARGS__))(__VA_ARGS__)
 

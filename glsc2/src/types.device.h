@@ -37,6 +37,12 @@ typedef struct
     unsigned int vi2;
 } triangle_data_t;
 
+typedef struct {
+    unsigned int offset;
+    unsigned int stride;
+    unsigned int misc; // size[3], type[3], normalized[1], vertex_attrib_pointer_active[1]
+} vertex_attribute_data_t;
+
 /*
 typedef struct
 {
@@ -56,16 +62,20 @@ typedef struct {
     unsigned short width, height, misc;
     /*
     unsigned int internalformat : 4;
-    unsigned int s : 2;
-    unsigned int t : 2;
+    unsigned int wrap_s : 2;
+    unsigned int wrap_t : 2;
     unsigned int min_filter : 3;
     unsigned int mag_filter : 1;
     */
 } sampler2D_t;
 
-unsigned short get_sampler2D_internalformat(sampler2D_t sampler2D) { return sampler2D.misc & 0xFu; }
-void           set_sampler2D_internalformat(sampler2D_t sampler2D, unsigned short internalformat) { sampler2D.misc = (sampler2D.misc & 0xF0u) | (internalformat & 0xFu); }
 
+unsigned int get_sampler2D_internalformat(sampler2D_t sampler2D)  { return (sampler2D.misc >>  0) & 0xFu; }
+unsigned int get_sampler2D_wrap_s(sampler2D_t sampler2D)          { return (sampler2D.misc >>  4) & 0x3u; }
+unsigned int get_sampler2D_wrap_t(sampler2D_t sampler2D)          { return (sampler2D.misc >>  6) & 0x3u; }
+unsigned int get_sampler2D_min_filter(sampler2D_t sampler2D)      { return (sampler2D.misc >>  8) & 0x7u; }
+unsigned int get_sampler2D_mag_filter(sampler2D_t sampler2D)      { return (sampler2D.misc >> 11) & 0x1u; }
 
+void set_sampler2D_internalformat(sampler2D_t sampler2D, unsigned short internalformat) { sampler2D.misc = (sampler2D.misc & 0xF0u) | (internalformat & 0xFu); }
 
 #endif

@@ -108,22 +108,22 @@ scissor_data_t _scissor_data = {
 
 stencil_data_t _stencil_data = {
     .front = {
-        .function = { .func = GL_ALWAYS, .ref = 0, .mask = 1, },
-        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dpass = GL_KEEP }
+        .function = { .func = STENCIL_FUNC_ALWAYS, .ref = 0, .mask = 1, },
+        .operation = { .sfail = STENCIL_OP_KEEP, .dpfail = STENCIL_OP_KEEP, .dpass = STENCIL_OP_KEEP }
     },
     .back = {
-        .function = { .func = GL_ALWAYS, .ref = 0, .mask = 1, },
-        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dpass = GL_KEEP }
+        .function = { .func = STENCIL_FUNC_ALWAYS, .ref = 0, .mask = 1, },
+        .operation = { .sfail = STENCIL_OP_KEEP, .dpfail = STENCIL_OP_KEEP, .dpass = STENCIL_OP_KEEP }
     },
 };
 
 blend_data_t _blend_data = {
     .equation = {
-        .modeRGB = GL_FUNC_ADD, .modeAlpha = GL_FUNC_ADD,
+        .modeRGB = BLEND_FUNC_ADD, .modeAlpha = BLEND_FUNC_ADD,
     },
     .func = {
-        .srcRGB = GL_ZERO, .srcAlpha = GL_ZERO,
-        .dstRGB = GL_ONE, .dstAlpha = GL_ONE,
+        .srcRGB = BLEND_ZERO, .srcAlpha = BLEND_ZERO,
+        .dstRGB = BLEND_ONE, .dstAlpha = BLEND_ONE,
     },
     .color = {
         .red = 0, .green = 0, .blue = 0, .alpha = 0
@@ -160,6 +160,12 @@ rasterization_mem_container_t _rasterization_mem;
 cl_ulong c_clear_write_values;
 cl_ushort c_clear_enabled_data = 0;
 active_deferred_clear_t _deferred_clear;
+
+cl_float4 _vertex_attributes[MAX_VERTEX_ATTRIBS];
+cl_mem _vertex_attributes_mem;
+vertex_attribute_data_t _vertex_attribute_data[MAX_VERTEX_ATTRIBS];
+cl_mem _vertex_attribute_data_mem;
+cl_mem _dummy_buffer;
 
 #include "kernels/triangle_setup.ocl.c"
 #include "kernels/bin_raster.ocl.c"
@@ -271,6 +277,16 @@ void __context_constructor__() {
     // dummy objects to pass to the kernel
     _rasterization_mem.globals.depthbuffer      = createBuffer(CL_MEM_READ_WRITE, sizeof(cl_int[40]), NULL);
     _rasterization_mem.globals.stencilbuffer    = createBuffer(CL_MEM_READ_WRITE, sizeof(cl_int[1000][1000]), NULL);
+
+    // TODO: Maybe write on device memory
+    _vertex_attributes_mem = createBuffer(CL_MEM_READ_ONLY, sizeof(_vertex_attributes), NULL);
+    _vertex_attribute_data_mem = createBuffer(CL_MEM_READ_ONLY, sizeof(_vertex_attribute_data), NULL);
+    _dummy_buffer = createBuffer(CL_MEM_READ_ONLY, 64, NULL);
+
+    for (int attribute=0; attribute < MAX_VERTEX_ATTRIBS; ++attribute) {
+        _vertex_attributes[attribute] = (cl_float4){0, 0, 0, 1};
+        _vertex_attribute_data[attribute].misc = 0;
+    }
 
     #ifdef DEVICE_IMAGE_ENABLED
     {
@@ -481,15 +497,7 @@ GLenum _error;
 
 #define SET_GL_ERROR(error) \
     { \
-        _error = error; \
-        char error_name[32]; \
-        switch (error) { \
-            CASE(GL_INVALID_ENUM); \
-            CASE(GL_INVALID_OPERATION); \
-            CASE(GL_INVALID_VALUE); \
-            default: strcpy(error_name, "UNKNOWN"); break; \
-        } \
-        printf("DEBUG: %s throws a %s at %s:%d\n", __func__, error_name, __FILE__, __LINE__); \
+        printf("DEBUG: %s throws a "#error" at %s:%d\n", __func__, __FILE__, __LINE__); \
         exit(error); \
     }
 
@@ -617,7 +625,7 @@ inline GLenum gl_function_to_blend_function (GLenum factor)
 
 GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) 
 {
-    glBlendFuncSeparate(sfactor, sfactor, dfactor, dfactor);
+    glBlendFuncSeparate(sfactor, dfactor, sfactor, dfactor);
 }
 
 GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) 
@@ -997,10 +1005,16 @@ GL_APICALL void GL_APIENTRY glDisable (GLenum cap) {
     }
 }
 
-GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) {
-    if (index >= GL_MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
+GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) 
+{
+    if (index >= GL_MAX_VERTEX_ATTRIBS) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    }
 
     _vertex_attrib_enable[index] = 0;
+
+    _vertex_attribute_data[index].misc &= ~VERTEX_ATTRIBUTE_ACTIVE_POINTER;
 }
 
 #define IS_DRAW_MODE(_MODE) \
@@ -1295,27 +1309,37 @@ inline uint32_t get_stencil_data() {
 }
 
 void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
-    cl_mem vertex_array_mem[MAX_VERTEX_ATTRIBS];
     cl_command_queue command_queue = getCommandQueue();
     
     cl_kernel kernel = _programs[_current_program].vertex_kernel;
     size_t global_work_size[1];
     global_work_size[0] = end - start;
 
+    // upload vertex attribute data
+    // TODO: map host memory
+    CL_CHECK(clEnqueueWriteBuffer(command_queue, _vertex_attributes_mem, CL_FALSE, 0, sizeof(_vertex_attributes), _vertex_attributes, 0, NULL, NULL));
+    CL_CHECK(clEnqueueWriteBuffer(command_queue, _vertex_attribute_data_mem, CL_FALSE, 0, sizeof(_vertex_attribute_data), _vertex_attribute_data, 0, NULL, NULL));
+
+    // arrange vertex attribute buffers
+    cl_mem vertex_array_mem[MAX_VERTEX_ATTRIBS];
     for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
+        vertex_attrib_pointer_t *pointer = &_vertex_attribs[attrib].pointer;
+        cl_mem vertex_attribute_mem;
 
-        if (_vertex_attrib_enable[attrib]) {
-            vertex_attrib_pointer_t *pointer = &_vertex_attribs[attrib].pointer;
+        if (pointer->binding) {
+            vertex_attribute_mem = _buffers[pointer->binding].mem;
+        } else if (pointer->pointer != NULL) {
             size_t buffer_in_size = count*sizeof_type(pointer->type)*pointer->size+pointer->stride;
-
-            if (pointer->binding) {
-                vertex_array_mem[attrib] = _buffers[pointer->binding].mem;
-            } else {
-                vertex_array_mem[attrib] = createBuffer(CL_MEM_HOST_READ_ONLY | CL_MEM_USE_HOST_PTR, buffer_in_size, pointer->pointer);
-            }
+            vertex_attribute_mem = createBuffer(CL_MEM_HOST_READ_ONLY | CL_MEM_USE_HOST_PTR, buffer_in_size, pointer->pointer);
+        } else {
+            vertex_attribute_mem = _dummy_buffer;
         }
+
+        setKernelArg(kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(cl_mem), &vertex_attribute_mem);
+        vertex_array_mem[attrib]=vertex_attribute_mem;
     }
 
+    // TODO: uniforms could be compressed an uploaded from a single constant buffer
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
         if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
             setKernelArg(kernel, 
@@ -1326,24 +1350,31 @@ void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
         }
     }
 
-    for(int attrib = 0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        if (_vertex_attrib_state[attrib] == VEC4) {
-            NOT_IMPLEMENTED;
-            // setKernelArg(vertex_kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(vertex_attrib_t), &_vertex_attribs[attrib]);
-        } else {
-            setKernelArg(kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(cl_mem), &vertex_array_mem[attrib]);
-        }
-    }
-
     global_work_size[0] = end - start;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL));
 
-    // TODO: Assign statically this memory
+    // release host memory
     for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        if (_vertex_attrib_enable[attrib] && !_vertex_attribs[attrib].pointer.binding) {
+        if (_vertex_attrib_enable[attrib] && !_vertex_attribs[attrib].pointer.binding && _vertex_attribs[attrib].pointer.pointer != NULL) {
             CHECK_CL(clReleaseMemObject(vertex_array_mem[attrib]));
         }
     }
+
+    cl_uint c_vertex_size = get_vertex_size();
+    uint32_t varying = CURRENT_PROGRAM.varying_size;
+    size_t size = c_vertex_size*end;
+    float* vertex_buffer = (float*) malloc(size);
+    CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
+    for (int vertex=0; vertex < end; ++vertex) {
+        int offset = vertex*(c_vertex_size/sizeof(float));
+        printf("vertex=%d:\n", vertex);
+        for (int var=0; var < varying + 1; ++var) {
+            printf("[%d](%f,%f,%f,%f) ", var, vertex_buffer[offset+var*4], vertex_buffer[offset+var*4+1], vertex_buffer[offset+var*4+2], vertex_buffer[offset+var*4+3]);
+        }
+        printf("\n");
+    }
+    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) 
+    // printf("\n");
 
 }
 
@@ -1590,10 +1621,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     // Vertex Shader
     run_vertex_shader(first, count, count);
     
-    // size_t size = c_vertex_size*end;
-    // float* vertex_buffer = (float*) malloc(size);
-    // CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
-    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) printf("[%d]:%f, ", i, vertex_buffer[i]);
+    
 
     // Triangle Setup Range
     kernel = _kernels.triangle_setup_arrays;
@@ -1746,10 +1774,16 @@ GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
     }
 }
 
-GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index) {
-    if (index >= MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
+GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index) 
+{
+    if (index >= MAX_VERTEX_ATTRIBS) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    } 
     
     _vertex_attrib_enable[index] = 1;
+
+    _vertex_attribute_data[index].misc |= VERTEX_ATTRIBUTE_ACTIVE_POINTER;
 }
 
 GL_APICALL void GL_APIENTRY glFinish (void) {
@@ -2078,7 +2112,7 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
         cl_kernel_arg_type_qualifier type_qualifier;
         cl_kernel_arg_access_qualifier access_qualifier;
 
-        for(cl_uint arg=0; arg < vertex_kernel_num_args; ++arg) {
+        for(cl_uint arg=2; arg < vertex_kernel_num_args; ++arg) {
             char name[ARG_NAME_SIZE];
             char type_name[32];
             uint32_t size, type;
@@ -2251,7 +2285,8 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
     } else NOT_IMPLEMENTED;
 
-
+    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, 0, sizeof(cl_mem), &_vertex_attributes_mem));
+    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, 1, sizeof(cl_mem), &_vertex_attribute_data_mem));
     #ifdef CONF_FINE_IMAGE_ENABLED
     CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.textures.vertex_buffer));
     #else 
@@ -2342,8 +2377,8 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
         };
     }
 
-    // CL_CHECK(clEnqueueReadBuffer(getCommandQueue(), buffer_info.mem, CL_TRUE, 0, sizeof(uint32_t[width][height]), data, 0, NULL, NULL));
-    // return;
+    CL_CHECK(clEnqueueReadBuffer(getCommandQueue(), buffer_info.mem, CL_TRUE, 0, sizeof(uint32_t[width][height]), data, 0, NULL, NULL));
+    return;
 
     cl_mem dst_buff = clCreateBuffer(_getContext(), CL_MEM_WRITE_ONLY, bufSize, NULL, &cl_error);
     // cl_mem dst_buff = clCreateBuffer(_getContext(), CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR, bufSize, data, &cl_error); DO NOT SUPPORTED ON VORTEX
@@ -2814,7 +2849,7 @@ GL_APICALL void GL_APIENTRY glUseProgram (GLuint program){
     _current_program=program;
 }
 
-
+/*
 #define SET_VERTEX_ATTRIB(index, x, y, z, w) ({                         \
     if (index>=MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);      \
     _vertex_attrib_state[index] = VEC4;                                 \
@@ -2823,37 +2858,107 @@ GL_APICALL void GL_APIENTRY glUseProgram (GLuint program){
     _vertex_attribs[index].vec4.values[2] = z;                          \
     _vertex_attribs[index].vec4.values[3] = w;                          \
     })
+*/
+
+inline void set_vertex_attribute(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
+    if (index >= MAX_VERTEX_ATTRIBS) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    }
+    _vertex_attributes[index] = (cl_float4){x, y, z, w};
+}
 
 GL_APICALL void GL_APIENTRY glVertexAttrib1f (GLuint index, GLfloat x) {
-    SET_VERTEX_ATTRIB(index, x, 0.f, 0.f, 1.f);
+    set_vertex_attribute(index, x, 0.f, 0.f, 1.f);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib1fv (GLuint index, const GLfloat *v) {
-    SET_VERTEX_ATTRIB(index, v[0], 0.f, 0.f, 1.f);
+    set_vertex_attribute(index, v[0], 0.f, 0.f, 1.f);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib2f (GLuint index, GLfloat x, GLfloat y) {
-    SET_VERTEX_ATTRIB(index, x, y, 0.f, 1.f);
+    set_vertex_attribute(index, x, y, 0.f, 1.f);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib2fv (GLuint index, const GLfloat *v) {
-    SET_VERTEX_ATTRIB(index, v[0], v[1], 0.f, 1.f);
+    set_vertex_attribute(index, v[0], v[1], 0.f, 1.f);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib3f (GLuint index, GLfloat x, GLfloat y, GLfloat z) {
-    SET_VERTEX_ATTRIB(index, x, y, z, 1.f);
+    set_vertex_attribute(index, x, y, z, 1.f);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib3fv (GLuint index, const GLfloat *v) {
-    SET_VERTEX_ATTRIB(index, v[0], v[1], v[2], 1.f);
+    set_vertex_attribute(index, v[0], v[1], v[2], 1.f);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) {
-    SET_VERTEX_ATTRIB(index, x, y, z, w);
+    set_vertex_attribute(index, x, y, z, w);
 }
 GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v) {
-    SET_VERTEX_ATTRIB(index, v[0], v[1], v[2], v[3]);
+    set_vertex_attribute(index, v[0], v[1], v[2], v[3]);
 }
 
-GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) {
-    if (index >= MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
-    if (size > 4 || size <=0) RETURN_ERROR(GL_INVALID_VALUE);
-    if (stride < 0) RETURN_ERROR(GL_INVALID_VALUE);
-    if (type < GL_BYTE || type > GL_FLOAT) RETURN_ERROR(GL_INVALID_VALUE);
+GLboolean gl_type_to_vertex_attribute_type(GLenum gl_type, unsigned int* va_type) 
+{
+    #define CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE(type) \
+        case GL_##type: *va_type = VERTEX_ATTRIBUTE_TYPE_##type; break;
+
+    switch (gl_type)
+    {
+        CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE(BYTE);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE(UNSIGNED_BYTE);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE(SHORT);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE(UNSIGNED_SHORT);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE(FLOAT);
+        default:
+            return GL_FALSE;
+    }
+
+    #undef CASE_GL_TO_VERTEX_ATTRIBUTE_TYPE
+
+    return GL_TRUE;
+};
+
+GLboolean gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size)
+{
+    #define CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(size) \
+        case size: *va_size = VERTEX_ATTRIBUTE_SIZE_##size; break;
+
+    switch (gl_size)
+    {
+        CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(1);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(2);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(3);
+        CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(4);
+        default:
+            return GL_FALSE;
+    }
+
+    #undef CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE
+
+    return GL_TRUE;
+}
+
+GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) 
+{
+    unsigned int va_size, va_type, va_active_pointer;
+
+    if (index >= MAX_VERTEX_ATTRIBS) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    }
+    
+    if (gl_size_to_vertex_attribute_size(size, &va_size) == GL_FALSE) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    }
+
+    if (gl_type_to_vertex_attribute_type(type, &va_type) == GL_FALSE) {
+        SET_GL_ERROR(GL_INVALID_ENUM);
+        return;
+    }
+
+    if (stride < 0) {
+        SET_GL_ERROR(GL_INVALID_VALUE);
+        return;
+    }
+
+    va_active_pointer = _vertex_attribute_data[index].misc & VERTEX_ATTRIBUTE_ACTIVE_POINTER;
 
     _vertex_attribs[index].pointer = (vertex_attrib_pointer_t) {
         .size = size,
@@ -2863,9 +2968,19 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLe
         .pointer = pointer,
         .binding = _buffer_binding
     };
+
     _vertex_attrib_state[index] = POINTER;
 
+    _vertex_attribute_data[index] = (vertex_attribute_data_t) {
+        .stride = stride,
+        .offset = _buffer_binding ? (unsigned int) pointer : 0,
+        .misc = 
+            va_type |
+            va_size |
+            va_active_pointer,
+    };
 }
+
 GL_APICALL void GL_APIENTRY glViewport (GLint x, GLint y, GLsizei width, GLsizei height){
     _viewport.x=x;
     _viewport.y=y;

@@ -9,14 +9,12 @@
 
 #ifdef __COMPILER_RELATIVE_PATH__
 #include "macros.h"
-#include "types.cl"
 #include "built_in.cl"
-#include "../../types.device.h"
+#include "../../constants.h"
 #else
 #include "glsc2/src/kernels/shaders/macros.h"
-#include "glsc2/src/kernels/shaders/types.cl"
 #include "glsc2/src/kernels/shaders/built_in.cl"
-#include "glsc2/src/types.device.h"
+#include "glsc2/src/constants.h"
 #endif
 
 // Utils
@@ -28,20 +26,6 @@ typedef write_only image1d_buffer_t vertex_buffer_t;
 #define KERNEL_ARG_VERTEX_BUFFER global float4* vertex_buffer
 typedef global float4* vertex_buffer_t;
 #endif
-
-float4 texture2D(sampler2D_t sampler, image2D_t image, float2 coord) {
-    int width, height;
-
-    coord.x = (coord.x - floor(coord.x));
-    coord.y = (coord.y - floor(coord.y));
-
-    width   = sampler.width * coord.x;
-    height  = sampler.height * coord.y;
-
-    global uchar* color = image + (height*sampler.width + width)*4;
-    return (float4) ((float)*color / 255, (float)*(color+1) / 255, (float)*(color+2) / 255, (float)*(color+3) / 255);
-    
-}
 
 #define TEXTURE2D(sampler, coord) texture2D(sampler, gl_image_##sampler, coord);
 
@@ -151,37 +135,58 @@ void __attribute__((overloadable)) set_attribute_from_kernel(global const float*
     *out = ((global const float4*) in)[get_global_linear_id()];
 }
 
+void __attribute__((overloadable)) set_attribute_from_float4(float4 in, float2* out) {
+    *out = in.xy;
+}
+void __attribute__((overloadable)) set_attribute_from_float4(float4 in, float3* out) {
+    *out = in.xyz;
+}
+void __attribute__((overloadable)) set_attribute_from_float4(float4 in, float4* out) {
+    *out = in;
+}
+
 //-------------
 
 #ifdef ATTRIBUTE_VEC2
+#define COUNT_ATTRIBUTE_VEC2 COUNT(ATTRIBUTE_VEC2)
 #define KERNEL_ARG_ATTRIBUTE_VEC2 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC2))
 #define DEFINE_ATTRIBUTE_VEC2 STRUCT_CHAIN(float2, ATTRIBUTE_VEC2)
 #define SET_ATTRIBUTE_VEC2 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC2)
 #else
+#define COUNT_ATTRIBUTE_VEC2 0
 #define KERNEL_ARG_ATTRIBUTE_VEC2
 #define DEFINE_ATTRIBUTE_VEC2
 #define SET_ATTRIBUTE_VEC2
 #endif
 
 #ifdef ATTRIBUTE_VEC3
+#define COUNT_ATTRIBUTE_VEC3 COUNT(ATTRIBUTE_VEC3)
 #define KERNEL_ARG_ATTRIBUTE_VEC3 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC3))
 #define DEFINE_ATTRIBUTE_VEC3 STRUCT_CHAIN(float3, ATTRIBUTE_VEC3)
 #define SET_ATTRIBUTE_VEC3 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC3)
 #else
+#define COUNT_ATTRIBUTE_VEC3 0
 #define KERNEL_ARG_ATTRIBUTE_VEC3
 #define DEFINE_ATTRIBUTE_VEC3
 #define SET_ATTRIBUTE_VEC3
 #endif
 
 #ifdef ATTRIBUTE_VEC4
+#define COUNT_ATTRIBUTE_VEC4 COUNT(ATTRIBUTE_VEC4)
 #define KERNEL_ARG_ATTRIBUTE_VEC4 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC4))
 #define DEFINE_ATTRIBUTE_VEC4 STRUCT_CHAIN(float4, ATTRIBUTE_VEC4)
 #define SET_ATTRIBUTE_VEC4 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC4)
 #else
+#define COUNT_ATTRIBUTE_VEC4 0
 #define KERNEL_ARG_ATTRIBUTE_VEC4
 #define DEFINE_ATTRIBUTE_VEC4
 #define SET_ATTRIBUTE_VEC4
 #endif
+
+#define COUNT_ATTRIBUTES ( \
+    COUNT_ATTRIBUTE_VEC2 + \
+    COUNT_ATTRIBUTE_VEC3 + \
+    COUNT_ATTRIBUTE_VEC4 )
 
 #define DEFINE_ATTRIBUTES \
     DEFINE_ATTRIBUTE_VEC2 \
@@ -194,9 +199,12 @@ void __attribute__((overloadable)) set_attribute_from_kernel(global const float*
     KERNEL_ARG_ATTRIBUTE_VEC4
 
 #define SET_ATTRIBUTES \
+    { \
+    uint gl_attribute_location = 0; \
     SET_ATTRIBUTE_VEC2 \
     SET_ATTRIBUTE_VEC3 \
-    SET_ATTRIBUTE_VEC4
+    SET_ATTRIBUTE_VEC4 \
+    }
 
 //-------------------
 
@@ -287,8 +295,51 @@ inline void fill_vertex_buffer(
     }
 }
 
+// TODO: Mem acces on wrong padding cause error
+inline float4 gl_get_vertex_attribute_from_pointer(global void* data, vertex_attribute_data_t vertex_attribute_data) {
+    data += vertex_attribute_data.offset;
+
+    switch (vertex_attribute_data.misc & (VERTEX_ATTRIBUTE_SIZE_MASK | VERTEX_ATTRIBUTE_TYPE_MASK)) {
+        default:
+        case VERTEX_ATTRIBUTE_SIZE_1 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (sizeof(float) + vertex_attribute_data.stride) * get_global_linear_id();
+            return (float4)(
+                *(global float*)data, 
+                0, 
+                0, 
+                1
+                );
+        case VERTEX_ATTRIBUTE_SIZE_2 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (sizeof(float2) + vertex_attribute_data.stride) * get_global_linear_id();
+            return (float4)(
+                ((global float*)data)[0], 
+                ((global float*)data)[1], 
+                0, 
+                1
+                );
+        case VERTEX_ATTRIBUTE_SIZE_3 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (sizeof(float[3]) + vertex_attribute_data.stride) * get_global_linear_id();
+            return (float4)(
+                ((global float*)data)[0],
+                ((global float*)data)[1],
+                ((global float*)data)[2],
+                1
+                );
+        case VERTEX_ATTRIBUTE_SIZE_4 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (sizeof(float4) + vertex_attribute_data.stride) * get_global_linear_id();
+            return (float4)(
+                ((global float*)data)[0],
+                ((global float*)data)[1],
+                ((global float*)data)[2],
+                ((global float*)data)[3]
+                );
+    };
+}
+
 #define VS_MAIN(...) \
     kernel void gl_vertex_shader( \
+        global float4* vertex_attributes, \
+        global vertex_attribute_data_t* vertex_attribute_datas, \
         KERNEL_ARG_ATTRIBUTES \
         VS_KERNEL_ARG_UNIFORMS \
         KERNEL_ARG_VERTEX_BUFFER \

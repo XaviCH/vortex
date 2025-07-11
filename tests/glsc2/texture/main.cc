@@ -8,8 +8,8 @@
 
 #include "../common.h"
 
-#define WIDTH 150
-#define HEIGHT 100
+#define WIDTH 1500
+#define HEIGHT 1000
 
 static float position[] = {
   -.5, .5, 0.0,
@@ -41,7 +41,7 @@ int main() {
   glGenRenderbuffers(1, &colorbuffer);
 
   glBindRenderbuffer(GL_RENDERBUFFER, colorbuffer);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA4, WIDTH, HEIGHT);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, WIDTH, HEIGHT);
 
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorbuffer);
@@ -58,6 +58,8 @@ int main() {
   loc_texCoord  = glGetAttribLocation(program, "in_texCoord");
   loc_sampler   = glGetUniformLocation(program, "ourTexture");
 
+  printf("position = %d, texCoord = %d, sampler = %d\n", loc_position, loc_texCoord, loc_sampler);
+
   glVertexAttribPointer(loc_position, 3, GL_FLOAT, GL_FALSE, 0, &position);
   glEnableVertexAttribArray(loc_position); 
 
@@ -66,18 +68,21 @@ int main() {
   glBufferData(GL_ARRAY_BUFFER,sizeof(texCoord), &texCoord, GL_STATIC_DRAW);
   glVertexAttribPointer(loc_texCoord, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
   glEnableVertexAttribArray(loc_texCoord); 
-  glDisable(GL_DITHER);
+  glEnable(GL_BLEND);
+
+  glBlendEquation(GL_FUNC_ADD);
+  glBlendFunc(GL_SRC_ALPHA, GL_DST_ALPHA);
 
   // Set up texture
   unsigned int texture;
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1); 
+  // glPixelStorei(GL_UNPACK_ALIGNMENT, 1); 
   glGenTextures(1, &texture);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, texture);
   glUniform1i(loc_sampler, 0); // texture unit 0
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
-  // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // has to be enabled or mipmap has to be generated
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // has to be enabled or mipmap has to be generated
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -89,15 +94,17 @@ int main() {
     data[i*4+0] = image->data[i].red;
     data[i*4+1] = image->data[i].green;
     data[i*4+2] = image->data[i].blue;
-    data[i*4+3] = 0xFFu;
+    data[i*4+3] = 0x0Fu;
   }
+
   #ifdef C_OPENGL_HOST
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image->x,image->y, 0, GL_RGB, GL_UNSIGNED_BYTE, image->data);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image->x,image->y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+  // glGenerateMipmap(GL_TEXTURE_2D);
   #else
   glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, image->x, image->y);
   glTexSubImage2D(GL_TEXTURE_2D,0,0,0,image->x,image->y, GL_RGBA, GL_UNSIGNED_BYTE, data);
   #endif
-
+  
   glClear(GL_COLOR_BUFFER_BIT);
   glDrawArrays(GL_TRIANGLES, 0, 6);
   glFinish();
@@ -107,6 +114,9 @@ int main() {
   #else
   glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
   #endif
+  
+  printf("%x\n", glGetError());
+
   print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
 
   EGL_DESTROY();

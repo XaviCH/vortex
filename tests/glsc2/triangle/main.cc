@@ -6,8 +6,8 @@
 
 #include "../common.h"
 
-#define WIDTH 150
-#define HEIGHT 100
+#define WIDTH 1500
+#define HEIGHT 1000
 
 static float position[] = {
    0.0, 1.0, 0.0,
@@ -33,7 +33,7 @@ int main() {
   glGenRenderbuffers(1, &colorbuffer);
 
   glBindRenderbuffer(GL_RENDERBUFFER, colorbuffer);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA4, WIDTH, HEIGHT);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, WIDTH, HEIGHT);
 
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorbuffer);
