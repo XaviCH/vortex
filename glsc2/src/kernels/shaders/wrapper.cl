@@ -301,32 +301,32 @@ inline float4 gl_get_vertex_attribute_from_pointer(global void* data, vertex_att
 
     switch (vertex_attribute_data.misc & (VERTEX_ATTRIBUTE_SIZE_MASK | VERTEX_ATTRIBUTE_TYPE_MASK)) {
         default:
-        case VERTEX_ATTRIBUTE_SIZE_1 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (sizeof(float) + vertex_attribute_data.stride) * get_global_linear_id();
+        case (VERTEX_ATTRIBUTE_SIZE_1 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 *(global float*)data, 
                 0, 
                 0, 
                 1
                 );
-        case VERTEX_ATTRIBUTE_SIZE_2 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (sizeof(float2) + vertex_attribute_data.stride) * get_global_linear_id();
+        case (VERTEX_ATTRIBUTE_SIZE_2 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
-                ((global float*)data)[0], 
+                ((global float*)data)[0],
                 ((global float*)data)[1], 
                 0, 
                 1
                 );
-        case VERTEX_ATTRIBUTE_SIZE_3 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (sizeof(float[3]) + vertex_attribute_data.stride) * get_global_linear_id();
+        case (VERTEX_ATTRIBUTE_SIZE_3 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 ((global float*)data)[0],
                 ((global float*)data)[1],
                 ((global float*)data)[2],
                 1
                 );
-        case VERTEX_ATTRIBUTE_SIZE_4 | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (sizeof(float4) + vertex_attribute_data.stride) * get_global_linear_id();
+        case (VERTEX_ATTRIBUTE_SIZE_4 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 ((global float*)data)[0],
                 ((global float*)data)[1],

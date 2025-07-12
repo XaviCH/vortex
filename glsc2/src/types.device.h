@@ -76,6 +76,21 @@ unsigned int get_sampler2D_wrap_t(sampler2D_t sampler2D)          { return (samp
 unsigned int get_sampler2D_min_filter(sampler2D_t sampler2D)      { return (sampler2D.misc >>  8) & 0x7u; }
 unsigned int get_sampler2D_mag_filter(sampler2D_t sampler2D)      { return (sampler2D.misc >> 11) & 0x1u; }
 
-void set_sampler2D_internalformat(sampler2D_t sampler2D, unsigned short internalformat) { sampler2D.misc = (sampler2D.misc & 0xF0u) | (internalformat & 0xFu); }
+void set_sampler2D_internalformat(sampler2D_t* sampler2D, unsigned short internalformat) 
+{ 
+    sampler2D->misc = (sampler2D->misc & ~0xFu) | (internalformat & 0xFu); 
+}
+
+void set_sampler2D_wrap_s(sampler2D_t* sampler2D, unsigned short wrap_s) 
+{ 
+    sampler2D->misc &= ~(0x3u << 4);
+    sampler2D->misc |= wrap_s << 4;
+}
+
+void set_sampler2D_wrap_t(sampler2D_t* sampler2D, unsigned short wrap_t) 
+{ 
+    sampler2D->misc &= ~(0x3u << 6);
+    sampler2D->misc |= wrap_t << 6;
+}
 
 #endif

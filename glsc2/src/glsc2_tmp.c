@@ -1541,6 +1541,8 @@ void run_fragment_shader(GLenum mode) {
             // .internalformat = texture_unit->internalformat,
             // .wraps = texture_unit->wraps,
         };
+        set_sampler2D_wrap_s(&sampler2D, texture_unit->wraps.s);
+        set_sampler2D_wrap_t(&sampler2D, texture_unit->wraps.t);
 
         setKernelArg(kernel,
             CURRENT_PROGRAM.sampler_data[sampler].fragment_location,
@@ -2673,6 +2675,24 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
 
 GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) NOT_IMPLEMENTED;
 GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params) NOT_IMPLEMENTED;
+
+GLboolean gl_tex_parameter_to_tex_wrap(GLint param, uint32_t* result) {
+    switch (param)
+    {
+    case GL_REPEAT: 
+        *result = TEXTURE_WRAP_REPEAT;
+        break;
+    case GL_CLAMP_TO_EDGE: 
+        *result = TEXTURE_WRAP_CLAMP_TO_EDGE;
+        break;
+    case GL_MIRRORED_REPEAT: 
+        *result = TEXTURE_WRAP_MIRRORED_REPEAT;
+        break;
+    default: return GL_FALSE;
+    }
+    return GL_TRUE;
+}
+
 GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) {
     // Chekc if value is correct
     switch (pname)
@@ -2694,12 +2714,15 @@ GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint 
         NOT_IMPLEMENTED;
     }
     // Set value
+    uint32_t value;
     switch (pname)
     {
     case GL_TEXTURE_WRAP_S:
-        _textures[_active_textures[_current_active_texture].binding].wraps.s          = param; return;        
+        gl_tex_parameter_to_tex_wrap(param, &value);
+        _textures[_active_textures[_current_active_texture].binding].wraps.s          = value; return;        
     case GL_TEXTURE_WRAP_T:
-        _textures[_active_textures[_current_active_texture].binding].wraps.t          = param; return;
+        gl_tex_parameter_to_tex_wrap(param, &value);
+        _textures[_active_textures[_current_active_texture].binding].wraps.t          = value; return;
     case GL_TEXTURE_MIN_FILTER:
         _textures[_active_textures[_current_active_texture].binding].wraps.min_filter = param; return;
     case GL_TEXTURE_MAG_FILTER:
@@ -2917,7 +2940,7 @@ GLboolean gl_type_to_vertex_attribute_type(GLenum gl_type, unsigned int* va_type
 GLboolean gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size)
 {
     #define CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(size) \
-        case size: *va_size = VERTEX_ATTRIBUTE_SIZE_##size; break;
+        case size: *va_size = VERTEX_ATTRIBUTE_SIZE_##size << 3; break;
 
     switch (gl_size)
     {
@@ -2956,6 +2979,8 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLe
     if (stride < 0) {
         SET_GL_ERROR(GL_INVALID_VALUE);
         return;
+    } else if (stride == 0) {
+        stride = sizeof_type(type)*size;
     }
 
     va_active_pointer = _vertex_attribute_data[index].misc & VERTEX_ATTRIBUTE_ACTIVE_POINTER;

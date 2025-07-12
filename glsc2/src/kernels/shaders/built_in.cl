@@ -35,20 +35,25 @@ float mod(float x, float y) {
     return x - y * floor(x/y);
 }
 
+inline float gl_clamp_tex_coord(float value, uint size) {
+    float min = 1.f / (2 * size);
+    float max = 1.f - min;
+    return clamp(value, min, max);
+}
 
-float apply_wrap(uint wrap, float value) {
+float apply_wrap(uint wrap, float value, uint size) {
     switch(wrap) {
         default:
         case TEXTURE_WRAP_REPEAT:
             return value - floor(value);
         case TEXTURE_WRAP_CLAMP_TO_EDGE:
-            return clamp(value, 0.f, 1.f);
+            return gl_clamp_tex_coord(value, size);
         case TEXTURE_WRAP_MIRRORED_REPEAT:
             {
-                float wrap = value - floor(value);
-                if ((int)(floor(value)) % 2 == 0) 
-                    wrap = 1 - wrap;
-                return clamp(wrap, 0.f, 1.f);
+                float tmp = value - floor(value);
+                if ((int)(fabs(floor(value))) % 2 == 1) 
+                    tmp = 1.0 - tmp;
+                return gl_clamp_tex_coord(tmp, size);
             }
     }
 }
@@ -59,8 +64,8 @@ uint2 gl_sampl(sampler2D_t sampler, float2 coord) {
     uint wrap_s = get_sampler2D_wrap_s(sampler);
     uint wrap_t = get_sampler2D_wrap_t(sampler);
 
-    float coord_x = apply_wrap(wrap_s, coord.x);
-    float coord_y = apply_wrap(wrap_t, coord.y);
+    float coord_x = apply_wrap(wrap_s, coord.x, sampler.width);
+    float coord_y = apply_wrap(wrap_t, coord.y, sampler.height);
 
     img_coord = (uint2){
         sampler.width * coord_x, 
