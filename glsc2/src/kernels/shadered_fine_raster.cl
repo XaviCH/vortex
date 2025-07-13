@@ -609,6 +609,7 @@ kernel void fine_raster_single_sample(
     // const uchar  c_clear_stencil,
     const ulong  c_clear_write_values, 
     const ushort c_clear_enabled_data,
+    const ushort c_enabled_data,
     const uint   c_color_buffer_mode,
     // const int    c_deferred_clear,
     const uint   c_depth_data,
@@ -1022,15 +1023,21 @@ kernel void fine_raster_single_sample(
         {
             
             bool colorbuffer_needs_store = 
-                true ||
+                (c_enabled_data & ENABLED_COLOR_CHANNEL_MASK) != 0 ||
                 (c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_MASK) != 0;
 
             bool depthbuffer_needs_store =
-                (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 ||
+                (
+                    (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && 
+                    (c_enabled_data & ENABLED_DEPTH_CHANNEL) != 0
+                ) || 
                 (c_clear_enabled_data & CLEAR_ENABLED_DEPTH_CHANNEL) != 0;
 
             bool stencilbuffer_needs_store =
-                (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0 ||
+                (
+                    (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0 &&
+                    (c_enabled_data & ENABLED_STENCIL_CHANNEL_MASK) != 0
+                ) ||
                 (c_clear_enabled_data & CLEAR_ENABLED_STENCIL_CHANNEL_MASK) != 0;
 
             
@@ -1063,37 +1070,11 @@ kernel void fine_raster_single_sample(
                         g_stencil_buffer[surf_x + surf_y*c_viewport_width] = w_tile_stencil[pixel];
                     #endif
                 }
+                
 
             }
             
-            /*
-            int surf_x = (tile_x << (CR_TILE_LOG2 + 2)) + ((get_local_id(0) & (CR_TILE_SIZE - 1)) << 2);
-            int surf_y = (tile_y << CR_TILE_LOG2) + (get_local_id(0) >> CR_TILE_LOG2);
-            #ifdef CONF_FINE_IMAGE_ENABLED
-            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y}, uint_to_uint4(w_tile_color[get_local_id(0)], TEX_RGBA8));
-            write_imageui(t_color_buffer, (int2){surf_x/4, surf_y + 4}, uint_to_uint4(w_tile_color[get_local_id(0) + 32], TEX_RGBA8));
-            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
-                write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y}, w_tile_depth[get_local_id(0)]);
-                write_imageui(t_depth_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_depth[get_local_id(0) + 32]);
-            }
-            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
-                write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y}, w_tile_stencil[get_local_id(0)]);
-                write_imageui(t_stencil_buffer, (int2){surf_x/4, surf_y + 4}, w_tile_stencil[get_local_id(0) + 32]);
-            }
-            #else
-            write_tex_to_buffer(g_color_buffer, surf_x/4 + surf_y*c_viewport_width, c_color_buffer_mode, w_tile_color[get_local_id(0)]);
-            write_tex_to_buffer(g_color_buffer, surf_x/4 + (surf_y+4)*c_viewport_width, c_color_buffer_mode, w_tile_color[get_local_id(0) + 32]);
-            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
-                g_depth_buffer[surf_x/4 + surf_y*c_viewport_width] = w_tile_depth[get_local_id(0)];
-                g_depth_buffer[surf_x/4 + (surf_y+4)*c_viewport_width] = w_tile_depth[get_local_id(0) + 32];
-            }
-            if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0) {
-                g_stencil_buffer[surf_x/4 + surf_y*c_viewport_width] = w_tile_stencil[get_local_id(0)];
-                g_stencil_buffer[surf_x/4 + (surf_y+4)*c_viewport_width] = w_tile_stencil[get_local_id(0) + 32];
-            }
-            #endif
-            */
         }
-        
     }
+
 }

@@ -1295,6 +1295,30 @@ inline uint get_num_tris(GLenum mode, GLsizei count) {
     }
 }
 
+inline cl_ushort get_enabled_data(framebuffer_data_t framebuffer) {
+    cl_ushort enabled_data;
+
+    cl_ushort enabled_color = 0;
+    cl_ushort enabled_depth = 0;
+    cl_ushort enabled_stencil = 0;
+
+    enabled_color = 
+        _masks.color.r ? ENABLED_COLOR_CHANNEL_RED    : 0 |
+        _masks.color.g ? ENABLED_COLOR_CHANNEL_GREEN  : 0 |
+        _masks.color.b ? ENABLED_COLOR_CHANNEL_BLUE   : 0 |
+        _masks.color.a ? ENABLED_COLOR_CHANNEL_ALPHA  : 0 ;
+    
+    if (framebuffer.depth.mem != _rasterization_mem.globals.depthbuffer) 
+        enabled_depth = _masks.depth ? ENABLED_DEPTH_CHANNEL : 0;
+    
+    if (framebuffer.stencil.mem != _rasterization_mem.globals.stencilbuffer) 
+        enabled_stencil = _masks.stencil.front & 0xFFu;
+
+    enabled_data = enabled_color | enabled_depth | enabled_stencil;
+
+    return enabled_data;
+}
+
 inline uint32_t get_stencil_data() {
     uint32_t stencil_data = 0;
 
@@ -1360,6 +1384,7 @@ void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
         }
     }
 
+    /*
     cl_uint c_vertex_size = get_vertex_size();
     uint32_t varying = CURRENT_PROGRAM.varying_size;
     size_t size = c_vertex_size*end;
@@ -1367,12 +1392,24 @@ void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
     CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
     for (int vertex=0; vertex < end; ++vertex) {
         int offset = vertex*(c_vertex_size/sizeof(float));
-        printf("vertex=%d:\n", vertex);
+        printf("vertex=%d: ", vertex);
         for (int var=0; var < varying + 1; ++var) {
             printf("[%d](%f,%f,%f,%f) ", var, vertex_buffer[offset+var*4], vertex_buffer[offset+var*4+1], vertex_buffer[offset+var*4+2], vertex_buffer[offset+var*4+3]);
         }
         printf("\n");
     }
+    free(vertex_buffer);
+    
+    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
+        if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
+            size_t size = CURRENT_PROGRAM.uniforms_data[uniform].size * sizeof_type(CURRENT_PROGRAM.uniforms_data[uniform].type);
+            float* uniform_data = (float*) malloc(size);
+            CL_CHECK(clEnqueueReadBuffer(command_queue, CURRENT_PROGRAM.uniforms_mem[uniform], CL_TRUE, 0, size, uniform_data, 0, NULL, NULL));
+            for(int i=0; i<size/sizeof(float); ++i) printf("[%d]:%f,",i,uniform_data[i]);
+            printf("\n");
+        }
+    }
+    */
     // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) 
     // printf("\n");
 
@@ -1518,6 +1555,8 @@ void run_fragment_shader(GLenum mode) {
     cl_uint   c_depth_data = get_depth_data(); //get_depth_data(); 
     cl_uint   c_stencil_data = get_stencil_data(); 
 
+    cl_ushort c_enabled_data = get_enabled_data(framebuffer);
+
     enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.fine_counter, 0, 0, sizeof(zero), &zero);
 
     for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
@@ -1568,15 +1607,16 @@ void run_fragment_shader(GLenum mode) {
     // CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_clear_stencil),     &c_clear_stencil));
     CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_clear_write_values),     &c_clear_write_values));
     CL_CHECK(clSetKernelArg(kernel, 19 + arg_offset, sizeof(c_clear_enabled_data),     &c_clear_enabled_data));
-    CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
+    CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_enabled_data),    &c_enabled_data));
+    CL_CHECK(clSetKernelArg(kernel, 21 + arg_offset, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
     // CL_CHECK(clSetKernelArg(kernel, 22 + arg_offset, sizeof(c_deferred_clear),    &c_deferred_clear));
-    CL_CHECK(clSetKernelArg(kernel, 21 + arg_offset, sizeof(c_depth_data),    &c_depth_data));
+    CL_CHECK(clSetKernelArg(kernel, 22 + arg_offset, sizeof(c_depth_data),    &c_depth_data));
 
-    CL_CHECK(clSetKernelArg(kernel, 25 + arg_offset, sizeof(c_render_mode_flags), &c_render_mode_flags));
-    CL_CHECK(clSetKernelArg(kernel, 26 + arg_offset, sizeof(c_stencil_data), &c_stencil_data));
-    CL_CHECK(clSetKernelArg(kernel, 27 + arg_offset, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, 28 + arg_offset, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, 29 + arg_offset, sizeof(c_width_tiles),       &c_width_tiles));
+    CL_CHECK(clSetKernelArg(kernel, 26 + arg_offset, sizeof(c_render_mode_flags), &c_render_mode_flags));
+    CL_CHECK(clSetKernelArg(kernel, 27 + arg_offset, sizeof(c_stencil_data), &c_stencil_data));
+    CL_CHECK(clSetKernelArg(kernel, 28 + arg_offset, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 29 + arg_offset, sizeof(c_viewport_width),    &c_viewport_width));
+    CL_CHECK(clSetKernelArg(kernel, 30 + arg_offset, sizeof(c_width_tiles),       &c_width_tiles));
 
     local_work_size[1] = CONF_FINE_SUB_GROUPS;
     global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
@@ -2324,9 +2364,9 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
     cl_int    c_max_bin_segs = CONF_MAX_BIN_SEGS;
     cl_int    c_max_subtris = CONF_MAX_SUBTRIS;
     cl_int    c_max_tile_segs = CONF_MAX_TILE_SEGS;
-    CL_CHECK(clSetKernelArg(kernel, 22 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, 23 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_subtris));
-    CL_CHECK(clSetKernelArg(kernel, 24 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_tile_segs));
+    CL_CHECK(clSetKernelArg(kernel, 23 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_bin_segs));
+    CL_CHECK(clSetKernelArg(kernel, 24 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_subtris));
+    CL_CHECK(clSetKernelArg(kernel, 25 + fragment_kernel_num_args + offset, sizeof(cl_int),  &c_max_tile_segs));
 
 }
 

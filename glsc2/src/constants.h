@@ -162,6 +162,30 @@
 
 // Render modes
 
+
+// Mask modes
+#define ENABLED_STENCIL_CHANNEL_MASK  (0xFFu << 0)
+#define ENABLED_COLOR_CHANNEL_RED     (1 << 8)
+#define ENABLED_COLOR_CHANNEL_GREEN   (1 << 9)
+#define ENABLED_COLOR_CHANNEL_BLUE    (1 << 10)
+#define ENABLED_COLOR_CHANNEL_ALPHA   (1 << 11)
+#define ENABLED_DEPTH_CHANNEL         (1 << 12)
+
+#define ENABLED_COLOR_CHANNEL_MASK    \
+    ( \
+    ENABLED_COLOR_CHANNEL_RED   | \
+    ENABLED_COLOR_CHANNEL_GREEN | \
+    ENABLED_COLOR_CHANNEL_BLUE  | \
+    ENABLED_COLOR_CHANNEL_ALPHA   \
+    )
+
+#define ENABLED_MASK \
+    ( \
+        ENABLED_COLOR_CHANNEL_MASK | \
+        ENABLED_DEPTH_CHANNEL | \
+        ENABLED_STENCIL_CHANNEL_MASK | \
+    )
+
 // Clearing modes
 #define CLEAR_ENABLED_STENCIL_CHANNEL_MASK  (0xFFu << 0)
 #define CLEAR_ENABLED_COLOR_CHANNEL_RED     (1 << 8)
