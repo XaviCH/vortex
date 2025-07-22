@@ -1,9 +1,9 @@
 #ifdef __COMPILER_RELATIVE_PATH__
-#include <backend/utils/common.cl>
 #include <backend/types.cl>
+#include <backend/utils/common.cl>
 #else
-#include "glsc2/src/kernels/common.cl"
 #include "glsc2/src/backend/types.cl"
+#include "glsc2/src/backend/utils/common.cl"
 #endif
 
 /**

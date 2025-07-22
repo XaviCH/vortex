@@ -7,31 +7,36 @@
 // Byte size of local memory available for core
 #define DEVICE_LOCAL_MEM_SIZE 0xc000u
 
+#define DEVICE_NUM_CORES 36
+
+
 #define DEVICE_LOCAL_THREADS_LOG2 10
 
+//
+
+
+// if disable no images nor texture units where used
 #ifndef DEVICE_IMAGE_SUPPORT
 #define DEVICE_IMAGE_SUPPORT 0
 #endif
 
+#define DEVICE_SUB_GROUP_THREADS_LOG2 5
+
+// if disable the threads are executed as each local thread is independant of each other
 #ifndef DEVICE_SUB_GROUP_SUPPORT
-#define DEVICE_SUB_GROUP_SUPPORT 0
+#define DEVICE_SUB_GROUP_SUPPORT 1
 #endif
 
+// if disable the sub groups do not have read after write coherence between them
 #ifndef DEVICE_SUB_GROUP_RAW
 #define DEVICE_SUB_GROUP_RAW 1
 #endif
 
-#ifndef DEVICE_NUM_CORES
-#define DEVICE_NUM_CORES 15
+// if enabled the kernels could use intrinsicts as ballot, all, any, scan or reduce sub group operations. 
+#ifndef DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT
+#define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 0
 #endif
 
-// TODO DEVICE_SUB_GROUP_RAW
-// caos17 cluster josue
-// tfm
-
-#define DEVICE_HAS_SUB_GROUP_INTRINSICTS 1
-#define DEVICE_SUB_GROUP_THREADS_LOG2 5
-#define DEVICE_SUB_GROUP_MEM_COHERENCE 0 // 0 --> explicit coherence, 1 --> implicit coherence
 // ------
 // RENDER CONFIG
 // ------
@@ -40,11 +45,11 @@
 // KERNEL CONFIG
 // ------
 // Triangle Setup Configuration
-#define CONF_SETUP_SUB_GROUPS 2
+#define DEVICE_SETUP_SUB_GROUPS 2
 // Bin Raster Configuration
-#define CONF_BIN_SUB_GROUPS 16
-
-#define CONF_COARSE_SUB_GROUPS 16
+#define DEVICE_BIN_SUB_GROUPS 16
+// Coarse Raster Configuration
+#define DEVICE_COARSE_SUB_GROUPS 16
 
 #define CONF_FINE_SUB_GROUPS 16
 

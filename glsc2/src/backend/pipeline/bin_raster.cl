@@ -1,13 +1,17 @@
 #ifdef __COMPILER_RELATIVE_PATH__
+#include <backend/types.cl>
 #include <backend/utils/sub_group_mask.cl>
 #include <backend/utils/sync.cl>
-#include <backend/types.cl>
 #else
+#include "glsc2/src/backend/types.cl"
 #include "glsc2/src/backend/utils/sub_group_mask.cl"
 #include "glsc2/src/backend/utils/sync.cl"
-#include "glsc2/src/backend/types.cl"
 #endif
 
+// TODO: rm sub group dependency
+#ifndef DEVICE_SUB_GROUP_ENABLED
+#error Kernel requiere sub groups to work.
+#endif
 
 /**
     Processed triangles are going to be stored in bins, depending if they fall inside.
@@ -49,16 +53,16 @@ void bin_raster(
     local volatile int  s_out_total   [CR_MAXBINS_SQR];
     local volatile int  s_over_index  [CR_MAXBINS_SQR];
 
-    local volatile sub_group_mask_t  s_out_mask    [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
-    local volatile int  s_out_count   [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
-    local volatile int  s_tri_buf     [DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4];  // triangle ring buffer
+    local volatile sub_group_mask_t     s_out_mask    [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];          // +1 to avoid bank collisions
+    local volatile int                  s_out_count   [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];          // +1 to avoid bank collisions
+    local volatile int                  s_tri_buf     [DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4];   // triangle ring buffer
 
     local volatile uint s_batch_pos;
     local volatile uint s_buf_count;
     local volatile uint s_over_total;
     local volatile uint s_alloc_base;
 
-    #ifdef CONF_BIN_SUB_GROUP_ENABLED
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     local volatile uint l_temp [DEVICE_BIN_SUB_GROUPS];
     #else 
     local volatile uint l_temp [DEVICE_SUB_GROUP_THREADS*DEVICE_BIN_SUB_GROUPS];
@@ -148,11 +152,6 @@ void bin_raster(
                 buf_count = s_buf_count;
             }
 
-            // TODO: maybe move it to another part, here just creates noise
-            // clear its output buffers
-            for (int i=get_local_id(0); i < c_num_bins; i += get_local_size(0))
-                clear_sub_group_mask(&s_out_mask[get_local_id(1)][i]);
-
             // choose our triangle
             uint4 tri_data = (uint4){0, 0, 0, 0};
             if (local_id < buf_count)
@@ -168,15 +167,18 @@ void bin_raster(
                     data_idx = g_tri_header[data_idx].misc + subtri_idx;
 
                 // read triangle
-                #ifdef CONF_BIN_IMAGE_ENABLED
+                #ifdef DEVICE_IMAGE_ENABLED
                 tri_data = read_imageui(t_tri_header, data_idx);
                 #else
                 tri_data = *(((global uint4*) g_tri_header) + data_idx); 
                 #endif
             }
+
+            // clear its output buffers
+            for (int i=get_local_id(0); i < c_num_bins; i += get_local_size(0))
+                clear_sub_group_mask(&s_out_mask[get_local_id(1)][i]);
             
             // setup bounding box and edge functions, and rasterize
-            // TODO: Sub group code in this part heavily relies on CUDA warp sync, refactorit to make it more OpenCL friendly.
             int lox, loy, hix, hiy;
             if (local_id < buf_count) {
                 int v0x = add_s16lo_s16lo(tri_data.x, c_viewport_width  * (CR_SUBPIXEL_SIZE >> 1));
@@ -195,16 +197,19 @@ void bin_raster(
                 sub_group_mask_t bit;
                 clear_sub_group_mask(&bit);
                 set_bit_sub_group_mask(&bit, get_sub_group_local_id());
-                // bit.mask = 1 << get_local_id(0);
 
-                #ifdef CONF_BIN_SUB_GROUP_ENABLED
-                uint activemask = sub_group_activemask();
-                bool multi = (hix != lox || hiy != loy);
-                if (sub_group_masked_any(multi, activemask)) {
-                    bool _complex = (hix > lox+1 || hiy > loy+1);
-                    if (sub_group_masked_any(_complex, activemask))
-                #endif
-                    {
+                {
+                    // TODO: maybe for 1 bin can be optimized with intrinsicts and avoid atomics.
+                    if (hix == lox || hiy == loy) { // only one bin afected
+                        int bin_idx = lox + c_width_bins * loy;
+                        atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx], bit);
+                    } else if ((hix <= lox+1 && hiy <= loy+1)) { // 2x2 bin afected
+                        int bin_idx = lox + c_width_bins * loy;
+                        atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx], bit);
+                        if (hix > lox) atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx + 1], bit);
+                        if (hiy > loy) atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx + c_width_bins], bit);
+                        if (hix > lox && hiy > loy) atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx + c_width_bins + 1], bit);
+                    } else {
                         int d12x = d02x - d01x, d12y = d02y - d01y;
                         v0x -= lox << bin_log, v0y -= loy << bin_log;
 
@@ -236,24 +241,8 @@ void bin_raster(
                         }
                         while (currPtr != endPtr);
                     }
-                #ifdef CONF_BIN_SUB_GROUP_ENABLED
-                    else {
-                        int bin_idx = lox + c_width_bins * loy;
-                        atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx], bit);
-                        if (hix > lox) atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx + 1], bit);
-                        if (hiy > loy) atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx + c_width_bins], bit);
-                        if (hix > lox && hiy > loy) atomic_or((local uint*)&s_out_mask[get_local_id(1)][bin_idx + c_width_bins + 1], bit);
-                    }
-                } else {
-                    int bin_idx = lox + c_width_bins * loy;
-                    int tmp_idx;
-                    do {
-                        int tmp_idx = sub_group_broadcast_first_ui(bin_idx);
-                        s_out_mask[get_sub_group_local_id()][tmp_idx] = sub_group_ballot(bin_idx == tmp_idx);
-                    } while(bin_idx != tmp_idx);
-                    
                 }
-                #endif
+
             }
 
             // count per-bin contributions
@@ -282,12 +271,12 @@ void bin_raster(
                 // exc cumm scan of all overflows in the work group 
                 uint over_total;
                 uint exc_scan_over_index;
-                #ifdef CONF_BIN_SUB_GROUP_ENABLED
+                #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
                 {
-                    exc_scan_over_index = popcount(sub_group_ballot(overflow) & getLaneMaskLt());
+                    exc_scan_over_index = popcount_sub_group_mask(and_sub_group_mask(ballot_sub_group_mask(overflow),get_lane_sub_group_mask_lt()));
                     if (get_sub_group_local_id() == get_sub_group_size()-1)
                         over_total = atomic_add(&s_over_total, exc_scan_over_index + overflow);
-                    over_total = sub_group_broadcast_ui(over_total, get_sub_group_size()-1);
+                    over_total = sub_group_broadcast(over_total, get_sub_group_size()-1);
                 }
                 #else
                 {

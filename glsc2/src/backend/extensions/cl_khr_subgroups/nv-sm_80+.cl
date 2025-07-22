@@ -1,3 +1,11 @@
+inline uint __attribute__((overloadable)) sub_group_broadcast (uint x, uint sub_group_local_id) {
+    uint r;
+    asm volatile(
+        "shfl.sync.idx.b32  %0, %1, %2, 0x1f, 0xffffffff;"
+        : "=r"(r) : "r"(x), "r"(sub_group_local_id));
+    return r;
+}
+
 
 inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add (uint x) {
     uint r;
@@ -61,6 +69,14 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min (uint x) 
         "shfl.sync.up.b32  dst|p, %0, 0x10,0x0, 0xffffffff;"
         "@p min.u32        %0, dst, %0;"
         "}"
+        : "=r"(r) : "r"(x));
+    return r;
+}
+
+inline uint __attribute__((overloadable)) sub_group_reduce_min (uint x) {
+    uint r;
+    asm volatile(
+        "redux.sync.min.u32 %0, %1, 0xffffffff;"
         : "=r"(r) : "r"(x));
     return r;
 }

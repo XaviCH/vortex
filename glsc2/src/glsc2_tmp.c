@@ -167,8 +167,8 @@ vertex_attribute_data_t _vertex_attribute_data[MAX_VERTEX_ATTRIBS];
 cl_mem _vertex_attribute_data_mem;
 cl_mem _dummy_buffer;
 
-#include "kernels/triangle_setup.ocl.c"
-#include "kernels/bin_raster.ocl.c"
+#include "backend/pipeline/triangle_setup.o.c"
+#include "backend/pipeline/bin_raster.o.c"
 #include "kernels/coarse_raster.ocl.c"
 #include "kernels/force_clear.ocl.c"
 
@@ -192,8 +192,8 @@ void __context_constructor__() {
     strided_write_program                   = createProgramWithBinary(KERNEL_STRIDED_WRITE_BIN,                    sizeof(KERNEL_STRIDED_WRITE_BIN));
     clear_program                           = createProgramWithBinary(KERNEL_CLEAR_BIN,                            sizeof(KERNEL_CLEAR_BIN));
 
-    _rasterization_programs.triangle_setup   = createProgramWithBinary(triangle_setup_ocl, triangle_setup_ocl_len);
-    _rasterization_programs.bin_raster       = createProgramWithBinary(bin_raster_ocl, bin_raster_ocl_len);
+    _rasterization_programs.triangle_setup   = createProgramWithBinary(triangle_setup_o, triangle_setup_o_len);
+    _rasterization_programs.bin_raster       = createProgramWithBinary(bin_raster_o, bin_raster_o_len);
     _rasterization_programs.coarse_raster    = createProgramWithBinary(coarse_raster_ocl, coarse_raster_ocl_len);
     _rasterization_programs.force_clear      = createProgramWithBinary(force_clear_ocl, force_clear_ocl_len);
 
@@ -370,7 +370,7 @@ void __context_constructor__() {
     #ifdef CONF_BIN_IMAGE_ENABLED
     arg_offset = 1;
     #endif
-    cl_uint c_bin_batch_sz = CONF_BIN_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS;
+    cl_uint c_bin_batch_sz = DEVICE_BIN_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS;
     cl_uint c_max_bin_segs = CONF_MAX_BIN_SEGS;
 
 
@@ -1303,10 +1303,10 @@ inline cl_ushort get_enabled_data(framebuffer_data_t framebuffer) {
     cl_ushort enabled_stencil = 0;
 
     enabled_color = 
-        _masks.color.r ? ENABLED_COLOR_CHANNEL_RED    : 0 |
-        _masks.color.g ? ENABLED_COLOR_CHANNEL_GREEN  : 0 |
-        _masks.color.b ? ENABLED_COLOR_CHANNEL_BLUE   : 0 |
-        _masks.color.a ? ENABLED_COLOR_CHANNEL_ALPHA  : 0 ;
+        (_masks.color.r ? ENABLED_COLOR_CHANNEL_RED    : 0) |
+        (_masks.color.g ? ENABLED_COLOR_CHANNEL_GREEN  : 0) |
+        (_masks.color.b ? ENABLED_COLOR_CHANNEL_BLUE   : 0) |
+        (_masks.color.a ? ENABLED_COLOR_CHANNEL_ALPHA  : 0) ;
     
     if (framebuffer.depth.mem != _rasterization_mem.globals.depthbuffer) 
         enabled_depth = _masks.depth ? ENABLED_DEPTH_CHANNEL : 0;
@@ -1315,6 +1315,8 @@ inline cl_ushort get_enabled_data(framebuffer_data_t framebuffer) {
         enabled_stencil = _masks.stencil.front & 0xFFu;
 
     enabled_data = enabled_color | enabled_depth | enabled_stencil;
+
+    printf("ecolor=%x, edepth=%x, estencil=%x\n", enabled_color, enabled_depth, enabled_stencil);
 
     return enabled_data;
 }
@@ -1384,7 +1386,7 @@ void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
         }
     }
 
-    /*
+    
     cl_uint c_vertex_size = get_vertex_size();
     uint32_t varying = CURRENT_PROGRAM.varying_size;
     size_t size = c_vertex_size*end;
@@ -1409,7 +1411,7 @@ void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
             printf("\n");
         }
     }
-    */
+    
     // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) 
     // printf("\n");
 
@@ -1432,7 +1434,7 @@ void run_bin_raster(GLenum mode, GLsizei count) {
     cl_uint c_viewport_width = framebuffer.width;
 
     uint32_t arg_offset;
-    #ifdef CONF_BIN_IMAGE_ENABLED
+    #ifdef DEVICE_IMAGE_ENABLED
     arg_offset = 1;
     #else
     arg_offset = 0;
@@ -1457,10 +1459,14 @@ void run_bin_raster(GLenum mode, GLsizei count) {
     CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_viewport_width),    &c_viewport_width));
     CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_width_bins),        &c_width_bins));
 
-    local_work_size[1] = CONF_BIN_SUB_GROUPS;
+    local_work_size[1] = DEVICE_BIN_SUB_GROUPS;
     global_work_size[0] =  local_work_size[0] * CR_BIN_STREAMS_SIZE;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+
+    cl_uint test;
+    clEnqueueReadBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, CL_TRUE, 0, sizeof(cl_uint), &test, 0, NULL, NULL);
+    printf("run bin raster: %d\n", test);
 }
 
 void run_coarse_raster(GLenum mode, GLsizei count) {
@@ -1498,7 +1504,7 @@ void run_coarse_raster(GLenum mode, GLsizei count) {
 
     enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.coarse_counter, 0, 0, sizeof(zero), &zero);
     enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_active_tiles, 0, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, 0, 0, sizeof(zero), &zero);
+    // enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, 0, 0, sizeof(zero), &zero);
     enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_tile_segs, 0, 0, sizeof(zero), &zero);
 
     CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_deferred_clear),    &c_deferred_clear));
@@ -1513,6 +1519,10 @@ void run_coarse_raster(GLenum mode, GLsizei count) {
     global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
     global_work_size[1] = local_work_size[1] * 1;
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+
+    cl_uint test;
+    clEnqueueReadBuffer(command_queue, _rasterization_mem.atomics.num_tile_segs, CL_TRUE, 0, sizeof(cl_uint), &test, 0, NULL, NULL);
+    printf("run coarse raster: %d\n", test);
 }
 
 void run_fragment_shader(GLenum mode) {
@@ -1556,6 +1566,8 @@ void run_fragment_shader(GLenum mode) {
     cl_uint   c_stencil_data = get_stencil_data(); 
 
     cl_ushort c_enabled_data = get_enabled_data(framebuffer);
+
+    printf("dclear=%x, clear_mask=%x, draw_mask=%x\n", c_deferred_clear, c_clear_enabled_data, c_enabled_data);
 
     enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.fine_counter, 0, 0, sizeof(zero), &zero);
 
@@ -1674,7 +1686,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     cl_uint c_viewport_height = framebuffer.height;
     cl_uint c_viewport_width = framebuffer.width;
 
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(c_num_tris), &c_num_tris);
 
     CL_CHECK(clSetKernelArg(kernel, 5, sizeof(c_num_tris),          &c_num_tris));
     CL_CHECK(clSetKernelArg(kernel, 7, sizeof(c_render_mode_flags), &c_render_mode_flags));
@@ -1683,7 +1695,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
     CL_CHECK(clSetKernelArg(kernel, 10, sizeof(c_viewport_height),   &c_viewport_height));
     CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_width),    &c_viewport_width));
 
-    local_work_size[1] = CONF_SETUP_SUB_GROUPS;
+    local_work_size[1] = DEVICE_SETUP_SUB_GROUPS;
     global_work_size[0] = local_work_size[0] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
     global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
@@ -1750,8 +1762,8 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     cl_uint c_viewport_height = framebuffer.height;
     cl_uint c_viewport_width = framebuffer.width;
 
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(zero), &zero);
-    cl_mem g_index_buffer = createBuffer(CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, (count)*sizeof_type(type)*2, indices);
+    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_subtris, 0, 0, sizeof(c_num_tris), &c_num_tris);
+    cl_mem g_index_buffer = createBuffer(CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, (count)*sizeof_type(type), indices);
 
     CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_index_buffer),      &g_index_buffer));
     CL_CHECK(clSetKernelArg(kernel, 6, sizeof(c_num_tris),          &c_num_tris));
@@ -1761,7 +1773,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_height),   &c_viewport_height));
     CL_CHECK(clSetKernelArg(kernel, 12, sizeof(c_viewport_width),    &c_viewport_width));
 
-    local_work_size[1] = CONF_SETUP_SUB_GROUPS;
+    local_work_size[1] = DEVICE_SETUP_SUB_GROUPS;
     global_work_size[0] = local_work_size[0] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
     global_work_size[1] = local_work_size[1] * ((c_num_tris-1) / (local_work_size[0]*local_work_size[1])+1);
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));

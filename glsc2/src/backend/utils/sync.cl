@@ -9,9 +9,15 @@
 #define BACKEND_UTILS_SYNC_CL
 
 #ifdef __COMPILER_RELATIVE_PATH__
-#include <backend/utils/common.cl>
+    #include <backend/utils/common.cl>
+
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
+    #include <backend/extensions/cl_khr_subgroups/include.cl>
+    #endif
+
 #else
-#include "glsc2/src/backend/utils/common.cl"
+    #include "glsc2/src/backend/utils/common.cl"
 #endif
 
 #ifdef DEVICE_SUB_GROUP_RAW_ENABLED
@@ -27,6 +33,24 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add(uint valu
         }
     }
     return value;
+}
+
+inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min(uint value, local volatile uint* sg_temp) {
+    local volatile uint* ptr = &sg_temp[get_sub_group_local_id()];
+    *ptr = value;
+    #pragma unroll
+    for(int target=1; target < get_sub_group_size(); target *= 2) {
+        if (get_sub_group_local_id() >= target) {
+            value = min(value, ptr[-target]);    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+
+inline uint __attribute__((overloadable)) sub_group_reduce_min(uint value, local volatile uint* l_temp) {
+    sub_group_scan_inclusive_min(value, l_temp);
+    return l_temp[get_local_linear_size()-1];
 }
 
 #endif
@@ -52,39 +76,65 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
     return result;
 }
 
-
 inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
     uint result;
 
     uint id = get_local_linear_id();
-
     local volatile uint* ptr = &l_temp[id];
-    *ptr    = value;
 
-    #pragma unroll
-    for(uint i=1; i<get_local_size(0); i=i*2) {
-        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+    // reduce the use of local memory by using intra subgroup register operations.
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        value = sub_group_scan_inclusive_add(value);
+        if (get_sub_group_local_id() == get_sub_group_size()-1)
+            l_temp[get_sub_group_id()] = value;
+        
+        // TODO: Generalize for get_num_sub_groups > get_sub_group_size
+        #pragma unroll
+        for (int scan_size = get_num_sub_groups(); scan_size>0; scan_size/=get_sub_group_size()) {
+            barrier(CLK_LOCAL_MEM_FENCE);
+            // subgroup register scan until scan results <= num_sub_groups
+            if (get_sub_group_id()*get_sub_group_size() < scan_size) {
+                uint temp = get_sub_group_local_id() < scan_size ? l_temp[get_sub_group_local_id()] : 0;
+                temp = sub_group_scan_inclusive_add(temp);
+                l_temp[get_sub_group_local_id()] = temp;
+                // if (get_sub_group_local_id() == get_sub_group_size()-1)
+            }
+        }
+
         barrier(CLK_LOCAL_MEM_FENCE);
-        #endif
-        if (id >= i) {
-            value += ptr[-i];
-            *ptr = value;
+        value += get_sub_group_id() ? l_temp[get_sub_group_id()-1] : 0;
+    }
+    #else
+    {
+        *ptr = value;
+
+        #pragma unroll
+        for(uint i=1; i<get_local_size(0); i=i*2) {
+            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+            barrier(CLK_LOCAL_MEM_FENCE);
+            #endif
+            if (id >= i) {
+                value += ptr[-i];
+                *ptr = value;
+            }
+        }
+
+        #pragma unroll
+        for(uint i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
+            barrier(CLK_LOCAL_MEM_FENCE);
+            if (id >= i) {
+                value += ptr[-i];
+                *ptr = value;
+            }
         }
     }
-
-    #pragma unroll
-    for(uint i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
-        barrier(CLK_LOCAL_MEM_FENCE);
-        if (id >= i) {
-            value += ptr[-i];
-            *ptr = value;
-        }
-    }
+    #endif
 
     return value;
 }
 
-inline uint local_scan_inclusive_min_ui(uint value, local volatile uint* l_temp) {
+inline uint __attribute__((overloadable)) local_scan_inclusive_min(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
     *ptr = value;
@@ -129,6 +179,7 @@ inline uint local_sized_reduce_min_sized_ui(uint value, local volatile uint* l_t
 /**
     PRE: All threads are active when function is called.
  */
+/*
 inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
     uint result;
 
@@ -161,15 +212,14 @@ inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
 
     return result;
 }
+*/
 
 
-/*
-inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
-    local_scan_inclusive_min_ui(value, l_temp);
+inline uint __attribute__((overloadable)) local_reduce_min(uint value, local volatile uint* l_temp) {
+    local_scan_inclusive_min(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
     return l_temp[get_local_linear_size()-1];
 }
-*/
 
 
 
@@ -209,7 +259,7 @@ inline uint local_scan_inclusive_or_1dim_ui(uint value, local volatile uint* l_t
     return value;
 }
 
-inline uint local_reduce_or_1dim_ui(uint value, local volatile uint* l_temp) {
+inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local volatile uint* l_temp) {
     local_scan_inclusive_or_1dim_ui(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
     return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
@@ -220,7 +270,8 @@ inline uint local_reduce_or_1dim_ui(uint value, local volatile uint* l_temp) {
         For DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1 is not required that all threads were active. 
         Otherwise all threads in work group must be active. 
  */
-inline uint local_ballot_1dim(bool value, local volatile uint* l_temp) {
+
+inline uint local_1dim_ballot(bool value, local volatile uint* l_temp) {
     uint mask;
 
     #if DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1
@@ -229,12 +280,13 @@ inline uint local_ballot_1dim(bool value, local volatile uint* l_temp) {
     }
     #else
     {
-        mask = local_reduce_or_1dim_ui((value ? 1u : 0u) << get_local_id(0), l_temp);
+        mask = local_1dim_reduce_or((value ? 1u : 0u) << get_local_id(0), l_temp);
     }
     #endif
 
     return mask;
 }
+
 
 inline uint local_scan_inclusive_max_1dim_ui(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);
