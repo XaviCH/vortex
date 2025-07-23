@@ -244,13 +244,15 @@ inline uint local_reduce_and_2dim_ui(uint value, local volatile uint* l_temp) {
     return l_temp[get_local_linear_size() - get_local_size(0) + get_local_id(0)];
 }
 
-inline uint local_scan_inclusive_or_1dim_ui(uint value, local volatile uint* l_temp) {
+inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
     *ptr = value;
     #pragma unroll
     for(int i=1; i<get_local_size(0); i=i*2) {
+        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
         barrier(CLK_LOCAL_MEM_FENCE);
+        #endif
         if (local_id >= i) {
             value = value | ptr[-i];    
             *ptr = value;
@@ -260,8 +262,10 @@ inline uint local_scan_inclusive_or_1dim_ui(uint value, local volatile uint* l_t
 }
 
 inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local volatile uint* l_temp) {
-    local_scan_inclusive_or_1dim_ui(value, l_temp);
+    local_1dim_scan_inclusive_or(value, l_temp);
+    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
     barrier(CLK_LOCAL_MEM_FENCE);
+    #endif
     return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
 }
 
@@ -274,14 +278,10 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
 inline uint local_1dim_ballot(bool value, local volatile uint* l_temp) {
     uint mask;
 
-    #if DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1
-    {
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
         mask = sub_group_ballot(value);
-    }
     #else
-    {
         mask = local_1dim_reduce_or((value ? 1u : 0u) << get_local_id(0), l_temp);
-    }
     #endif
 
     return mask;

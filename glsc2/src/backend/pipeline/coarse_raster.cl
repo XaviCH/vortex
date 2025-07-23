@@ -649,8 +649,9 @@ void coarse_raster(
 
             for (int emit_in_bin = thread_local_id; emit_in_bin < total_emits; emit_in_bin += get_local_linear_size())
             {
-                // int emit_in_bin = emit_in_bin_chunk + thread_local_id;
-                
+                #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+                    #error Required raw support.
+                #endif
                 // Find tile in bin.
 
                 local uint* tile_base = (local uint*) &s_tile_emit_prefix_sum[0];
@@ -685,30 +686,18 @@ void coarse_raster(
                 // Find thread in warp.
 
                 int thread_in_warp = 0;
-                int pop = popcount(emit_mask & 0xFFFF);
-                bool pred = (emit_in_warp >= pop);
-                if (pred) emit_in_warp -= pop;
-                if (pred) emit_mask >>= 0x10;
-                if (pred) thread_in_warp += 0x10;
-
-                pop = popcount(emit_mask & 0xFF);
-                pred = (emit_in_warp >= pop);
-                if (pred) emit_in_warp -= pop;
-                if (pred) emit_mask >>= 0x08;
-                if (pred) thread_in_warp += 0x08;
-
-                pop = popcount(emit_mask & 0xF);
-                pred = (emit_in_warp >= pop);
-                if (pred) emit_in_warp -= pop;
-                if (pred) emit_mask >>= 0x04;
-                if (pred) thread_in_warp += 0x04;
-
-                pop = popcount(emit_mask & 0x3);
-                pred = (emit_in_warp >= pop);
-                if (pred) emit_in_warp -= pop;
-                if (pred) emit_mask >>= 0x02;
-                if (pred) thread_in_warp += 0x02;
-
+                int pop;
+                #pragma unroll
+                for(int bits = DEVICE_SUB_GROUP_THREADS/2; bits > 1; bits/=2) {
+                    uint mask = (1u << bits) - 1; 
+                    pop = popcount(emit_mask & mask);
+                    if (emit_in_warp >= pop) {
+                        emit_in_warp -= pop;
+                        emit_mask >>= bits;
+                        thread_in_warp += bits;
+                    }
+                }
+                
                 if (emit_in_warp >= (emit_mask & 1))
                     thread_in_warp++;
 
@@ -748,7 +737,6 @@ void coarse_raster(
             }
 
             // Tile per thread: Fix previous segment's next-pointer and update s_tile_stream_curr_ofs.
-            // TODO: rm this sync, maybe unecessary ??
             barrier(CLK_LOCAL_MEM_FENCE);
             for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += get_local_linear_size())
             {
@@ -784,154 +772,106 @@ void coarse_raster(
 
         barrier(CLK_LOCAL_MEM_FENCE);
 
-        #ifdef CONF_SUB_GROUP_ENABLED
-        for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += get_local_linear_size())
-        #else
         for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
-        #endif
         {
-            #ifndef CONF_SUB_GROUP_ENABLED
-            int tile_in_bin = tile_in_bin_chunk + thread_local_id;
+            bool req_predicate;
+            #if (CR_BIN_SQR%DEVICE_SUB_GROUP_THREADS == 0 && (DEVICE_SUB_GROUP_RAW || DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT))
+                req_predicate = false;
+            #else
+                req_predicate = true;
             #endif
-            bool is_tile_in_bin = tile_in_bin < CR_BIN_SQR;
-            int ofs;
+
+            int tile_in_bin = tile_in_bin_chunk + thread_local_id;
+            bool pass = tile_in_bin >= CR_BIN_SQR;
+
+            if (!req_predicate && pass)
+                break;
+
+            int ofs, tile_x, tile_y;
             bool force;
-            if (is_tile_in_bin) {
 
-                int tile_x = tile_in_bin & (CR_BIN_SIZE - 1);
-                int tile_y = tile_in_bin >> CR_BIN_LOG2;
-                bool force = (c_deferred_clear && tile_x <= max_tile_x_in_bin && tile_y <= max_tile_y_in_bin); // check this
-
-                int ofs;
-
-                #ifndef CONF_SUB_GROUP_ENABLED
-                if (is_tile_in_bin)
-                #endif
-                {
-                    ofs = s_tile_stream_curr_ofs[tile_in_bin];
-                }
-                int seg_idx = (ofs - 1) >> CR_TILE_SEG_LOG2;
-                int seg_count = ofs & (CR_TILE_SEG_SIZE - 1);
-
-                if (ofs >= 0)
-                    g_tile_seg_next[seg_idx] = -1;
-                else if (force)
-                {
-                    s_tile_stream_curr_ofs[tile_in_bin] = 0;
-                    g_tile_first_seg[bin_tile_idx + tile_x + tile_y * c_width_tiles] = -1;
-                }
-
-                if (seg_count != 0)
-                    g_tile_seg_count[seg_idx] = seg_count;
-            
+            if (!pass) {
+                tile_x = tile_in_bin & (CR_BIN_SIZE - 1);
+                tile_y = tile_in_bin >> CR_BIN_LOG2;
+                force = (c_deferred_clear && tile_x <= max_tile_x_in_bin && tile_y <= max_tile_y_in_bin); // check this
+                ofs = s_tile_stream_curr_ofs[tile_in_bin];
             }
 
-            uint bitmask = local_1dim_ballot(ofs >= 0 || force || is_tile_in_bin, l_temp);
-            // uint bitmask = sub_group_ballot(ofs >= 0 || force || is_tile_in_bin);
+            uint bitmask = local_1dim_ballot((ofs >= 0 || force) && !pass, l_temp);
+
+            if (pass)
+                break;
 
             s_scan_temp[0][(tile_in_bin >> 5) + 16] = popcount(bitmask);
+
+            int seg_idx = (ofs - 1) >> CR_TILE_SEG_LOG2;
+            int seg_count = ofs & (CR_TILE_SEG_SIZE - 1);
+
+            if (ofs >= 0)
+                g_tile_seg_next[seg_idx] = -1;
+            else if (force)
+            {
+                s_tile_stream_curr_ofs[tile_in_bin] = 0;
+                g_tile_first_seg[bin_tile_idx + tile_x + tile_y * c_width_tiles] = -1;
+            }
+
+            if (seg_count != 0)
+                g_tile_seg_count[seg_idx] = seg_count;
+            
         }
 
         // First warp: Scan-8.
         // One thread: Allocate space for active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);
-        // #ifdef CONF_SUB_GROUP_ENABLED
-        // if (thread_local_id < get_local_size(0))
-        // #endif
+
+        if (thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS)
         {
+            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+                #error Required raw support.
+            #endif
+
             local volatile uint* p = &s_scan_temp[0][thread_local_id + 16];
-            uint sum = 0;
-            if (thread_local_id < CR_BIN_SQR / 32) {
-                // s_scan_temp[0][thread_local_id + 8] = 0;
-                sum = s_scan_temp[0][thread_local_id + 16];
-            }
-            // uint scan_sum;
-            // #ifdef CONF_SUB_GROUP_ENABLED
-            // #else
-            //     scan_sum = local_scan_inclusive_add_1dim_ui(sum, l_temp);
-            // #endif
-            // sum = sub_group_scan_inclusive_add_ui(sum);
+            uint sum = s_scan_temp[0][thread_local_id + 16];
+
             #pragma unroll
-            for (int i=1; i*DEVICE_SUB_GROUP_THREADS < CR_BIN_SQR; i*=2) {
+            for (int i=1; i < CR_BIN_SQR/DEVICE_SUB_GROUP_THREADS; i*=2) {
                 sum += p[-i], p[0] = sum;
-                
-                // last iter do not sync
-                if (i*DEVICE_SUB_GROUP_THREADS*2 < CR_BIN_SQR) 
-                    barrier(CLK_LOCAL_MEM_FENCE);
             }
-            /*
-            #if (CR_BIN_SQR > 1 * 32)
-            if (thread_local_id < CR_BIN_SQR / 32) {
-                sum += p[-1], p[0] = sum;
-            }
-            barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
-            #if (CR_BIN_SQR > 2 * 32)
-            if (thread_local_id < CR_BIN_SQR / 32) {
-                sum += p[-2], p[0] = sum;
-            }
-            barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
-            #if (CR_BIN_SQR > 4 * 32)
-            if (thread_local_id < CR_BIN_SQR / 32) {
-                sum += p[-4], p[0] = sum;
-            }
-            barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
-            */
-            if (thread_local_id == CR_BIN_SQR / 32 - 1)
+
+            if (thread_local_id == CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS - 1)
                 s_first_active_idx = atomic_add(a_num_active_tiles, sum);
         }
 
         // Tile per thread: Output active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);
-        #ifdef CONF_SUB_GROUP_ENABLED
-        for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += DEVICE_COARSE_SUB_GROUPS * 32)
-        #else
-        for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
-        #endif
+
+        for(int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
         {
-            #ifndef CONF_SUB_GROUP_ENABLED
+            bool req_predicate;
+            #if (CR_BIN_SQR%DEVICE_SUB_GROUP_THREADS == 0 && (DEVICE_SUB_GROUP_RAW || DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT))
+                req_predicate = false;
+            #else
+                req_predicate = true;
+            #endif
+
             int tile_in_bin = tile_in_bin_chunk + thread_local_id;
-            bool enable = tile_in_bin < CR_BIN_SQR;
-            #endif
+            bool pass = tile_in_bin >= CR_BIN_SQR || s_tile_stream_curr_ofs[tile_in_bin] < 0;
 
-            bool pass = 1;
-            #ifndef CONF_SUB_GROUP_ENABLED
-            if (enable)
-            #endif
-            {
-                pass = s_tile_stream_curr_ofs[tile_in_bin] < 0;
-            }
+            if (!req_predicate && pass)
+                continue;
 
-            #ifdef CONF_SUB_GROUP_ENABLED
+            uint ballot = local_1dim_ballot(!pass, l_temp);
+
             if (pass)
                 continue;
-            #endif
 
             int active_idx = s_first_active_idx;
-            #ifndef CONF_SUB_GROUP_ENABLED
-            if (!pass)
-            #endif
-            {
-                active_idx += s_scan_temp[0][(tile_in_bin >> 5) + 15];
-            }
+            active_idx += s_scan_temp[0][(tile_in_bin / DEVICE_SUB_GROUP_THREADS) + 15];
+            active_idx += popcount(ballot & getLaneMaskLt());
 
-            uint activemask;
-            #ifdef CONF_SUB_GROUP_ENABLED
-            activemask = sub_group_activemask();
-            #else
-            activemask = local_1dim_reduce_or((pass ? 0 : 1) << get_local_id(0), l_temp);
-            #endif
-            active_idx += popcount(activemask & getLaneMaskLt());
-            #ifndef CONF_SUB_GROUP_ENABLED
-            if (!pass)
-            #endif
-            {
-                g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
-            }
+            g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
         }
 
     }
