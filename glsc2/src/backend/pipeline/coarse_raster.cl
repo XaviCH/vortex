@@ -8,6 +8,356 @@
 #include "glsc2/src/backend/utils/sync.cl"
 #endif
 
+
+inline void extract_tri_data(
+    uint4 tri_data, int origin_x, int origin_y, 
+    int* v0x, int* v0y, int* d01x, int* d01y, int* d02x, int* d02y
+) {
+    *v0x = sub_s16lo_s16lo(tri_data.x, origin_x);
+    *v0y = sub_s16hi_s16lo(tri_data.x, origin_y);
+    *d01x = sub_s16lo_s16lo(tri_data.y, tri_data.x);
+    *d01y = sub_s16hi_s16hi(tri_data.y, tri_data.x);
+    *d02x = sub_s16lo_s16lo(tri_data.z, tri_data.x);
+    *d02y = sub_s16hi_s16hi(tri_data.z, tri_data.x);
+}
+
+inline void compute_tile_aabb(
+    int v0x, int v0y, int d01x, int d01y, int d02x, int d02y, 
+    int tile_log, int max_tile_x_in_bin, int max_tile_y_in_bin,
+    int* lox, int* loy, int* hix, int* hiy
+) {
+    *lox = add_clamp_0_x((v0x + min_min(d01x, 0, d02x)) >> tile_log, 0, max_tile_x_in_bin);
+    *loy = add_clamp_0_x((v0y + min_min(d01y, 0, d02y)) >> tile_log, 0, max_tile_y_in_bin);
+    *hix = add_clamp_0_x((v0x + max_max(d01x, 0, d02x)) >> tile_log, 0, max_tile_x_in_bin);
+    *hiy = add_clamp_0_x((v0y + max_max(d01y, 0, d02y)) >> tile_log, 0, max_tile_y_in_bin);
+}
+
+#if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
+inline void sub_group_emit_triangle_mask(
+    uint4 tri_data, 
+    local uint* s_warp_emit_mask, 
+    local volatile uint* l_temp, 
+    int tri_idx,
+    int origin_x, int origin_y,
+    int max_tile_x_in_bin, int max_tile_y_in_bin,
+    int tile_log
+) {
+
+    bool emit = tri_idx != -1;
+
+    uint emitions = local_1dim_ballot(emit, l_temp);
+    if (emitions == 0) return;
+
+    int v0x, v0y, d01x, d01y, d02x, d02y;
+    if (emit)
+        extract_tri_data(tri_data, origin_x, origin_y, &v0x, &v0y, &d01x, &d01y, &d02x, &d02y);
+
+    int lox, loy, hix, hiy;
+    if (emit)
+        compute_tile_aabb(
+            v0x, v0y, d01x, d01y, d02x, d02y, 
+            tile_log, max_tile_x_in_bin, max_tile_y_in_bin, 
+            &lox, &loy, &hix, &hiy);
+
+    int sizex, sizey, area;
+    if (emit)
+    {
+        sizex = add_sub(hix, 1, lox);
+        sizey = add_sub(hiy, 1, loy);
+        area = sizex * sizey;
+    }
+
+    local uint* curr_ptr;
+    int ptr_y_inc;
+    uint mask_bit;
+    if (emit)
+    {
+        curr_ptr = &s_warp_emit_mask[get_local_id(1) * (CR_BIN_SQR + 1) + lox + (loy << CR_BIN_LOG2)];
+        ptr_y_inc = CR_BIN_SIZE - sizex;
+        mask_bit = 1 << get_local_id(0);
+    }
+
+    uint small_tile = local_1dim_ballot(sizex <= 2 && sizey <= 2, l_temp);
+
+    if (popcount(small_tile) == get_sub_group_size()) {
+        atomic_or(curr_ptr, mask_bit);
+        if (sizex == 2) atomic_or(curr_ptr + 1, mask_bit);
+        if (sizey == 2) atomic_or(curr_ptr + CR_BIN_SIZE, mask_bit);
+        if (sizex == 2 && sizey == 2) atomic_or(curr_ptr + 1 + CR_BIN_SIZE, mask_bit);
+        return;
+    }
+
+    // Initialize edge functions.
+    int d12x, d12y, b01, b02, b12;
+    if (emit) {
+        d12x = d02x - d01x;
+        d12y = d02y - d01y;
+        v0x -= lox << tile_log;
+        v0y -= loy << tile_log;
+
+        int t01 = v0x * d01y - v0y * d01x;
+        int t02 = v0y * d02x - v0x * d02y;
+        int t12 = d01x * d12y - d01y * d12x - t01 - t02;
+        b01 = add_sub(t01 >> tile_log, max(d01x, 0), min(d01y, 0));
+        b02 = add_sub(t02 >> tile_log, max(d02y, 0), min(d02x, 0));
+        b12 = add_sub(t12 >> tile_log, max(d12x, 0), min(d12y, 0));
+
+        d01x += sizex * d01y;
+        d02x += sizex * d02y;
+        d12x += sizex * d12y;
+    }
+
+    // TODO: Checkout this
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        uint aabb_mask, mask_x, mask_y;
+        int wloy, wlox, whix, whiy, warea;
+
+        aabb_mask = add_sub(2 << hix, 0x20000 << hiy, 1 << lox) - (0x10000 << loy);
+        aabb_mask = sub_group_reduce_or(aabb_mask, l_temp);
+
+        mask_x = aabb_mask & 0xFFFF;
+        mask_y = aabb_mask >> 16;
+        wlox = findLeadingOne(mask_x ^ (mask_x - 1));
+        wloy = findLeadingOne(mask_y ^ (mask_y - 1));
+        whix = findLeadingOne(mask_x);
+        whiy = findLeadingOne(mask_y);
+        warea = (add_sub(whix, 1, wlox)) * (add_sub(whiy, 1, wloy));
+
+        if (sub_group_ballot(warea * 4 <= area * 8))
+        {
+            for (int y = wloy; y <= hiy; y++)
+            {
+                if (y < loy) continue;
+
+                for (int x = wlox; x <= hix; x++)
+                {
+                    if (x < lox) continue;
+
+                    *curr_ptr = sub_group_ballot(b01 >= 0 && b02 >= 0 && b12 >= 0);
+                    curr_ptr += 1, b01 -= d01y, b02 += d02y, b12 -= d12y;
+                }
+                curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x;
+            }
+
+            return;
+        }
+    }
+    #endif
+
+    if (emit)
+    {
+        local uint* skip_ptr = curr_ptr + (sizex);
+        local uint* end_ptr  = curr_ptr + (sizey << CR_BIN_LOG2);
+        do
+        {
+            if (b01 >= 0 && b02 >= 0 && b12 >= 0)
+                atomic_or(curr_ptr, mask_bit);
+            curr_ptr += 1, b01 -= d01y, b02 += d02y, b12 -= d12y;
+            if (curr_ptr == skip_ptr)
+                curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x, skip_ptr += CR_BIN_SIZE;
+        }
+        while (curr_ptr != end_ptr);
+    }
+
+
+}
+#endif
+
+inline void local_emit_triangle_mask(
+    uint4 tri_data, 
+    local uint* s_warp_emit_mask, 
+    local volatile uint* l_temp, 
+    int tri_idx,
+    int origin_x, int origin_y,
+    int max_tile_x_in_bin, int max_tile_y_in_bin,
+    int tile_log
+) {
+    #ifndef DEVICE_SUB_GROUP_ENABLED
+        #error Required DEVICE_SUB_GROUP_ENABLED
+    #endif
+
+    #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
+    {
+        sub_group_emit_triangle_mask(tri_data, s_warp_emit_mask, l_temp, tri_idx, origin_x, origin_y, max_tile_x_in_bin, max_tile_y_in_bin, tile_log);
+        return;
+    }
+    #endif
+
+    if (tri_idx == -1) return;
+
+    int v0x, v0y, d01x, d01y, d02x, d02y;
+    extract_tri_data(
+        tri_data, origin_x, origin_y, 
+        &v0x, &v0y, &d01x, &d01y, &d02x, &d02y);
+
+    int lox, loy, hix, hiy;
+    compute_tile_aabb(
+        v0x, v0y, d01x, d01y, d02x, d02y, 
+        tile_log, max_tile_x_in_bin, max_tile_y_in_bin, 
+        &lox, &loy, &hix, &hiy);
+
+    int sizex, sizey, area;
+    {
+        sizex = add_sub(hix, 1, lox);
+        sizey = add_sub(hiy, 1, loy);
+        area = sizex * sizey;
+    }
+
+    local uint* curr_ptr;
+    int ptr_y_inc;
+    uint mask_bit;
+    {
+        curr_ptr = &s_warp_emit_mask[get_local_id(1) * (CR_BIN_SQR + 1) + lox + (loy << CR_BIN_LOG2)];
+        ptr_y_inc = CR_BIN_SIZE - sizex;
+        mask_bit = 1 << get_local_id(0);
+    }
+
+    
+    if (sizex <= 2 && sizey <= 2)
+    {
+        atomic_or(curr_ptr, mask_bit);
+        if (sizex == 2) atomic_or(curr_ptr + 1, mask_bit);
+        if (sizey == 2) atomic_or(curr_ptr + CR_BIN_SIZE, mask_bit);
+        if (sizex == 2 && sizey == 2) atomic_or(curr_ptr + 1 + CR_BIN_SIZE, mask_bit);
+        return;
+    }
+    
+    // Initialize edge functions.
+    int d12x, d12y, b01, b02, b12;
+    {
+        d12x = d02x - d01x;
+        d12y = d02y - d01y;
+        v0x -= lox << tile_log;
+        v0y -= loy << tile_log;
+
+        int t01 = v0x * d01y - v0y * d01x;
+        int t02 = v0y * d02x - v0x * d02y;
+        int t12 = d01x * d12y - d01y * d12x - t01 - t02;
+        b01 = add_sub(t01 >> tile_log, max(d01x, 0), min(d01y, 0));
+        b02 = add_sub(t02 >> tile_log, max(d02y, 0), min(d02x, 0));
+        b12 = add_sub(t12 >> tile_log, max(d12x, 0), min(d12y, 0));
+
+        d01x += sizex * d01y;
+        d02x += sizex * d02y;
+        d12x += sizex * d12y;
+    }
+
+    {
+        local uint* skip_ptr = curr_ptr + (sizex);
+        local uint* end_ptr  = curr_ptr + (sizey << CR_BIN_LOG2);
+        do
+        {
+            if (b01 >= 0 && b02 >= 0 && b12 >= 0)
+                atomic_or(curr_ptr, mask_bit);
+            curr_ptr += 1, b01 -= d01y, b02 += d02y, b12 -= d12y;
+            if (curr_ptr == skip_ptr)
+                curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x, skip_ptr += CR_BIN_SIZE;
+        }
+        while (curr_ptr != end_ptr);
+    }
+
+
+}
+
+inline void sub_group_emit_prefix_sum(
+    local uint (*s_warp_emit_mask)[CR_BIN_SQR + 1],
+    local uint (*s_warp_emit_prefix_sum)[CR_BIN_SQR + 1],
+    local uint* s_tile_stream_curr_ofs,
+    local uint* s_tile_emit_prefix_sum,
+    local volatile uint* l_temp,
+    int emit_shift
+) {
+
+    for (int tile_in_bin_chunk = get_sub_group_id(); tile_in_bin_chunk * get_sub_group_size() < CR_BIN_SQR; tile_in_bin_chunk += get_num_sub_groups()) {
+        int tile_in_bin = tile_in_bin_chunk * get_sub_group_size() + get_sub_group_local_id();
+
+        int tile_emits, tile_allocs;
+        uint sum = 0;
+        if (tile_in_bin < CR_BIN_SQR)
+        {
+            tile_emits = 0;
+
+            for (int i = 0; i < get_num_sub_groups(); i++)
+            {
+                tile_emits += popcount(s_warp_emit_mask[i][tile_in_bin]);
+                s_warp_emit_prefix_sum[i][tile_in_bin] = tile_emits;
+            }
+
+            // Determine the number of segments to allocate.
+
+            int space_left = -s_tile_stream_curr_ofs[tile_in_bin] & (CR_TILE_SEG_SIZE - 1);
+            tile_allocs = (tile_emits - space_left + CR_TILE_SEG_SIZE - 1) >> CR_TILE_SEG_LOG2;
+            sum = (tile_emits << emit_shift) | tile_allocs;
+        }
+
+        uint scan_sum;
+        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+        {
+            if (!sub_group_any(tile_emits >= 2)) {
+                uint m = getLaneMaskLe();
+                scan_sum = (popcount(sub_group_ballot(tile_emits & 1) & m) << emit_shift) | popcount(sub_group_ballot(tile_allocs & 1) & m);
+            } else {
+                scan_sum = sub_group_scan_inclusive_add(sum);
+            }
+        }
+        #else
+            scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
+        #endif
+        
+        if (tile_in_bin < CR_BIN_SQR)
+            s_tile_emit_prefix_sum[tile_in_bin + 1] = scan_sum;
+    }
+}
+
+inline void local_emit_prefix_sum(
+    local uint (*s_warp_emit_mask)[CR_BIN_SQR + 1],
+    local uint (*s_warp_emit_prefix_sum)[CR_BIN_SQR + 1],
+    local uint* s_tile_stream_curr_ofs,
+    local uint* s_tile_emit_prefix_sum,
+    local volatile uint* l_temp,
+    int emit_shift
+) {
+    #ifndef DEVICE_SUB_GROUP_ENABLED
+        #error Required DEVICE_SUB_GROUP_ENABLED
+    #endif
+
+    #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
+    {
+        sub_group_emit_prefix_sum(s_warp_emit_mask, s_warp_emit_prefix_sum, s_tile_stream_curr_ofs, s_tile_emit_prefix_sum, l_temp, emit_shift);
+        return;
+    }
+    #endif
+
+    for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size()) {
+        int tile_in_bin = tile_in_bin_chunk + get_local_linear_id();
+
+        int tile_emits, tile_allocs;
+        uint sum = 0;
+        if (tile_in_bin < CR_BIN_SQR)
+        {
+            tile_emits = 0;
+
+            for (int i = 0; i < DEVICE_COARSE_SUB_GROUPS; i++)
+            {
+                tile_emits += popcount(s_warp_emit_mask[i][tile_in_bin]);
+                s_warp_emit_prefix_sum[i][tile_in_bin] = tile_emits;
+            }
+
+            // Determine the number of segments to allocate.
+
+            int space_left = -s_tile_stream_curr_ofs[tile_in_bin] & (CR_TILE_SEG_SIZE - 1);
+            tile_allocs = (tile_emits - space_left + CR_TILE_SEG_SIZE - 1) >> CR_TILE_SEG_LOG2;
+            sum = (tile_emits << emit_shift) | tile_allocs;
+        }
+
+        uint scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
+        
+        if (tile_in_bin < CR_BIN_SQR)
+            s_tile_emit_prefix_sum[tile_in_bin + 1] = scan_sum;
+    }
+}
+
 inline void sort_shared(local volatile uint* ptr, int num_items)
 {
     int thread_local_id = get_local_linear_id(); // get_local_id(0) + get_local_id(1) * get_local_size(0);
@@ -104,8 +454,12 @@ inline int global_tile_idx(int tile_in_bin, int c_width_tiles)
 
 //----------------------------------------------------------------------------------------
 
-kernel 
+kernel
+#ifdef DEVICE_SUB_GROUP_ENABLED
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_COARSE_SUB_GROUPS, 1)))
+#else
+    #error This kernel requires DEVICE_SUB_GROUP_ENABLED
+#endif
 void coarse_raster(
     global int* a_coarse_counter,
     global int* a_num_active_tiles,
@@ -372,141 +726,22 @@ void coarse_raster(
                 int subtri_idx = tri_idx & 0x7;
                 if (subtri_idx != 7)
                     data_idx = g_tri_header[data_idx].misc + subtri_idx;
+                
                 #ifdef DEVICE_IMAGE_ENABLED
-                tri_data = read_imageui(t_tri_header, data_idx);
+                    tri_data = read_imageui(t_tri_header, data_idx);
                 #else
-                tri_data = *(((global uint4*) g_tri_header) + data_idx); 
+                    tri_data = *(((global uint4*) g_tri_header) + data_idx); 
                 #endif
             }
 
-            // TODO: Refactor this part to be optimal for disable sub groups kernels
-            // 32 triangles per warp: Record emits (= tile intersections).
-            #ifdef CONF_SUB_GROUP_ENABLED
-            if (sub_group_any(tri_idx != -1))
-            #endif
-            {
-                int v0x = sub_s16lo_s16lo(tri_data.x, origin_x);
-                int v0y = sub_s16hi_s16lo(tri_data.x, origin_y);
-                int d01x = sub_s16lo_s16lo(tri_data.y, tri_data.x);
-                int d01y = sub_s16hi_s16hi(tri_data.y, tri_data.x);
-                int d02x = sub_s16lo_s16lo(tri_data.z, tri_data.x);
-                int d02y = sub_s16hi_s16hi(tri_data.z, tri_data.x);
-
-                // Compute tile-based AABB.
-
-                int lox = add_clamp_0_x((v0x + min_min(d01x, 0, d02x)) >> tile_log, 0, max_tile_x_in_bin);
-                int loy = add_clamp_0_x((v0y + min_min(d01y, 0, d02y)) >> tile_log, 0, max_tile_y_in_bin);
-                int hix = add_clamp_0_x((v0x + max_max(d01x, 0, d02x)) >> tile_log, 0, max_tile_x_in_bin);
-                int hiy = add_clamp_0_x((v0y + max_max(d01y, 0, d02y)) >> tile_log, 0, max_tile_y_in_bin);
-                int sizex = add_sub(hix, 1, lox);
-                int sizey = add_sub(hiy, 1, loy);
-                int area = sizex * sizey;
-
-                // Miscellaneous init.
-
-                local uchar* curr_ptr = (local uchar*)&s_warp_emit_mask[get_local_id(1)][lox + (loy << CR_BIN_LOG2)];
-                int ptr_y_inc = CR_BIN_SIZE * 4 - (sizex << 2);
-                uint mask_bit = 1 << get_local_id(0);
-
-                // Case A: All AABBs are small => record the full AABB using atomics.
-                #ifdef CONF_SUB_GROUP_ENABLED
-                if (sub_group_all(sizex <= 2 && sizey <= 2))
-                {
-
-                    if (tri_idx != -1)
-                    {
-                        atomic_or((local uint*)curr_ptr, mask_bit);
-                        if (sizex == 2) atomic_or((local uint*)(curr_ptr + 4), mask_bit);
-                        if (sizey == 2) atomic_or((local uint*)(curr_ptr + CR_BIN_SIZE * 4), mask_bit);
-                        if (sizex == 2 && sizey == 2) atomic_or((local uint*)(curr_ptr + 4 + CR_BIN_SIZE * 4), mask_bit);
-                    }
-
-                }
-                else
-                #endif
-                {
-                    // Compute warp-AABB (scan-32).
-
-                    uint aabb_mask = add_sub(2 << hix, 0x20000 << hiy, 1 << lox) - (0x10000 << loy);
-                    if (tri_idx == -1)
-                        aabb_mask = 0;
-
-                    #ifdef CONF_SUB_GROUP_ENABLED
-                    aabb_mask = sub_group_reduce_or_ui(aabb_mask);
-                    #else
-                    aabb_mask = local_1dim_reduce_or(aabb_mask, l_temp);
-                    #endif
-
-                    uint mask_x = aabb_mask & 0xFFFF;
-                    uint mask_y = aabb_mask >> 16;
-                    int wlox = findLeadingOne(mask_x ^ (mask_x - 1));
-                    int wloy = findLeadingOne(mask_y ^ (mask_y - 1));
-                    int whix = findLeadingOne(mask_x);
-                    int whiy = findLeadingOne(mask_y);
-                    int warea = (add_sub(whix, 1, wlox)) * (add_sub(whiy, 1, wloy));
-
-                    // Initialize edge functions.
-
-                    int d12x = d02x - d01x;
-                    int d12y = d02y - d01y;
-                    v0x -= lox << tile_log;
-                    v0y -= loy << tile_log;
-
-                    int t01 = v0x * d01y - v0y * d01x;
-                    int t02 = v0y * d02x - v0x * d02y;
-                    int t12 = d01x * d12y - d01y * d12x - t01 - t02;
-                    int b01 = add_sub(t01 >> tile_log, max(d01x, 0), min(d01y, 0));
-                    int b02 = add_sub(t02 >> tile_log, max(d02y, 0), min(d02x, 0));
-                    int b12 = add_sub(t12 >> tile_log, max(d12x, 0), min(d12y, 0));
-
-                    d01x += sizex * d01y;
-                    d02x += sizex * d02y;
-                    d12x += sizex * d12y;
-
-                    // Case B: Warp-AABB is not much larger than largest AABB => Check tiles in warp-AABB, record using ballots.
-                    #ifdef CONF_SUB_GROUP_ENABLED
-                    if (sub_group_any(warea * 4 <= area * 8))
-                    {
-                        if (tri_idx != -1)
-                        {
-                            for (int y = wloy; y <= hiy; y++)
-                            {
-                                if (y < loy) continue;
-                                for (int x = wlox; x <= hix; x++)
-                                {
-                                    if (x < lox) continue;
-                                    *(local uint*)curr_ptr = sub_group_masked_ballot(b01 >= 0 && b02 >= 0 && b12 >= 0, sub_group_activemask());
-                                    curr_ptr += 4, b01 -= d01y, b02 += d02y, b12 -= d12y;
-                                }
-                                curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x;
-                            }
-                        }
-                    }
-
-                    // Case C: General case => Check tiles in AABB, record using atomics.
-
-                    else
-                    #endif
-                    {
-
-                        if (tri_idx != -1)
-                        {
-                            local uchar* skip_ptr = curr_ptr + (sizex << 2);
-                            local uchar* end_ptr  = curr_ptr + (sizey << (CR_BIN_LOG2 + 2));
-                            do
-                            {
-                                if (b01 >= 0 && b02 >= 0 && b12 >= 0)
-                                    atomic_or((local uint*)curr_ptr, mask_bit);
-                                curr_ptr += 4, b01 -= d01y, b02 += d02y, b12 -= d12y;
-                                if (curr_ptr == skip_ptr)
-                                    curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x, skip_ptr += CR_BIN_SIZE * 4;
-                            }
-                            while (curr_ptr != end_ptr);
-                        }
-
-                    }
-                }
-            }
+            // Triangle per thread: Record emits (= tile intersections).
+            
+            local_emit_triangle_mask(
+                tri_data, 
+                (local uint*)s_warp_emit_mask, 
+                l_temp, 
+                tri_idx, origin_x, origin_y, 
+                max_tile_x_in_bin, max_tile_y_in_bin, tile_log);
 
             barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -515,7 +750,17 @@ void coarse_raster(
             //------------------------------------------------------------------------
 
             // Tile per thread: Initialize prefix sums.
+            
+            local_emit_prefix_sum(
+                (local uint(*)[CR_BIN_SQR+1]) s_warp_emit_mask,
+                (local uint(*)[CR_BIN_SQR+1]) s_warp_emit_prefix_sum,
+                (local uint*) s_tile_stream_curr_ofs,
+                (local uint*) s_tile_emit_prefix_sum,
+                l_temp,
+                emit_shift
+                );
             // TODO: this only works if CR_BIN_SQR is divisible by get_local_size(0)
+            /*
             #ifdef CONF_SUB_GROUP_ENABLED
             for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += get_local_linear_size())
             #else
@@ -527,22 +772,23 @@ void coarse_raster(
                 int tile_in_bin = tile_in_bin_chunk + thread_local_id;
                 #endif
 
-                local uchar *src_ptr, *dst_ptr;
                 local volatile uint* p;
                 int tile_emits, tile_allocs;
                 #ifndef CONF_SUB_GROUP_ENABLED
                 if (tile_in_bin < CR_BIN_SQR)
                 #endif
                 {
-                    src_ptr = (local uchar*)&s_warp_emit_mask[0][tile_in_bin];
-                    dst_ptr = (local uchar*)&s_warp_emit_prefix_sum[0][tile_in_bin];
+                    local uint *src_ptr, *dst_ptr;
+
+                    src_ptr = (local uint*)&s_warp_emit_mask[0][tile_in_bin];
+                    dst_ptr = (local uint*)&s_warp_emit_prefix_sum[0][tile_in_bin];
                     tile_emits = 0;
                     for (int i = 0; i < DEVICE_COARSE_SUB_GROUPS; i++)
                     {
-                        tile_emits += popcount(*(uint*)src_ptr);
-                        *(uint*)dst_ptr = tile_emits;
-                        src_ptr += (CR_BIN_SQR + 1) * 4;
-                        dst_ptr += (CR_BIN_SQR + 1) * 4;
+                        tile_emits += popcount(*src_ptr);
+                        *dst_ptr = tile_emits;
+                        src_ptr += (CR_BIN_SQR + 1);
+                        dst_ptr += (CR_BIN_SQR + 1);
                     }
 
                     // Determine the number of segments to allocate.
@@ -579,7 +825,7 @@ void coarse_raster(
                     }
                 }
             }
-
+            */
             // First warp: Scan-8.
 
             barrier(CLK_LOCAL_MEM_FENCE);
