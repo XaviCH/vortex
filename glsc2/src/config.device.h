@@ -32,7 +32,7 @@
 #define DEVICE_SUB_GROUP_RAW 1
 #endif
 
-// if enabled the kernels could use intrinsicts as ballot, all, any, scan or reduce sub group operations. 
+// if enabled the device supports sub group intra-register operations as ballot, all, any, scan or reduce. 
 #ifndef DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT
 #define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 0
 #endif
@@ -40,10 +40,11 @@
 // ------
 // RENDER CONFIG
 // ------
-// ------
 
+// ------
 // KERNEL CONFIG
 // ------
+
 // Triangle Setup Configuration
 #define DEVICE_SETUP_SUB_GROUPS 2
 // Bin Raster Configuration
@@ -51,6 +52,10 @@
 // Coarse Raster Configuration
 #define DEVICE_COARSE_SUB_GROUPS 16
 
+#define CONF_COARSE_SUB_GROUPS 16 // tmp
+
 #define CONF_FINE_SUB_GROUPS 16
+
+#define DEVICE_FINE_SUB_GROUPS 16
 
 #endif

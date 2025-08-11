@@ -1,3 +1,7 @@
+inline void sub_group_barrier(cl_mem_fence_flags flags) {
+    asm volatile("bar.warp.sync 0xffffffff;");
+}
+
 inline uint __attribute__((overloadable)) sub_group_broadcast (uint x, uint sub_group_local_id) {
     uint r;
     asm volatile(
@@ -5,7 +9,6 @@ inline uint __attribute__((overloadable)) sub_group_broadcast (uint x, uint sub_
         : "=r"(r) : "r"(x), "r"(sub_group_local_id));
     return r;
 }
-
 
 inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add (uint x) {
     uint r;

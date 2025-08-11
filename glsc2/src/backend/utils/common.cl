@@ -11,6 +11,12 @@
 
 //-----------------------------------------------------------------------------
 
+// Those are always mapped into kernel dimensions.
+inline uint get_sub_group_local_id()    { return get_local_id(0);   }
+inline uint get_sub_group_id()          { return get_local_id(1);   }
+inline uint get_sub_group_size()        { return get_local_size(0); }
+inline uint get_num_sub_groups()        { return get_local_size(1); }
+
 // Utility functions
 
 inline uint     ugetLo           (ulong a)              { return a & 0x00000000FFFFFFFFu; }
@@ -117,10 +123,7 @@ inline float    slct_f              (float a, float b, int c)   { return (c >= 0
 /*
     The multiple dimensions is mapped to sub groups and work groups on the base OpenCL language.
 */
-inline uint get_sub_group_local_id()    { return get_local_id(0);   }
-inline uint get_sub_group_id()          { return get_local_id(1);   }
-inline uint get_sub_group_size()        { return get_local_size(0); }
-inline uint get_num_sub_groups()        { return get_local_size(1); }
+
 
 
 // TODO add asm extension as attachable header file at compile time
@@ -429,7 +432,7 @@ inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, 
     int t0 = (uint)values.x >> sh;
     int t1 = ((uint)values.y >> sh) - t0;
     int t2 = ((uint)values.z >> sh) - t0;
-
+    
     uint rcpMant = (__float_as_int(areaRcp) & 0x007FFFFF) | 0x00800000;
     int rcpShift = (23 + 127) - (__float_as_int(areaRcp) >> 23);
 

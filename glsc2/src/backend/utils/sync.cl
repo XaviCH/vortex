@@ -9,14 +9,16 @@
 #define BACKEND_UTILS_SYNC_CL
 
 #ifdef __COMPILER_RELATIVE_PATH__
+    #include <backend/utils/sub_group_mask.cl>
     #include <backend/utils/common.cl>
 
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
     #include <backend/extensions/cl_khr_subgroups/include.cl>
+    #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     #endif
 
 #else
+    #include "glsc2/src/backend/utils/sub_group_mask.cl"
     #include "glsc2/src/backend/utils/common.cl"
 #endif
 
@@ -83,6 +85,7 @@ inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, l
     local volatile uint* ptr = &l_temp[id];
 
     // reduce the use of local memory by using intra subgroup register operations.
+    /*
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     {
         value = sub_group_scan_inclusive_add(value);
@@ -106,6 +109,7 @@ inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, l
         value += get_sub_group_id() ? l_temp[get_sub_group_id()-1] : 0;
     }
     #else
+    */
     {
         *ptr = value;
 
@@ -129,7 +133,7 @@ inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, l
             }
         }
     }
-    #endif
+    // #endif
 
     return value;
 }
@@ -262,10 +266,13 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
 }
 
 inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local volatile uint* l_temp) {
+
     local_1dim_scan_inclusive_or(value, l_temp);
+    
     #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-    barrier(CLK_LOCAL_MEM_FENCE);
+        barrier(CLK_LOCAL_MEM_FENCE);
     #endif
+
     return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
 }
 
@@ -274,19 +281,27 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
         For DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1 is not required that all threads were active. 
         Otherwise all threads in work group must be active. 
  */
-
-inline uint local_1dim_ballot(bool value, local volatile uint* l_temp) {
-    uint mask;
+#ifdef DEVICE_SUB_GROUP_ENABLED
+inline sub_group_mask_t local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) {
+    sub_group_mask_t mask;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-        mask = sub_group_ballot(value);
+        mask = ballot_sub_group_mask(value);
     #else
-        mask = local_1dim_reduce_or((value ? 1u : 0u) << get_local_id(0), l_temp);
+    {
+        sub_group_mask_t tmp;
+        clear_sub_group_mask(&tmp);
+        set_bit_sub_group_mask(&tmp, get_local_id(0));
+        #if DEVICE_SUB_GROUP_THREADS > 32
+            #error Func does not expect subgroups that big.
+        #endif
+        mask.mask = local_1dim_reduce_or(value << get_local_id(0), (local volatile uint*) l_temp);
+    }
     #endif
-
+    
     return mask;
 }
-
+#endif
 
 inline uint local_scan_inclusive_max_1dim_ui(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);

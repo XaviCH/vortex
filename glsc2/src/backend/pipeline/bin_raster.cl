@@ -8,18 +8,17 @@
 #include "glsc2/src/backend/utils/sync.cl"
 #endif
 
-// TODO: rm sub group dependency
-#ifndef DEVICE_SUB_GROUP_ENABLED
-#error Kernel requiere sub groups to work.
-#endif
-
 /**
     Processed triangles are going to be stored in bins, depending if they fall inside.
     Each CTA has their full set of bins. Each CTA would batch a different set of triangles
     to test each bin. 
  */
 kernel
+#ifdef DEVICE_SUB_GROUP_ENABLED
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_BIN_SUB_GROUPS, 1)))
+#else
+    #error Kernel require sub groups to work.
+#endif
 void bin_raster(
     global int* a_bin_counter,
     global int* a_num_bin_segs,
@@ -62,11 +61,13 @@ void bin_raster(
     local volatile uint s_over_total;
     local volatile uint s_alloc_base;
 
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    local volatile uint l_temp [DEVICE_BIN_SUB_GROUPS];
-    #else 
+
+
+    // #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    // local volatile uint l_temp [DEVICE_BIN_SUB_GROUPS];
+    // #else 
     local volatile uint l_temp [DEVICE_SUB_GROUP_THREADS*DEVICE_BIN_SUB_GROUPS];
-    #endif
+    // #endif
 
     if (*a_num_subtris > c_max_subtris) 
         return;
@@ -271,19 +272,26 @@ void bin_raster(
                 // exc cumm scan of all overflows in the work group 
                 uint over_total;
                 uint exc_scan_over_index;
+                
                 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
                 {
                     exc_scan_over_index = popcount_sub_group_mask(and_sub_group_mask(ballot_sub_group_mask(overflow),get_lane_sub_group_mask_lt()));
                     if (get_sub_group_local_id() == get_sub_group_size()-1)
                         over_total = atomic_add(&s_over_total, exc_scan_over_index + overflow);
+                    
                     over_total = sub_group_broadcast(over_total, get_sub_group_size()-1);
                 }
                 #else
                 {
-                    over_total = s_over_total;
-                    exc_scan_over_index = local_scan_inclusive_add(overflow, l_temp) - overflow;
-                    if (get_local_linear_id()-1 == c_num_bins)
-                        s_over_total = exc_scan_over_index + overflow;
+                    exc_scan_over_index = local_1dim_scan_inclusive_add(overflow, l_temp) - overflow;
+                    if (get_sub_group_local_id() == get_sub_group_size()-1)
+                        l_temp[get_local_linear_id()] = atomic_add(&s_over_total, exc_scan_over_index + overflow);
+
+                    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+                        barrier(CLK_LOCAL_MEM_FENCE);
+                    #endif
+
+                    over_total = l_temp[(get_sub_group_id() + 1)*get_sub_group_size() - 1];
                 }
                 #endif
 

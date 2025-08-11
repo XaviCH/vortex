@@ -7,10 +7,8 @@
     #ifdef __COMPILER_RELATIVE_PATH__
     #include <backend/extensions/cl_khr_subgroup_ballot/nv-sm_30+.cl>
     #else
-    #include "glsc2/src/backend/extensions/cl_khr_subgroups/nv-sm_80+.cl"
+    #include "glsc2/src/backend/extensions/cl_khr_subgroup_ballot/nv-sm_30+.cl"
     #endif
 #endif
-
-
 
 #endif

@@ -3,6 +3,8 @@
 
 #ifdef __COMPILER_RELATIVE_PATH__
     #include <backend/types.cl>
+    #include <backend/utils/common.cl>
+
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
@@ -11,6 +13,7 @@
 
 #else
     #include "glsc2/src/backend/types.cl"
+    #include "glsc2/src/backend/utils/common.cl"
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     #include "glsc2/src/backend/extensions/cl_khr_subgroup_ballot/include.cl"
@@ -35,27 +38,41 @@ inline sub_group_mask_t and_sub_group_mask(sub_group_mask_t a, sub_group_mask_t 
     return sub_group_mask;
 }
 
+inline bool all_sub_group_mask(sub_group_mask_t sub_group_mask) {
+    return popcount(sub_group_mask.mask) == get_sub_group_size();
+}
+
 inline bool any_sub_group_mask(sub_group_mask_t sub_group_mask) {
-    bool condition;
-
-    #if (DEVICE_SUB_GROUP_THREADS <= 64)
-        condition = sub_group_mask.mask;
-    #else
-        condition = *((ulong*)&sub_group_mask.mask.xy) || *((ulong*)&sub_group_mask.mask.zw);
-    #endif
-
-    return condition;
+    return popcount(sub_group_mask.mask) != 0;
 }
 
 inline sub_group_mask_t get_lane_sub_group_mask_lt() {
     sub_group_mask_t sub_group_mask;
 
     #if (DEVICE_SUB_GROUP_THREADS <= 64)
-        sub_group_mask.mask = (1ul << get_local_id(0)) - 1; 
+        sub_group_mask.mask = (1ul << get_sub_group_local_id()) - 1; 
     #else
+    {
         ulong* pointer = &sub_group_mask.mask;
-        pointer[0] = get_local_id(0) > 63 ? ULONG_MAX : (1ul << get_local_id(0)) - 1;
-        pointer[1] = get_local_id(0) > 63 ? (1ul << (get_local_id(0) - 64)) - 1 : 0;
+        pointer[0] = get_sub_group_local_id() > 63 ? ULONG_MAX : (1ul << get_sub_group_local_id()) - 1;
+        pointer[1] = get_sub_group_local_id() > 63 ? (1ul << (get_sub_group_local_id() - 64)) - 1 : 0;
+    }
+    #endif
+
+    return sub_group_mask;
+}
+
+inline sub_group_mask_t get_lane_sub_group_mask_le() {
+    sub_group_mask_t sub_group_mask;
+
+    #if (DEVICE_SUB_GROUP_THREADS <= 64)
+        sub_group_mask.mask = (2ul << get_sub_group_local_id()) - 1; 
+    #else
+    {
+        ulong* pointer = &sub_group_mask.mask;
+        pointer[0] = get_sub_group_local_id() > 63 ? ULONG_MAX : (2ul << get_sub_group_local_id()) - 1;
+        pointer[1] = get_sub_group_local_id() > 63 ? (2ul << (get_sub_group_local_id() - 64)) - 1 : 0;
+    }
     #endif
 
     return sub_group_mask;
@@ -68,6 +85,7 @@ inline uint popcount_sub_group_mask(sub_group_mask_t sub_group_mask) {
 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
 inline sub_group_mask_t ballot_sub_group_mask(bool condition) {
     sub_group_mask_t sub_group_mask;
+
     #if (DEVICE_SUB_GROUP_THREADS <= 32)
         sub_group_mask.mask = sub_group_ballot(condition).x;
     #elif (DEVICE_SUB_GROUP_THREADS <= 64)
@@ -81,20 +99,28 @@ inline sub_group_mask_t ballot_sub_group_mask(bool condition) {
 #endif
 
 inline bool get_bit_sub_group_mask(sub_group_mask_t sub_group_mask, uint position) {
+    bool bit;
+
     #if (DEVICE_SUB_GROUP_THREADS <= 64)
-        return (sub_group_mask.mask & (1ul << position)) != 0;
+        bit = (sub_group_mask.mask & (1ul << position)) != 0;
     #else
+    {
         ulong* pointer = (ulong*)(&sub_group_mask) + (position > 63);
-        return (pointer->mask & (1ul << (position % 64))) != 0;
+        bit = (pointer->mask & (1ul << (position % 64))) != 0;
+    }
     #endif
+
+    return bit;
 }
 
 inline void set_bit_sub_group_mask(sub_group_mask_t* sub_group_mask, uint position) {
     #if (DEVICE_SUB_GROUP_THREADS <= 64)
         sub_group_mask->mask |= 1ul << position;
     #else
+    {
         ulong* pointer = (ulong*)sub_group_mask + (position > 63);
         pointer->mask |= 1ul << (position % 64);
+    }
     #endif
 }
 
