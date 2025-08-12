@@ -125,7 +125,7 @@
 //----------------------
 
 #ifdef ATTRIBUTE_VEC2
-    #define KERNEL_ARG_ATTRIBUTE_VEC2 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC2))
+    #define KERNEL_ARG_ATTRIBUTE_VEC2 COMMA_CHAIN(global const void*, JOIN_CHAIN(_,ATTRIBUTE_VEC2))
     #define DEFINE_ATTRIBUTE_VEC2 STRUCT_CHAIN(float2, ATTRIBUTE_VEC2)
     #define SET_ATTRIBUTE_VEC2 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC2)
 #else
@@ -135,7 +135,7 @@
 #endif
 
 #ifdef ATTRIBUTE_VEC3
-    #define KERNEL_ARG_ATTRIBUTE_VEC3 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC3))
+    #define KERNEL_ARG_ATTRIBUTE_VEC3 COMMA_CHAIN(global const void*, JOIN_CHAIN(_,ATTRIBUTE_VEC3))
     #define DEFINE_ATTRIBUTE_VEC3 STRUCT_CHAIN(float3, ATTRIBUTE_VEC3)
     #define SET_ATTRIBUTE_VEC3 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC3)
 #else
@@ -145,7 +145,7 @@
 #endif
 
 #ifdef ATTRIBUTE_VEC4
-    #define KERNEL_ARG_ATTRIBUTE_VEC4 COMMA_CHAIN(global const float*, JOIN_CHAIN(_,ATTRIBUTE_VEC4))
+    #define KERNEL_ARG_ATTRIBUTE_VEC4 COMMA_CHAIN(global const void*, JOIN_CHAIN(_,ATTRIBUTE_VEC4))
     #define DEFINE_ATTRIBUTE_VEC4 STRUCT_CHAIN(float4, ATTRIBUTE_VEC4)
     #define SET_ATTRIBUTE_VEC4 SET_ATTRIBUTE_CHAIN(ATTRIBUTE_VEC4)
 #else
@@ -410,18 +410,19 @@ typedef struct {
 #define FS_DEFINES \
     float4 gl_FragColor; \
     DEFINE_VARYINGS \
-    DEFINE_UNIFORMS_FLOAT
+    DEFINE_UNIFORMS
 
 #define FS_SETS \
     SET_VARYINGS \
     SET_UNIFORMS
 
 #define FS_KERNEL_PARAMS \
+    global const void* gl_uniforms, \
     FS_KERNEL_PARAM_UNIFORM_IMAGE2D
 
 #define FS_KERNEL_ARGS \
+    gl_uniforms, \
     FS_KERNEL_ARG_UNIFORM_IMAGE2D
-
 
 //------------------------------------
 // Data reflection for OpenGL frontend

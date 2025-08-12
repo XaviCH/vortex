@@ -3,7 +3,7 @@
 
 #ifdef __COMPILER_RELATIVE_PATH__
 #include <backend/types.cl>
-#include <backend/kernels/shaders/glsl/types.cl>
+#include <backend/shaders/glsl/types.cl>
 #include "constants.h"
 #else
 #include "glsc2/src/backend/types.cl"

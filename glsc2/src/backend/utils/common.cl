@@ -323,9 +323,9 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile co
 
 inline void cover8x8_setupLUT(volatile ulong* lut)
 {
-    for (int lutIdx = get_local_id(0) + get_local_size(0) * get_local_id(1); lutIdx < CR_COVER8X8_LUT_SIZE; lutIdx += get_local_size(0) * get_local_size(1))
+    for (int lutIdx = get_local_linear_id(); lutIdx < CR_COVER8X8_LUT_SIZE; lutIdx += get_local_linear_size())
     {
-        int _half       = (lutIdx < (12 << 5)) ? 0 : 1;
+        int _half       = (lutIdx < (CR_COVER8X8_LUT_SIZE/2)) ? 0 : 1;
         int yint       = (lutIdx >> 5) - _half * 12 - 3;
         uint shape      = ((lutIdx >> 2) & 7) << (31 - 2);
         int slctSwapXY = lutIdx << (31 - 1);

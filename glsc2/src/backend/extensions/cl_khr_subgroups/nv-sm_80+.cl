@@ -1,3 +1,17 @@
+inline uint sub_group_any(int p) { 
+    uint r; 
+    asm volatile(
+        "{"
+        ".reg .pred pi;"
+        "setp.ne.u32 pi, %1, 0;"
+        "vote.sync.any.pred  pi, pi, 0xffffffff;"
+        "selp.u32 %0, 1, 0, pi;"
+        "}"
+        : "=r"(r) : "r"(p)); 
+    return r; 
+}
+
+
 inline void sub_group_barrier(cl_mem_fence_flags flags) {
     asm volatile("bar.warp.sync 0xffffffff;");
 }
@@ -72,6 +86,14 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min (uint x) 
         "shfl.sync.up.b32  dst|p, %0, 0x10,0x0, 0xffffffff;"
         "@p min.u32        %0, dst, %0;"
         "}"
+        : "=r"(r) : "r"(x));
+    return r;
+}
+
+inline uint __attribute__((overloadable)) sub_group_reduce_max (uint x) {
+    uint r;
+    asm volatile(
+        "redux.sync.max.u32 %0, %1, 0xffffffff;"
         : "=r"(r) : "r"(x));
     return r;
 }

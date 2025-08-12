@@ -12,7 +12,7 @@
 #endif
 
 
-inline float4 gl_get_vertex_attribute_from_pointer(global void* data, vertex_attribute_data_t vertex_attribute_data) {
+inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vertex_attribute_data_t vertex_attribute_data) {
     data += vertex_attribute_data.offset;
 
     switch (vertex_attribute_data.misc & (VERTEX_ATTRIBUTE_SIZE_MASK | VERTEX_ATTRIBUTE_TYPE_MASK)) {
@@ -64,7 +64,7 @@ inline float4 gl_get_vertex_attribute(
 }
 
 #define GL_SET_VERTEX_ATTRIBUTE_ARGS \
-    global void* src, \
+    global const void* src, \
     global const float4* vertex_attributes, \
     global const vertex_attribute_data_t* vertex_attribute_datas, \
     int attribute_location

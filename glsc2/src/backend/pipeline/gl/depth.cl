@@ -97,13 +97,13 @@ inline void init_tile_z_min(ushort* tile_z_min, bool* tile_z_upd, local volatile
   *tile_z_upd = (max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]) > *tile_z_min);
 }
 
-#ifdef CONF_FINE_SUB_GROUP_ENABLED
+#ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
 inline void sub_group_update_tile_z_max(uint c_render_mode_flags, ushort* tile_z_max, bool* tile_z_upd, local volatile ushort* w_tile_depth)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
     {
         ushort z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        *tile_z_max = sub_group_reduce_max_ui(z);
+        *tile_z_max = sub_group_reduce_max(z);
         *tile_z_upd = false;
     }
 }
@@ -112,7 +112,7 @@ inline void sub_group_update_tile_z_min(uint c_render_mode_flags, ushort* tile_z
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0 && sub_group_any(*tile_z_upd))
     {
         ushort z = min(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        *tile_z_min = sub_group_reduce_min_ui(z);
+        *tile_z_min = sub_group_reduce_min(z);
         *tile_z_upd = false;
     }
 }

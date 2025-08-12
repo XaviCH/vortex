@@ -118,9 +118,9 @@
  * Kernel setters
  */
 
-#define SET_ATTRIBUTE(attr) \ 
+#define SET_ATTRIBUTE(attr) \
 { \
-    gl_set_vertex_attribute(_##attr, &attr, vertex_attributes, vertex_attribute_datas, gl_attribute_location) \
+    gl_set_vertex_attribute(&attr, _##attr, vertex_attributes, vertex_attribute_datas, gl_attribute_location); \
     gl_attribute_location += 1; \
 }
 

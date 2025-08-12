@@ -58,24 +58,32 @@ inline uint __attribute__((overloadable)) sub_group_reduce_min(uint value, local
 #endif
 
 inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint* l_temp) {
-    uint result;
-
-    local volatile uint* ptr = &l_temp[get_local_linear_id()];
-    *ptr = value;
-
-    #pragma unroll
-    for(int target=1; target < get_local_size(0); target *= 2) {
-        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-        barrier(CLK_LOCAL_MEM_FENCE);
-        #endif
-        if (get_local_id(0) >= target) {
-            value += ptr[-target];
-            *ptr = value;
-        }
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        return sub_group_scan_inclusive_add(value);
     }
-    result = value;
+    #else
+    {
+        uint result;
 
-    return result;
+        local volatile uint* ptr = &l_temp[get_local_linear_id()];
+        *ptr = value;
+
+        #pragma unroll
+        for(int target=1; target < get_local_size(0); target *= 2) {
+            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+                barrier(CLK_LOCAL_MEM_FENCE);
+            #endif
+            if (get_local_id(0) >= target) {
+                value += ptr[-target];
+                *ptr = value;
+            }
+        }
+        result = value;
+
+        return result;
+    }
+    #endif
 }
 
 inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
@@ -291,11 +299,8 @@ inline sub_group_mask_t local_1dim_ballot(bool value, local volatile sub_group_m
     {
         sub_group_mask_t tmp;
         clear_sub_group_mask(&tmp);
-        set_bit_sub_group_mask(&tmp, get_local_id(0));
-        #if DEVICE_SUB_GROUP_THREADS > 32
-            #error Func does not expect subgroups that big.
-        #endif
-        mask.mask = local_1dim_reduce_or(value << get_local_id(0), (local volatile uint*) l_temp);
+        if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
+        mask.mask = local_1dim_reduce_or(tmp.mask, (local volatile uint*) l_temp);
     }
     #endif
     

@@ -38,6 +38,14 @@ inline sub_group_mask_t and_sub_group_mask(sub_group_mask_t a, sub_group_mask_t 
     return sub_group_mask;
 }
 
+inline sub_group_mask_t not_sub_group_mask(sub_group_mask_t mask) {
+    sub_group_mask_t sub_group_mask;
+
+    sub_group_mask.mask = ~mask.mask;
+
+    return sub_group_mask;
+}
+
 inline bool all_sub_group_mask(sub_group_mask_t sub_group_mask) {
     return popcount(sub_group_mask.mask) == get_sub_group_size();
 }

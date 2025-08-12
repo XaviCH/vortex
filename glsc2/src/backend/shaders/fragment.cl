@@ -41,7 +41,6 @@ typedef struct {
 #define FS_MAIN(...) \
     inline bool gl_fragment_shader( \
         FS_KERNEL_PARAMS \
-        global const void* gl_uniforms, \
         fragment_shader_output_t* output, \
         ro_vertex_buffer_t vertex_buffer, \
         uint3 vert_idx, float3 bary \
