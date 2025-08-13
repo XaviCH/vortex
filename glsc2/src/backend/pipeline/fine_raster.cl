@@ -489,7 +489,6 @@ inline void execute_ROP_single_sample(
  * Otherwise, only one tile is processed per work group.
  */
 kernel 
-/*
 #ifdef DEVICE_SUB_GROUP_ENABLED
 #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
     #error "Sub-group raw mode must be enabled to use sub-group."
@@ -499,7 +498,6 @@ __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GR
     #error "Sub-group mode must be enabled to use fine rasterization."
 __attribute__((reqd_work_group_size(DEVICE_FINE_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
 #endif
-*/
 void fine_raster_single_sample(
     FS_KERNEL_PARAMS
 
@@ -557,7 +555,15 @@ void fine_raster_single_sample(
     local volatile uint     s_tri_data_idx      [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  CRTriangleData index
     local volatile ulong    s_triangle_cov      [DEVICE_FINE_SUB_GROUPS][64];          // 10KB coverage mask
     local volatile uint     s_triangle_frag     [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  fragment index
-    local volatile uint     s_temp              [DEVICE_FINE_SUB_GROUPS*64];          // 6.25KB
+
+    // The required local mem for specific sub-group communications.
+    typedef union {
+        uint                integer [DEVICE_SUB_GROUP_THREADS];
+        sub_group_mask_t    mask    [DEVICE_SUB_GROUP_THREADS];
+        sub_group_mask_t    tile    [64];
+    } sg_tmp_mem_t;
+
+    local volatile sg_tmp_mem_t     l_temp              [DEVICE_FINE_SUB_GROUPS]; // tmp memory
                                                                             // = 47.25KB total
     // Warp Space
     local volatile uint*    w_tile_color        = (local volatile uint*)    &s_tile_color[get_local_id(1)];
@@ -567,16 +573,13 @@ void fine_raster_single_sample(
     local volatile uint*    w_tri_data_idx      = (local volatile uint*)    &s_tri_data_idx[get_local_id(1)];
     local volatile ulong*   w_triangle_cov      = (local volatile ulong*)   &s_triangle_cov[get_local_id(1)];
     local volatile uint*    w_triangle_frag     = (local volatile uint*)    &s_triangle_frag[get_local_id(1)];
-    local volatile uint*    w_temp              = (local volatile uint*)    &s_temp[get_local_id(1)*64];
 
-    local volatile uint l_temp[DEVICE_FINE_SUB_GROUPS][DEVICE_SUB_GROUP_THREADS];
-    local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS] = &l_temp[get_sub_group_id()];
+    local volatile sg_tmp_mem_t *sg_temp = &l_temp[get_sub_group_id()];
 
     if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs || *a_num_tile_segs > c_max_tile_segs)
         return;
 
-    sub_group_mask_t rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags); //, &w_temp[0]); TODO: solved??, erase local mem
-    w_temp[get_local_id(1)] = 0; // first 16 elements of temp are always zero, TODO: carefull with size, depends on thread size y
+    sub_group_mask_t rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags);
     cover8x8_setupLUT(s_cover8x8_lut);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -610,11 +613,11 @@ void fine_raster_single_sample(
         }
         #else
         {
-            (*sg_temp)[get_sub_group_local_id()] = active_idx;
+            sg_temp->integer[get_sub_group_local_id()] = active_idx;
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
             #endif
-            active_idx = (*sg_temp)[0];
+            active_idx = sg_temp->integer[0];
         }
         #endif
 
@@ -734,7 +737,7 @@ void fine_raster_single_sample(
                     int pop = (tri_idx == -1) ? 0 : popcount(coverage);
 
                     // fragment count scan
-                    uint frag = local_1dim_scan_inclusive_add(pop, *l_temp);
+                    uint frag = local_1dim_scan_inclusive_add(pop, &sg_temp->integer);
                     uint tmp_frag = frag;
                     frag += frag_write; // frag now holds cumulative fragment count
 
@@ -747,12 +750,12 @@ void fine_raster_single_sample(
                         #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                             barrier(CLK_LOCAL_MEM_FENCE);
                         #endif
-                        frag_write += (*sg_temp)[get_sub_group_size()-1];
+                        frag_write += sg_temp->integer[get_sub_group_size()-1];
                     }
                     #endif
 
                     // queue non-empty triangles
-                    sub_group_mask_t good_mask = local_1dim_ballot(pop != 0, (local volatile sub_group_mask_t*) l_temp);
+                    sub_group_mask_t good_mask = local_1dim_ballot(pop != 0, &sg_temp->mask);
 
                     if (pop != 0)
                     {
@@ -776,19 +779,20 @@ void fine_raster_single_sample(
             
             
             // tag triangle boundaries
-            (*sg_temp)[get_sub_group_local_id()] = 0;
+            sg_temp->integer[get_sub_group_local_id()] = 0;
             if (tri_read + get_sub_group_local_id() < tri_write)
             {
                 int idx = w_triangle_frag[(tri_read + get_sub_group_local_id()) & 63] - frag_read;
                 if (idx <= get_sub_group_size())
-                    (*sg_temp)[idx - 1] = 1;
+                    sg_temp->integer[idx - 1] = 1;
             }
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             
             int rop_lane_idx = popcount_sub_group_mask(rop_lane_mask);
-            sub_group_mask_t boundary_mask = local_1dim_ballot((*sg_temp)[rop_lane_idx], (local volatile sub_group_mask_t*) l_temp);
+            bool tagged = sg_temp->integer[rop_lane_idx];
+            sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, &sg_temp->mask);
             
             // distribute fragments
             if (rop_lane_idx < frag_write - frag_read)
@@ -867,7 +871,7 @@ void fine_raster_single_sample(
                         c_render_mode_flags,
                         tri_idx, pixel_x, pixel_y, &fragment_shader_output, depth,
                         &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
-                        (local volatile sub_group_mask_t*) &w_temp[pixel_in_tile],
+                        &sg_temp->tile[pixel_in_tile],
                         c_blending_color, c_blending_data,
                         c_depth_data,
                         c_render_mode_flags,

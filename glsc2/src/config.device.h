@@ -56,6 +56,6 @@
 
 #define CONF_FINE_SUB_GROUPS 16
 
-#define DEVICE_FINE_SUB_GROUPS 16
+#define DEVICE_FINE_SUB_GROUPS 20
 
 #endif

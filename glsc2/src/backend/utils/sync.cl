@@ -57,6 +57,37 @@ inline uint __attribute__((overloadable)) sub_group_reduce_min(uint value, local
 
 #endif
 
+#ifdef DEVICE_SUB_GROUP_ENABLED
+inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        return sub_group_scan_inclusive_add(value);
+    }
+    #else
+    {
+        uint result;
+
+        uint local_id = get_sub_group_local_id();
+        (*sg_temp)[local_id] = value;
+
+        #pragma unroll
+        for(int target=1; target < get_sub_group_size(); target *= 2) {
+            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+                barrier(CLK_LOCAL_MEM_FENCE);
+            #endif
+            if (local_id >= target) {
+                value += (*sg_temp)[local_id-target];
+                (*sg_temp)[local_id] = value;
+            }
+        }
+        result = value;
+
+        return result;
+    }
+    #endif
+}
+#endif
+
 inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint* l_temp) {
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     {
@@ -256,6 +287,25 @@ inline uint local_reduce_and_2dim_ui(uint value, local volatile uint* l_temp) {
     return l_temp[get_local_linear_size() - get_local_size(0) + get_local_id(0)];
 }
 
+#ifdef DEVICE_SUB_GROUP_ENABLED
+inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+    uint local_id = get_sub_group_local_id();
+    local volatile uint* ptr = &(*sg_temp)[local_id];
+    *ptr = value;
+    #pragma unroll
+    for(int i=1; i<get_sub_group_size(); i=i*2) {
+        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        barrier(CLK_LOCAL_MEM_FENCE);
+        #endif
+        if (local_id >= i) {
+            value = value | ptr[-i];    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+#endif
+
 inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
@@ -272,6 +322,19 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
     }
     return value;
 }
+
+#ifdef DEVICE_SUB_GROUP_ENABLED
+inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+
+    local_1dim_scan_inclusive_or(value, sg_temp);
+    
+    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        barrier(CLK_LOCAL_MEM_FENCE);
+    #endif
+
+    return (*sg_temp)[get_sub_group_size()-1];
+}
+#endif
 
 inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local volatile uint* l_temp) {
 
@@ -290,7 +353,24 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
         Otherwise all threads in work group must be active. 
  */
 #ifdef DEVICE_SUB_GROUP_ENABLED
-inline sub_group_mask_t local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) {
+inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+    sub_group_mask_t mask;
+
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+        mask = ballot_sub_group_mask(value);
+    #else
+    {
+        sub_group_mask_t tmp;
+        clear_sub_group_mask(&tmp);
+        if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
+        mask.mask = local_1dim_reduce_or(tmp.mask, (local volatile uint(*)[DEVICE_SUB_GROUP_THREADS]) sg_temp);
+    }
+    #endif
+    
+    return mask;
+}
+
+inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) {
     sub_group_mask_t mask;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
