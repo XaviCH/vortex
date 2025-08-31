@@ -36,7 +36,7 @@ inline void compute_tile_aabb(
 inline void sub_group_emit_triangle_mask(
     uint4 tri_data, 
     local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1], 
-    local volatile void* l_temp, 
+    local volatile sub_group_mask_t* l_temp, 
     int tri_idx,
     int origin_x, int origin_y,
     int max_tile_x_in_bin, int max_tile_y_in_bin,
@@ -170,7 +170,7 @@ inline void sub_group_emit_triangle_mask(
 inline void local_emit_triangle_mask(
     uint4 tri_data, 
     local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1],
-    local volatile uint* l_temp, 
+    local volatile sub_group_mask_t* l_temp, 
     int tri_idx,
     int origin_x, int origin_y,
     int max_tile_x_in_bin, int max_tile_y_in_bin,
@@ -748,7 +748,7 @@ void coarse_raster(
             local_emit_triangle_mask(
                 tri_data, 
                 (local sub_group_mask_t(*)[CR_BIN_SQR+1])s_warp_emit_mask, 
-                l_temp, 
+                (volatile local sub_group_mask_t*) l_temp, 
                 tri_idx, origin_x, origin_y, 
                 max_tile_x_in_bin, max_tile_y_in_bin, tile_log);
 

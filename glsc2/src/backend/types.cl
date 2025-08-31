@@ -15,22 +15,4 @@ typedef global const float4* restrict ro_vertex_buffer_t;
 typedef global float4* restrict wo_vertex_buffer_t;
 #endif
 
-#ifdef DEVICE_SUB_GROUP_ENABLED
-typedef struct {
-    #if     (DEVICE_SUB_GROUP_THREADS <= 8)
-        uchar mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 16)
-        ushort mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 32)
-        uint mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 64)
-        ulong mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 128)
-        uint4 mask;
-    #else
-        #error DEVICE_SUB_GROUP_THREADS too large to be supported. 
-    #endif
-} sub_group_mask_t;
-#endif
-
 #endif

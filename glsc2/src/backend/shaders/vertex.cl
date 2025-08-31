@@ -55,31 +55,32 @@ inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vert
 inline float4 gl_get_vertex_attribute(
     global const float4* vertex_attributes, 
     global const vertex_attribute_data_t* vertex_attribute_datas,
+    global const void* attribute_pointer,
     int attribute_location
 ) {
     if ((vertex_attribute_datas[attribute_location].misc & VERTEX_ATTRIBUTE_ACTIVE_POINTER) != 0)
-        return gl_get_vertex_attribute_from_pointer((global void*)vertex_attributes, vertex_attribute_datas[attribute_location]);
+        return gl_get_vertex_attribute_from_pointer(attribute_pointer, vertex_attribute_datas[attribute_location]);
     
     return vertex_attributes[attribute_location];
 }
 
 #define GL_SET_VERTEX_ATTRIBUTE_ARGS \
-    global const void* src, \
+    global const void* attribute_pointer, \
     global const float4* vertex_attributes, \
     global const vertex_attribute_data_t* vertex_attribute_datas, \
     int attribute_location
 
 inline void __attribute__((overloadable)) gl_set_vertex_attribute(float2* dst, GL_SET_VERTEX_ATTRIBUTE_ARGS)
 {
-    *dst = gl_get_vertex_attribute(vertex_attributes, vertex_attribute_datas, attribute_location).xy;
+    *dst = gl_get_vertex_attribute(vertex_attributes, vertex_attribute_datas, attribute_pointer, attribute_location).xy;
 }
 inline void __attribute__((overloadable)) gl_set_vertex_attribute(float3* dst, GL_SET_VERTEX_ATTRIBUTE_ARGS)
 {
-    *dst = gl_get_vertex_attribute(vertex_attributes, vertex_attribute_datas, attribute_location).xyz;
+    *dst = gl_get_vertex_attribute(vertex_attributes, vertex_attribute_datas, attribute_pointer, attribute_location).xyz;
 }
 inline void __attribute__((overloadable)) gl_set_vertex_attribute(float4* dst, GL_SET_VERTEX_ATTRIBUTE_ARGS)
 {
-    *dst = gl_get_vertex_attribute(vertex_attributes, vertex_attribute_datas, attribute_location);
+    *dst = gl_get_vertex_attribute(vertex_attributes, vertex_attribute_datas, attribute_pointer, attribute_location);
 }
 
 #undef GL_SET_VERTEX_ATTRIBUTE_ARGS

@@ -26,7 +26,6 @@ inline void triangle_setup(
 
     ro_vertex_buffer_t t_vertex_buffer, 
 
-    const int c_num_tris, 
     const int c_max_subtris,
     const render_mode_t c_render_mode,
     const int c_samples_log2,
@@ -34,7 +33,7 @@ inline void triangle_setup(
     const int c_viewport_height,
     const int c_viewport_width,
     int3 vidx,
-    local float* bary 
+    float* bary 
 );
 
 //------------------------------------------------------------------------
@@ -44,7 +43,9 @@ inline void triangle_setup(
  *
  */
 kernel
+/*
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_SETUP_SUB_GROUPS, 1)))
+*/
 void triangle_setup_arrays(
     global int* a_num_subtris,
 
@@ -63,22 +64,26 @@ void triangle_setup_arrays(
     const int c_viewport_width
 )
 {
+    /*
     local float s_bary[DEVICE_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
 
     local float* bary = s_bary[get_local_linear_id()];
+    */
+    float bary[18];
 
     // Pick a task.
 
-    int task_idx = get_global_linear_id();
+    int task_idx = get_global_id(0);
     
+    /*
     if (task_idx >= c_num_tris)
         return;
-
+    */
     // Pick vertices
 
     int3 vidx;
     if (is_render_mode_flag_triangle_fan(c_render_mode)) {
-        vidx = (int3){0, task_idx + 1, task_idx + 2};
+        vidx = (int3){get_global_offset(0), task_idx + 1, task_idx + 2};
     } else if (is_render_mode_flag_triangle_strip(c_render_mode)) {
         uint offset = 2 * (task_idx%2);
         vidx = (int3){task_idx + offset, task_idx + 1, task_idx + 2 - offset};
@@ -94,7 +99,6 @@ void triangle_setup_arrays(
         g_tri_data,
         g_tri_subtris,
         t_vertex_buffer,
-        c_num_tris, 
         c_max_subtris,
         c_render_mode,
         c_samples_log2,
@@ -111,7 +115,9 @@ void triangle_setup_arrays(
  *
  */
 kernel
+/*
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_SETUP_SUB_GROUPS, 1)))
+*/
 void triangle_setup_range(
     global int* a_num_subtris,
 
@@ -122,7 +128,7 @@ void triangle_setup_range(
 
     ro_vertex_buffer_t t_vertex_buffer,
 
-    const int c_num_tris, 
+    const int c_vertex_offset,
     const int c_max_subtris,
     const render_mode_t c_render_mode,
     const int c_samples_log2,
@@ -131,17 +137,21 @@ void triangle_setup_range(
     const int c_viewport_width
 )
 {
+    /*
     local float s_bary[DEVICE_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
 
     local float* bary = s_bary[get_local_linear_id()];
+    */
+    float bary[18];
 
     // Pick a task.
 
     int task_idx = get_global_linear_id();
     
+    /*
     if (task_idx >= c_num_tris)
         return;
-
+    */
     // Pick vertices
 
     int3 vidx;
@@ -166,6 +176,8 @@ void triangle_setup_range(
         };
     }
 
+    vidx += c_vertex_offset;
+
     // Read vertices.
 
     triangle_setup(
@@ -174,7 +186,6 @@ void triangle_setup_range(
         g_tri_data,
         g_tri_subtris,
         t_vertex_buffer,
-        c_num_tris, 
         c_max_subtris,
         c_render_mode,
         c_samples_log2,
@@ -420,7 +431,6 @@ inline void triangle_setup(
 
     ro_vertex_buffer_t t_vertex_buffer, 
 
-    const int c_num_tris, 
     const int c_max_subtris,
     const render_mode_t c_render_mode,
     const int c_samples_log2,
@@ -428,7 +438,7 @@ inline void triangle_setup(
     const int c_viewport_height,
     const int c_viewport_width,
     int3 vidx,
-    local float* bary 
+    float* bary 
 )
 {
 
@@ -438,7 +448,7 @@ inline void triangle_setup(
 
     // Pick a task.
 
-    int task_idx = get_global_linear_id();
+    int task_idx = get_global_id(0);
 
     // Read vertices.
 

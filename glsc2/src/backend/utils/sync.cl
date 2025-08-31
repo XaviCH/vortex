@@ -59,14 +59,14 @@ inline uint __attribute__((overloadable)) sub_group_reduce_min(uint value, local
 
 #ifdef DEVICE_SUB_GROUP_ENABLED
 inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+    uint result;
+
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     {
-        return sub_group_scan_inclusive_add(value);
+        result = sub_group_scan_inclusive_add(value);
     }
     #else
     {
-        uint result;
-
         uint local_id = get_sub_group_local_id();
         (*sg_temp)[local_id] = value;
 
@@ -80,11 +80,12 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
                 (*sg_temp)[local_id] = value;
             }
         }
-        result = value;
 
-        return result;
+        result = value;
     }
     #endif
+
+    return result;
 }
 #endif
 
@@ -123,39 +124,13 @@ inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, l
     uint id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[id];
 
-    // reduce the use of local memory by using intra subgroup register operations.
-    /*
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    {
-        value = sub_group_scan_inclusive_add(value);
-        if (get_sub_group_local_id() == get_sub_group_size()-1)
-            l_temp[get_sub_group_id()] = value;
-        
-        // TODO: Generalize for get_num_sub_groups > get_sub_group_size
-        #pragma unroll
-        for (int scan_size = get_num_sub_groups(); scan_size>0; scan_size/=get_sub_group_size()) {
-            barrier(CLK_LOCAL_MEM_FENCE);
-            // subgroup register scan until scan results <= num_sub_groups
-            if (get_sub_group_id()*get_sub_group_size() < scan_size) {
-                uint temp = get_sub_group_local_id() < scan_size ? l_temp[get_sub_group_local_id()] : 0;
-                temp = sub_group_scan_inclusive_add(temp);
-                l_temp[get_sub_group_local_id()] = temp;
-                // if (get_sub_group_local_id() == get_sub_group_size()-1)
-            }
-        }
-
-        barrier(CLK_LOCAL_MEM_FENCE);
-        value += get_sub_group_id() ? l_temp[get_sub_group_id()-1] : 0;
-    }
-    #else
-    */
     {
         *ptr = value;
 
         #pragma unroll
         for(uint i=1; i<get_local_size(0); i=i*2) {
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-            barrier(CLK_LOCAL_MEM_FENCE);
+                barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             if (id >= i) {
                 value += ptr[-i];
@@ -258,13 +233,31 @@ inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
 */
 
 
+inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint id, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+    uint result;
+
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        result = sub_group_broadcast(value, id);
+    }
+    #else
+    {
+        (*sg_temp)[get_local_id(0)] = value;
+        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+            barrier(CLK_LOCAL_MEM_FENCE);
+        #endif
+        result = (*sg_temp)[0];
+    }
+    #endif
+
+    return result;
+}
+
 inline uint __attribute__((overloadable)) local_reduce_min(uint value, local volatile uint* l_temp) {
     local_scan_inclusive_min(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
     return l_temp[get_local_linear_size()-1];
 }
-
-
 
 inline uint local_scan_inclusive_and_2dim_ui(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_linear_id();
@@ -295,7 +288,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
     #pragma unroll
     for(int i=1; i<get_sub_group_size(); i=i*2) {
         #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-        barrier(CLK_LOCAL_MEM_FENCE);
+            barrier(CLK_LOCAL_MEM_FENCE);
         #endif
         if (local_id >= i) {
             value = value | ptr[-i];    
@@ -348,6 +341,19 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
 }
 
 /**
+ * @brief Ensure memory syncronization at least for 1st dimension threads on work group.
+ */
+inline void local_1dim_barrier(cl_mem_fence_flags flags) {
+    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+            sub_group_barrier(flags);
+        #else
+            barrier(flags);
+        #endif
+    #endif
+}
+
+/**
     PRE: 
         For DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1 is not required that all threads were active. 
         Otherwise all threads in work group must be active. 
@@ -362,8 +368,33 @@ inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool val
     {
         sub_group_mask_t tmp;
         clear_sub_group_mask(&tmp);
-        if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
-        mask.mask = local_1dim_reduce_or(tmp.mask, (local volatile uint(*)[DEVICE_SUB_GROUP_THREADS]) sg_temp);
+        if (value) set_bit_sub_group_mask(&tmp, get_sub_group_local_id());
+
+        clear_sub_group_mask(&(*sg_temp)[0]);
+        atomic_or_sub_group_mask(&(*sg_temp)[0], tmp);
+        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+            barrier(CLK_LOCAL_MEM_FENCE);
+        #endif
+        mask = (*sg_temp)[0];
+        // TODO: 
+        // Implement it without atomics could add speed up.
+        /*
+        #if DEVICE_SUB_GROUP_THREADS <= 8
+            local volatile uchar (*ptr)[DEVICE_SUB_GROUP_THREADS] = (local volatile uchar (*)[DEVICE_SUB_GROUP_THREADS]) sg_temp;
+        #elif DEVICE_SUB_GROUP_THREADS <= 16
+            local volatile ushort (*ptr)[DEVICE_SUB_GROUP_THREADS] = (local volatile ushort (*)[DEVICE_SUB_GROUP_THREADS]) sg_temp;
+        #elif DEVICE_SUB_GROUP_THREADS <= 32
+            local volatile uint (*ptr)[DEVICE_SUB_GROUP_THREADS] = (local volatile uint (*)[DEVICE_SUB_GROUP_THREADS]) sg_temp;
+        #elif DEVICE_SUB_GROUP_THREADS <= 64
+            local volatile ulong (*ptr)[DEVICE_SUB_GROUP_THREADS] = (local volatile ulong (*)[DEVICE_SUB_GROUP_THREADS]) sg_temp;
+        #elif DEVICE_SUB_GROUP_THREADS <= 128
+            local volatile uint4 (*ptr)[DEVICE_SUB_GROUP_THREADS] = (local volatile uint4 (*)[DEVICE_SUB_GROUP_THREADS]) sg_temp;
+        #else
+            #error Not supported size
+        #endif
+
+        mask.mask = local_1dim_reduce_or(tmp.mask, ptr);
+        */
     }
     #endif
     

@@ -212,8 +212,7 @@ inline bool bs_needs_dst(uint c_render_mode_flags, uint c_blender_op) {
 }
 
 inline void run_blend_shader(
-    blend_shader_input_t* input, blend_shader_output_t* output,
-    int tri_idx, int pixel_x, int pixel_y, int sampleIdx, uint src, uint dst,
+    blend_shader_output_t* output, uint src, uint dst,
     uint c_blending_color, uint c_blending_data, uint c_render_mode_flags)
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_BLENDER) != 0) {
@@ -393,15 +392,11 @@ inline int find_fragment(ulong coverage, int frag_idx)
 // Single-sample implementation.
 //------------------------------------------------------------------------
 
-#if (DEVICE_SUB_GROUP_RAW == 1)
 inline void execute_ROP_single_sample(
-    uint render_mode_flags,
-    int tri_idx, int pixel_x, int pixel_y,
     fragment_shader_output_t* restrict fs_out, ushort depth, 
     local volatile uint* restrict ptr_color, 
     local volatile ushort* restrict ptr_depth, 
     local volatile uchar* restrict ptr_stencil,
-    local volatile sub_group_mask_t* restrict ptr_temp,
     uint c_blending_color, uint c_blending_data,
     uint c_depth_data,
     uint c_render_mode_flags,
@@ -417,60 +412,42 @@ inline void execute_ROP_single_sample(
     bool stencil_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0;
     bool depth_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0;
 
-    // blend_shader_input.needs_dst = false;
-
-    sub_group_mask_t sub_group_mask;
-    clear_sub_group_mask(&sub_group_mask);
-    set_bit_sub_group_mask(&sub_group_mask, get_sub_group_local_id());
-
-    sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
     // TODO: Optimize, ordering on primitive is not always required.
-    do
-    {
-        clear_sub_group_mask(ptr_temp);
-        atomic_or_sub_group_mask(ptr_temp, sub_group_mask);
-
-        // check if this lane is processing an earlier fragment
-        if (!any_sub_group_mask(and_sub_group_mask(*ptr_temp, lt_mask))) {
             
-            // stencil test
-            uchar stencil = *ptr_stencil;
-            
-            if (stencil_test_enabled) {
-                if (!stencil_test(stencil, c_stencil_data)) {
-                    stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_sfail(c_stencil_data));
-                    return;
-                }
-            }
-
-            // depth test
-            if (depth_test_enabled) {
-                if (!depth_test(depth, *ptr_depth, c_depth_data)) {
-                    if (stencil_test_enabled)
-                        stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dfail(c_stencil_data));
-                    return;
-                }
-                *ptr_depth = depth;
-            }
-
-            // stencil op post depth test
-            if (stencil_test_enabled) {
-                stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dpass(c_stencil_data));
-            }
-            
-            // blending
-            run_blend_shader(&blend_shader_input, &blend_shader_output, tri_idx, pixel_x, pixel_y, 0, color, *ptr_color,
-                c_blending_color, c_blending_data, c_render_mode_flags);
-            if (blend_shader_output.write_color)
-                *ptr_color = blend_shader_output.color;
-            
+    // stencil test
+    uchar stencil = *ptr_stencil;
+    
+    if (stencil_test_enabled) {
+        if (!stencil_test(stencil, c_stencil_data)) {
+            stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_sfail(c_stencil_data));
             return;
         }
     }
-    while (true);
+
+    // depth test
+    if (depth_test_enabled) {
+        if (!depth_test(depth, *ptr_depth, c_depth_data)) {
+            if (stencil_test_enabled)
+                stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dfail(c_stencil_data));
+            return;
+        }
+        *ptr_depth = depth;
+    }
+
+    // stencil op post depth test
+    if (stencil_test_enabled) {
+        stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dpass(c_stencil_data));
+    }
+    
+    // blending
+    run_blend_shader(&blend_shader_output, color, *ptr_color,
+        c_blending_color, c_blending_data, c_render_mode_flags);
+    if (blend_shader_output.write_color)
+        *ptr_color = blend_shader_output.color;
+    
+    return;
     
 }
-#endif // DEVICE_SUB_GROUP_RAW_ENABLED
 
 //------------------------------------------------------------------------
 
@@ -490,13 +467,9 @@ inline void execute_ROP_single_sample(
  */
 kernel 
 #ifdef DEVICE_SUB_GROUP_ENABLED
-#ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-    #error "Sub-group raw mode must be enabled to use sub-group."
-#endif
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS, 1)))
 #else
-    #error "Sub-group mode must be enabled to use fine rasterization."
-__attribute__((reqd_work_group_size(DEVICE_FINE_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
 #endif
 void fine_raster_single_sample(
     FS_KERNEL_PARAMS
@@ -560,7 +533,7 @@ void fine_raster_single_sample(
     typedef union {
         uint                integer [DEVICE_SUB_GROUP_THREADS];
         sub_group_mask_t    mask    [DEVICE_SUB_GROUP_THREADS];
-        sub_group_mask_t    tile    [64];
+        sub_group_mask_t    tile    [CR_TILE_SQR];
     } sg_tmp_mem_t;
 
     local volatile sg_tmp_mem_t     l_temp              [DEVICE_FINE_SUB_GROUPS]; // tmp memory
@@ -607,20 +580,8 @@ void fine_raster_single_sample(
         if (get_local_id(0) == 0)
             active_idx = atomic_add(a_fine_counter, 1);
 
-        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-        {
-            active_idx = sub_group_broadcast(active_idx, 0);
-        }
-        #else
-        {
-            sg_temp->integer[get_sub_group_local_id()] = active_idx;
-            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-                barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
-            active_idx = sg_temp->integer[0];
-        }
-        #endif
-
+        active_idx = local_1dim_broadcast(active_idx, 0, &sg_temp->integer);
+        
         if (active_idx >= *a_num_active_tiles)
             break;
 
@@ -634,6 +595,7 @@ void fine_raster_single_sample(
         int frag_read = 0, frag_write = 0;
         w_triangle_frag[63] = 0; // "previous triangle"
 
+        // load tile
         {
             // Copy and clear if required framebuffers
             // TODO: Scissor test and dithering.
@@ -692,12 +654,12 @@ void fine_raster_single_sample(
         init_tile_z_max(&tile_z_max, &tile_z_upd_max, w_tile_depth);
         init_tile_z_min(&tile_z_min, &tile_z_upd_min, w_tile_depth);
         
-        // process fragments
+        // process fragments in tile
         for(;;)
         {
             // need to queue more fragments?
             
-            if (frag_write - frag_read < get_sub_group_size() && segment >= 0)
+            if (frag_write - frag_read < get_local_size(0) && segment >= 0)
             {
                 // update tile z
 
@@ -740,19 +702,7 @@ void fine_raster_single_sample(
                     uint frag = local_1dim_scan_inclusive_add(pop, &sg_temp->integer);
                     uint tmp_frag = frag;
                     frag += frag_write; // frag now holds cumulative fragment count
-
-                    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-                    {
-                        frag_write += sub_group_broadcast(tmp_frag, get_sub_group_size() - 1);
-                    }
-                    #else
-                    {
-                        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-                            barrier(CLK_LOCAL_MEM_FENCE);
-                        #endif
-                        frag_write += sg_temp->integer[get_sub_group_size()-1];
-                    }
-                    #endif
+                    frag_write += local_1dim_broadcast(tmp_frag, get_sub_group_size() - 1, &sg_temp->integer);
 
                     // queue non-empty triangles
                     sub_group_mask_t good_mask = local_1dim_ballot(pop != 0, &sg_temp->mask);
@@ -777,30 +727,35 @@ void fine_raster_single_sample(
             if (frag_read == frag_write)
                 break;
             
-            
+            // TODO: refactor this section
             // tag triangle boundaries
             sg_temp->integer[get_sub_group_local_id()] = 0;
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
             if (tri_read + get_sub_group_local_id() < tri_write)
             {
                 int idx = w_triangle_frag[(tri_read + get_sub_group_local_id()) & 63] - frag_read;
                 if (idx <= get_sub_group_size())
                     sg_temp->integer[idx - 1] = 1;
             }
-            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-                barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
-            
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+            // distribute fragments
             int rop_lane_idx = popcount_sub_group_mask(rop_lane_mask);
             bool tagged = sg_temp->integer[rop_lane_idx];
             sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, &sg_temp->mask);
-            
-            // distribute fragments
-            if (rop_lane_idx < frag_write - frag_read)
+
+            bool active_rop_lane = rop_lane_idx < frag_write - frag_read; 
+            int pixel_in_tile;
+            ushort depth;
+            fragment_shader_output_t fragment_shader_output;
+
+            if (active_rop_lane)
             {
                 int tri_buf_idx = (tri_read + popcount_sub_group_mask(and_sub_group_mask(boundary_mask,rop_lane_mask))) & 63;
                 int frag_idx = add_sub(frag_read, rop_lane_idx, w_triangle_frag[(tri_buf_idx - 1) & 63]);
                 ulong coverage = w_triangle_cov[tri_buf_idx];
-                int pixel_in_tile = find_fragment(coverage, frag_idx);
+                pixel_in_tile = find_fragment(coverage, frag_idx);
                 int tri_idx = w_triangle_idx[tri_buf_idx];
                 int data_idx = w_tri_data_idx[tri_buf_idx];
 
@@ -808,17 +763,15 @@ void fine_raster_single_sample(
                 uint pixel_x = (tile_x << CR_TILE_LOG2) + (pixel_in_tile & 7);
                 uint pixel_y = (tile_y << CR_TILE_LOG2) + (pixel_in_tile >> 3);
 
-                // PRE ROP tests
-                // TODO: Optimize
+                // TODO: Optimize to avoid running ROP
+                // pre ROP tests
 
                 // stencil test
                 uchar stencil;
                 bool skill = false;
                 
                 // depth test
-                ushort depth;
                 bool zkill = false;
-                
                 
                 if (!skill && (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
                 {
@@ -840,15 +793,13 @@ void fine_raster_single_sample(
                     }
                 }
 
-                fragment_shader_output_t fragment_shader_output;
-                bool fragment_pass = true;
                 // fragment_shader_output.discard = false;
 
                 if (!skill && !zkill)
                 {
                     // run fragment shader
                     
-                    fragment_pass = run_fragment_shader(
+                    active_rop_lane = run_fragment_shader(
                         FS_KERNEL_ARGS
 
                         &fragment_shader_output,
@@ -863,27 +814,46 @@ void fine_raster_single_sample(
                         
                 }
 
-                // run ROP
-                if (fragment_pass)
-                {
-                    
-                    execute_ROP_single_sample(
-                        c_render_mode_flags,
-                        tri_idx, pixel_x, pixel_y, &fragment_shader_output, depth,
-                        &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
-                        &sg_temp->tile[pixel_in_tile],
-                        c_blending_color, c_blending_data,
-                        c_depth_data,
-                        c_render_mode_flags,
-                        c_stencil_data
-                    );
-                    
-                }
-                
-
             }
+
+
+            // TODO: Optimize, ordering on primitive is not always required.
+            // loop while multiple threads access to same pixel and run ROP
+            sub_group_mask_t thread_bit = get_thread_bit_sub_group_mask();
+            sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
+
+            do
+            {
+                if (active_rop_lane) 
+                    clear_sub_group_mask(&sg_temp->tile[pixel_in_tile]);
+
+                local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (active_rop_lane) 
+                    atomic_or_sub_group_mask(&sg_temp->tile[pixel_in_tile], thread_bit);
+
+                local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+                if (active_rop_lane) {
+                    // check if this lane is processing an earlier fragment
+                    if (!any_sub_group_mask(and_sub_group_mask(sg_temp->tile[pixel_in_tile], lt_mask))) {
+                    
+                        execute_ROP_single_sample(
+                            &fragment_shader_output, depth,
+                            &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
+                            c_blending_color, c_blending_data,
+                            c_depth_data,
+                            c_render_mode_flags,
+                            c_stencil_data
+                        );
+                        active_rop_lane = false;
+                    }
+                }
+                    
+            } while(any_sub_group_mask(local_1dim_ballot(active_rop_lane, &sg_temp->mask)));
+
             // update counters
-            frag_read = min(frag_read + 32, frag_write);
+            frag_read = min((int)(frag_read + get_local_size(0)), frag_write);
             tri_read += popcount_sub_group_mask(boundary_mask);
         }
 

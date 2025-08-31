@@ -30,6 +30,26 @@ inline void __attribute__((overloadable)) clear_sub_group_mask(local volatile su
     sub_group_mask->mask = 0;
 }
 
+inline void set_bit_sub_group_mask(sub_group_mask_t* sub_group_mask, uint position) {
+    #if (DEVICE_SUB_GROUP_THREADS <= 64)
+        sub_group_mask->mask |= 1ul << position;
+    #else
+    {
+        ulong* pointer = (ulong*)sub_group_mask + (position > 63);
+        pointer->mask |= 1ul << (position % 64);
+    }
+    #endif
+}
+
+inline sub_group_mask_t get_thread_bit_sub_group_mask() {
+    sub_group_mask_t mask;
+
+    mask.mask = 0;
+    set_bit_sub_group_mask(&mask, get_sub_group_local_id());
+
+    return mask;
+}
+
 inline sub_group_mask_t and_sub_group_mask(sub_group_mask_t a, sub_group_mask_t b) {
     sub_group_mask_t sub_group_mask;
 
@@ -121,16 +141,7 @@ inline bool get_bit_sub_group_mask(sub_group_mask_t sub_group_mask, uint positio
     return bit;
 }
 
-inline void set_bit_sub_group_mask(sub_group_mask_t* sub_group_mask, uint position) {
-    #if (DEVICE_SUB_GROUP_THREADS <= 64)
-        sub_group_mask->mask |= 1ul << position;
-    #else
-    {
-        ulong* pointer = (ulong*)sub_group_mask + (position > 63);
-        pointer->mask |= 1ul << (position % 64);
-    }
-    #endif
-}
+
 
 inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group_mask_t* address, const sub_group_mask_t mask) {
     sub_group_mask_t atomic_mask;
@@ -148,7 +159,7 @@ inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group_mask_t
         uint result = atomic_or(aligned_address, aligned_mask);
         atomic_mask.mask = result >> align_offset*16;
     #elif (DEVICE_SUB_GROUP_THREADS <= 64)
-        atomic_mask.mask = atomic_or(&(address->mask), mask.mask);
+        atomic_mask.mask = atomic_or(&address->mask, mask.mask);
     #else
         #error Unsupported atomics for sub group threads that large
     #endif
