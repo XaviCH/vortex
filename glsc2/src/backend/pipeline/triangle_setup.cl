@@ -33,7 +33,8 @@ inline void triangle_setup(
     const int c_viewport_height,
     const int c_viewport_width,
     int3 vidx,
-    float* bary 
+    float* bary,
+    const uint c_primitive_config
 );
 
 //------------------------------------------------------------------------
@@ -61,7 +62,8 @@ void triangle_setup_arrays(
     const int c_samples_log2,
     const int c_vertex_size,
     const int c_viewport_height,
-    const int c_viewport_width
+    const int c_viewport_width,
+    const uint c_primitive_config
 )
 {
     /*
@@ -106,7 +108,8 @@ void triangle_setup_arrays(
         c_viewport_height,
         c_viewport_width,
         vidx,
-        bary
+        bary,
+        c_primitive_config
     );
 }
 
@@ -134,7 +137,8 @@ void triangle_setup_range(
     const int c_samples_log2,
     const int c_vertex_size,
     const int c_viewport_height,
-    const int c_viewport_width
+    const int c_viewport_width,
+    const uint c_primitive_config
 )
 {
     /*
@@ -193,7 +197,8 @@ void triangle_setup_range(
         c_viewport_height,
         c_viewport_width,
         vidx,
-        bary
+        bary,
+        c_primitive_config
     );
 }
 
@@ -293,7 +298,8 @@ inline void setupTriangle(
     int2 d1, int2 d2, int area,
 
     int c_viewport_width, int c_viewport_height,
-    int c_samples_log2, render_mode_t c_render_mode
+    int c_samples_log2, render_mode_t c_render_mode,
+    face_t face, uint c_primitive_config
     )
 {
     uint dep = 0;
@@ -382,9 +388,11 @@ inline void setupTriangle(
         prmt(p2.x, p2.y, 0x5410),
         (zmin & 0xfffff000u) | (f01 << 6) | (f12 << 2) | (f20 >> 2));
 
+    set_th_misc_face(&th->misc, face);
+    set_th_misc_primitive_config(&th->misc, c_primitive_config);
 }
 
-inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) {
+inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) { 
     float4 value;
 
     #ifdef DEVICE_IMAGE_ENABLED
@@ -402,7 +410,7 @@ inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) {
     Depending on the mode, flip the triangle.
     Swap v0 and v2.
  */
-inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, const render_mode_t c_render_mode) {
+inline face_t flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, const render_mode_t c_render_mode) {
     float2 d1 = (float2)(v1->x - v0->x, v1->y - v0->y);
     float2 d2 = (float2)(v2->x - v0->x, v2->y - v0->y);
     float area = d1.x * d2.y - d1.y * d2.x;
@@ -419,7 +427,11 @@ inline void flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, const r
         float4 tv = *v0;
         *v0 = *v2;
         *v2 = tv;
+        
+        return BACK;
     }
+
+    return FRONT;
 }
 
 inline void triangle_setup(
@@ -438,7 +450,8 @@ inline void triangle_setup(
     const int c_viewport_height,
     const int c_viewport_width,
     int3 vidx,
-    float* bary 
+    float* bary,
+    const uint c_primitive_config
 )
 {
 
@@ -476,7 +489,7 @@ inline void triangle_setup(
     }
 
     // Flip triangle depending on culling mode
-    flipTriangle(&vidx, &v0, &v1, &v2, c_render_mode);
+    face_t face = flipTriangle(&vidx, &v0, &v1, &v2, c_render_mode);
 
     // Inside depth range => try to snap vertices.
     if (v0.w >= fabs(v0.z) && v1.w >= fabs(v1.z) && v2.w >= fabs(v2.z))
@@ -506,7 +519,7 @@ inline void triangle_setup(
                     p0, p1, p2, rcpW,
                     d1, d2, area,
                     c_viewport_width, c_viewport_height,
-                    c_samples_log2, c_render_mode);
+                    c_samples_log2, c_render_mode, face, c_primitive_config);
 
             return;
         }
@@ -552,7 +565,7 @@ inline void triangle_setup(
     if (numSubtris > 1)
     {
         subtriBase = atomic_add(a_num_subtris, numSubtris);
-        g_tri_header[task_idx].misc = subtriBase;
+        g_tri_header[task_idx].misc.misc = subtriBase;
         if (subtriBase + numSubtris > c_max_subtris)
             numVerts = 0;
     }
@@ -579,7 +592,7 @@ inline void triangle_setup(
                 (float2)(bary[i * 2 + 0], bary[i * 2 + 1]),
                 p0, p1, p2, rcpW,
                 d1, d2, area,
-                c_viewport_width, c_viewport_height, c_samples_log2, c_render_mode);
+                c_viewport_width, c_viewport_height, c_samples_log2, c_render_mode, face, c_primitive_config);
 
             subtriBase++;
         }

@@ -14,10 +14,31 @@ typedef uint cl_uint;
 typedef ushort cl_ushort;
 typedef short cl_short;
 typedef bool cl_bool;
+typedef uint2 cl_uint2;
+typedef uint4 cl_uint4;
 #else
 #include <CL/opencl.h>
 #endif
 
+#ifdef DEVICE_SUB_GROUP_ENABLED
+typedef struct {
+    #if     (DEVICE_SUB_GROUP_THREADS <= 8)
+        cl_uchar mask;
+    #elif   (DEVICE_SUB_GROUP_THREADS <= 16)
+        cl_ushort mask;
+    #elif   (DEVICE_SUB_GROUP_THREADS <= 32)
+        cl_uint mask;
+    #elif   (DEVICE_SUB_GROUP_THREADS <= 64)
+        cl_ulong mask;
+    #elif   (DEVICE_SUB_GROUP_THREADS <= 128)
+        cl_uint4 mask;
+    #else
+        #error DEVICE_SUB_GROUP_THREADS too large to be supported. 
+    #endif
+} sub_group_mask_t;
+#endif
+
+// render mode methods
 typedef struct {
     cl_uint flags;
 } render_mode_t;
@@ -51,25 +72,57 @@ typedef enum {
     BACK = 1
 } face_t;
 
+// triangle header misc type
+// stores metadata related with the primitive
+#define TH_MISC_FACE_POSITION 31
+#define TH_MISC_BITFLIPS 12
+
+#define TH_MISC_PRIMITIVE_CONFIG_POSITION (TH_MISC_FACE_POSITION - TRIANGLE_PRIMITIVE_CONFIGS_LOG2)
+#define TH_MISC_DEPTH_SIZE_LOG ((TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_BITFLIPS)/2)
+
+#define TH_MISC_ZMAX_POSITION (TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_DEPTH_SIZE_LOG)
+#define TH_MISC_ZMIN_POSITION (TH_MISC_BITFLIPS)
+
 typedef struct {
     cl_uint misc;
 } triangle_header_misc_t;
 
-inline face_t           get_th_misc_face(const triangle_header_misc_t th_misc) { return (face_t)(th_misc.misc>>31); }
-inline cl_ushort   get_th_misc_zmax(const triangle_header_misc_t th_misc) { return ((th_misc.misc >>  4) | 0xFFu) & 0xFFFFu; }
-inline cl_ushort   get_th_misc_zmin(const triangle_header_misc_t th_misc) { return ((th_misc.misc >> 12) | 0x00u) & 0xFF00u; }
+inline face_t get_th_misc_face(const triangle_header_misc_t th_misc) { 
+    return (face_t)(th_misc.misc >> TH_MISC_FACE_POSITION); 
+}
+inline cl_uint get_th_misc_primitive_config(const triangle_header_misc_t th_misc) { 
+    return (th_misc.misc >> TH_MISC_PRIMITIVE_CONFIG_POSITION) & (TRIANGLE_PRIMITIVE_CONFIGS - 1); 
+}
+inline cl_ushort get_th_misc_zmax(const triangle_header_misc_t th_misc) {
+    const cl_uint LOST_BITS = 16 - (TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_ZMAX_POSITION);
+    cl_uint depth = (th_misc.misc >> (TH_MISC_ZMAX_POSITION - LOST_BITS)) | (LOST_BITS - 1); // bound to upper
+    return depth & 0xFFFFu;
+}
+inline cl_ushort get_th_misc_zmin(const triangle_header_misc_t th_misc) { 
+    const cl_uint LOST_BITS = 16 - (TH_MISC_ZMAX_POSITION - TH_MISC_ZMIN_POSITION);
+    cl_uint depth = (th_misc.misc >> (TH_MISC_ZMIN_POSITION - LOST_BITS)) & ~(LOST_BITS - 1); // bound to lower
+    return depth & 0xFFFFu;
+}
 
 inline void set_th_misc_face(triangle_header_misc_t* th_misc, face_t face) { 
-    th_misc->misc &= 0x7FFFFFFFu;
-    th_misc->misc |= ((unsigned int)face << 31);
-};
+    th_misc->misc &= (1u << TH_MISC_FACE_POSITION) - 1;
+    th_misc->misc |= ((cl_uint)face << TH_MISC_FACE_POSITION);
+}
+inline void set_th_misc_primitive_config(triangle_header_misc_t* th_misc, cl_uint primitive_config) { 
+    th_misc->misc &= ~((cl_uint)(TRIANGLE_PRIMITIVE_CONFIGS - 1) << TH_MISC_PRIMITIVE_CONFIG_POSITION);
+    th_misc->misc |= (primitive_config << TH_MISC_PRIMITIVE_CONFIG_POSITION);
+}
 inline void set_th_misc_zmax(triangle_header_misc_t* th_misc, cl_ushort zmax) {
-    th_misc->misc &= 0xFFF00FFFu;
-    th_misc->misc |= ((unsigned int)zmax << 4) & 0xFF000u; // just write the 8 most significant bits
+    const cl_uint VALID_BITS = (TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_ZMAX_POSITION);
+    const cl_uint LOST_BITS = 16 - VALID_BITS;
+    th_misc->misc &= ~(VALID_BITS << TH_MISC_ZMAX_POSITION);
+    th_misc->misc |= ((cl_uint)zmax >> LOST_BITS) << TH_MISC_ZMAX_POSITION;
 };
 inline void set_th_misc_zmin(triangle_header_misc_t* th_misc, cl_ushort zmin) {
-    th_misc->misc &= 0xF00FFFFFu;
-    th_misc->misc |= ((unsigned int)zmin << 12) & 0xFF00000u; // just write the 8 most significant bits
+    const cl_uint VALID_BITS = (TH_MISC_ZMAX_POSITION - TH_MISC_ZMIN_POSITION);
+    const cl_uint LOST_BITS = 16 - VALID_BITS;
+    th_misc->misc &= ~(VALID_BITS << TH_MISC_ZMIN_POSITION);
+    th_misc->misc |= ((cl_uint)zmin >> LOST_BITS) << TH_MISC_ZMIN_POSITION;
 };
 
 typedef struct
@@ -81,7 +134,7 @@ typedef struct
     cl_short v2x;
     cl_short v2y;
 
-    cl_uint misc;   // triSubtris=1: (zmin:20, f01:4, f12:4, f20:4), triSubtris>=2: (subtriBase)
+    triangle_header_misc_t misc;   // triSubtris=1: (zmin:20, f01:4, f12:4, f20:4), triSubtris>=2: (subtriBase)
 } triangle_header_t;
 
 typedef struct
@@ -139,6 +192,15 @@ typedef struct {
     unsigned int mag_filter : 1;
     */
 } sampler2D_t;
+
+/*
+typedef union {
+    struct {
+        unsigned short width, height, misc;
+    };
+    cl_uint2 _;
+} sampler2D_t;
+ */
 
 
 unsigned int get_sampler2D_internalformat(sampler2D_t sampler2D)  { return (sampler2D.misc >>  0) & 0xFu; }

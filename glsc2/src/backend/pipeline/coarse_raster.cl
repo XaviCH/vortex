@@ -777,11 +777,11 @@ void coarse_raster(
             #if (CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS <= DEVICE_SUB_GROUP_THREADS)
             {
                 bool thread_condition = true;
-                #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-                    thread_condition = thread_local_id < get_sub_group_size();
-                #endif
                 #ifdef DEVICE_SUB_GROUP_RAW_ENABLED
                     thread_condition = thread_local_id < CR_BIN_SQR / 32;
+                #endif
+                #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+                    thread_condition = thread_local_id < get_sub_group_size();
                 #endif
 
                 if (thread_condition){
@@ -789,16 +789,10 @@ void coarse_raster(
                     if (thread_local_id < CR_BIN_SQR / 32)
                         sum = s_tile_emit_prefix_sum[(thread_local_id << 5) + 32];
                     
-                    int scan_sum;
-                    #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT && DEVICE_SUB_GROUP_RAW == 0)
-                        scan_sum = sub_group_scan_inclusive_add(sum);
-                    #else
-                        scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
-                    #endif
+                    int scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
 
                     if (thread_local_id < CR_BIN_SQR / 32)
                         s_scan_temp[0][thread_local_id + 16] = scan_sum;
-
                 }
             }
             #else 
@@ -1013,7 +1007,26 @@ void coarse_raster(
         barrier(CLK_LOCAL_MEM_FENCE);
 
         // TODO: rm required raw support.
-        if (thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS)
+        #if CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS > DEVICE_SUB_GROUP_THREADS
+            #error CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS <= DEVICE_SUB_GROUP_THREADS
+        #endif
+        {
+            bool active_thread = thread_local_id < CR_BIN_SQR / get_sub_group_size();
+
+            uint sum = 0;
+            if (active_thread) 
+                sum = s_scan_temp[0][thread_local_id + 16];
+
+            sum = local_1dim_scan_inclusive_add(sum, l_temp);
+
+            if (active_thread)
+                s_scan_temp[0][thread_local_id + 16] = sum;
+
+            if (thread_local_id == CR_BIN_SQR / get_sub_group_size() - 1)
+                s_first_active_idx = atomic_add(a_num_active_tiles, sum);
+        }
+        /*
+        if (thread_local_id < CR_BIN_SQR / get_sub_group_size())
         {
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                 #error Required raw support.
@@ -1023,14 +1036,14 @@ void coarse_raster(
             uint sum = s_scan_temp[0][thread_local_id + 16];
 
             #pragma unroll
-            for (int i=1; i < CR_BIN_SQR/DEVICE_SUB_GROUP_THREADS; i*=2) {
+            for (int i=1; i < CR_BIN_SQR/get_sub_group_size(); i*=2) {
                 sum += p[-i], p[0] = sum;
             }
 
-            if (thread_local_id == CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS - 1)
+            if (thread_local_id == CR_BIN_SQR / get_sub_group_size() - 1)
                 s_first_active_idx = atomic_add(a_num_active_tiles, sum);
         }
-
+        */
         // Tile per thread: Output active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);

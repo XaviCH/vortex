@@ -9,11 +9,7 @@
 
 #define DEVICE_NUM_CORES 36
 
-
 #define DEVICE_LOCAL_THREADS_LOG2 10
-
-//
-
 
 // if disable no images nor texture units where used
 #ifndef DEVICE_IMAGE_SUPPORT
@@ -27,20 +23,25 @@
 #define DEVICE_SUB_GROUP_SUPPORT 1
 #endif
 
-// if disable the sub groups do not have read after write coherence between them
-#ifndef DEVICE_SUB_GROUP_RAW
-#define DEVICE_SUB_GROUP_RAW 1
+// if enabled, sub group threads are executed in locksteps.
+#ifndef DEVICE_SUB_GROUP_LOCKSTEP
+#define DEVICE_SUB_GROUP_LOCKSTEP 0
+#endif
+
+// if enabled, sub group threads read and writes instructions are visible to all threads. 
+#ifndef DEVICE_SUB_GROUP_RAW_COHERENCE
+#define DEVICE_SUB_GROUP_RAW_COHERENCE 0
 #endif
 
 // if enabled the device supports sub group intra-register operations as ballot, all, any, scan or reduce. 
 #ifndef DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT
-#define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 0
+#define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 1
 #endif
 
 // ------
 // RENDER CONFIG
 // ------
-
+#define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
 // ------
 // KERNEL CONFIG
 // ------

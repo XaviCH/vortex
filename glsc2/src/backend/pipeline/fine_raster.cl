@@ -467,9 +467,12 @@ inline void execute_ROP_single_sample(
  */
 kernel 
 #ifdef DEVICE_SUB_GROUP_ENABLED
-__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS, 1)))
+    __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS, 1)))
 #else
-__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
+    #if DEVICE_FINE_SUB_GROUPS != 1
+        #error DEVICE_FINE_SUB_GROUPS has to be 1
+    #endif
+    __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
 #endif
 void fine_raster_single_sample(
     FS_KERNEL_PARAMS
@@ -657,8 +660,8 @@ void fine_raster_single_sample(
         // process fragments in tile
         for(;;)
         {
+            // TODO: enqueue fragments that share same configuration
             // need to queue more fragments?
-            
             if (frag_write - frag_read < get_local_size(0) && segment >= 0)
             {
                 // update tile z
