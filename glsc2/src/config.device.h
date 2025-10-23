@@ -41,6 +41,9 @@
 // ------
 // RENDER CONFIG
 // ------
+#define DEVICE_VERTEX_ATTRIBUTE_SIZE 16
+#define DEVICE_UNIFORM_CAPACITY (2*1024) // 2 KB for uniforms
+#define DEVICE_TEXTURE_UNITS 8 // max number of active texture units
 #define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
 // ------
 // KERNEL CONFIG
@@ -52,10 +55,6 @@
 #define DEVICE_BIN_SUB_GROUPS 16
 // Coarse Raster Configuration
 #define DEVICE_COARSE_SUB_GROUPS 16
-
-#define CONF_COARSE_SUB_GROUPS 16 // tmp
-
-#define CONF_FINE_SUB_GROUPS 16
 
 #define DEVICE_FINE_SUB_GROUPS 20
 

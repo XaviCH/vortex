@@ -25,8 +25,28 @@
 // Built-in wrapper functions
 //---------------------------
 
-#define TEXTURE2D(sampler, coord) texture2D(sampler, gl_image_##sampler, coord);
+#define CASE_TEXTURE2D(color, sampler, coord) \
+    case sampler: color = texture2D(gl_texture_datas[sampler], gl_texture_unit_##sampler, coord); break;
 
+#define TEXTURE2D(sampler, coord) ({ \
+    float4 color; \
+    switch (sampler) { \
+        default: \
+        CASE_TEXTURE2D(color, 0, coord); \
+        CASE_TEXTURE2D(color, 1, coord); \
+        CASE_TEXTURE2D(color, 2, coord); \
+        CASE_TEXTURE2D(color, 3, coord); \
+        CASE_TEXTURE2D(color, 4, coord); \
+        CASE_TEXTURE2D(color, 5, coord); \
+        CASE_TEXTURE2D(color, 6, coord); \
+        CASE_TEXTURE2D(color, 7, coord); \
+    } \
+    color; \
+})
+/*
+#define TEXTURE2D(sampler, coord) \
+    texture2D(gl_texture_datas[0], gl_texture_unit_0, coord);
+*/
 //--------------------
 // Varying definitions
 //--------------------
@@ -181,9 +201,9 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     *dst = *(global const float*)&gl_uniforms[*offset];
     *offset += sizeof(float);
 }
-inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_uniforms, sampler2D_t* dst, uint* offset) {
-    *dst = *(global const sampler2D_t*)&gl_uniforms[*offset];
-    *offset += sizeof(sampler2D_t);
+inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_uniforms, uint* dst, uint* offset) {
+    *dst = *(global const uint*)&gl_uniforms[*offset];
+    *offset += sizeof(uint);
 }
 inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_uniforms, int2* dst, uint* offset) {
     *dst = *(global const int2*)&gl_uniforms[*offset];
@@ -253,7 +273,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
 
 #ifdef UNIFORM_SAMPLER2D
     #define KERNEL_PARAM_UNIFORM_SAMPLER2D COMMA_CHAIN(sampler2D_t, UNIFORM_SAMPLER2D)
-    #define DEFINE_UNIFORM_SAMPLER2D STRUCT_CHAIN(sampler2D_t, UNIFORM_SAMPLER2D)
+    #define DEFINE_UNIFORM_SAMPLER2D STRUCT_CHAIN(uint, UNIFORM_SAMPLER2D)
     #define SET_UNIFORM_SAMPLER2D SET_UNIFORM_CHAIN(UNIFORM_SAMPLER2D)
 #else
     #define KERNEL_PARAM_UNIFORM_SAMPLER2D
@@ -416,13 +436,34 @@ typedef struct {
     SET_VARYINGS \
     SET_UNIFORMS
 
-#define FS_KERNEL_PARAMS \
-    global const void* gl_uniforms, \
-    FS_KERNEL_PARAM_UNIFORM_IMAGE2D
+#define T_REPEAT_1(_S) _S##_0
+#define T_REPEAT_2(_S) T_REPEAT_1(_S), _S##_1 
+#define T_REPEAT_3(_S) T_REPEAT_2(_S), _S##_2 
+#define T_REPEAT_4(_S) T_REPEAT_3(_S), _S##_3 
+#define T_REPEAT_5(_S) T_REPEAT_4(_S), _S##_4 
+#define T_REPEAT_6(_S) T_REPEAT_5(_S), _S##_5 
+#define T_REPEAT_7(_S) T_REPEAT_6(_S), _S##_6 
+#define T_REPEAT_8(_S) T_REPEAT_7(_S), _S##_7 
 
+#define T_REPEAT(_N, _S) T_REPEAT_##_N(_S)
+
+// TODO: compiler aware of DEVICE_TEXTURE_UNITS
+
+#if DEVICE_TEXTURE_UNITS != 8
+    #error DEVICE_TEXTURE_UNITS must be 8
+#endif
+
+#ifndef FS_KERNEL_ARGS
 #define FS_KERNEL_ARGS \
-    gl_uniforms, \
-    FS_KERNEL_ARG_UNIFORM_IMAGE2D
+    T_REPEAT(8, gl_texture_unit), \
+    gl_texture_datas,
+#endif // FS_KERNEL_ARGS
+
+#ifndef FS_KERNEL_PARAMS
+#define FS_KERNEL_PARAMS \
+    T_REPEAT(8, ro_texture2d_t gl_texture_unit), \
+    global const gl_texture_data_t* gl_texture_datas,
+#endif // FS_KERNEL_PARAMS
 
 //------------------------------------
 // Data reflection for OpenGL frontend

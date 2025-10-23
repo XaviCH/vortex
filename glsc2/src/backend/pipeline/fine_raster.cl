@@ -150,6 +150,7 @@ inline float3 compute_barys(
 //------------------------------------------------------------------------
 
 inline bool run_fragment_shader(
+    global void* gl_uniforms,
     FS_KERNEL_PARAMS
 
     fragment_shader_output_t* output,
@@ -185,6 +186,7 @@ inline bool run_fragment_shader(
     float3 bary = compute_barys(&wpleq, &upleq, &vpleq, (pixel_x * 2 + 1), (pixel_y * 2 + 1));
 
     return gl_fragment_shader(
+        gl_uniforms,
         FS_KERNEL_ARGS
         output, vertex_buffer, vert_idx, bary 
         );
@@ -251,7 +253,7 @@ inline void get_triangle(
         *data_idx = *tri_idx;
         subtri_idx &= 7;
         if (subtri_idx != 7)
-            *data_idx = g_tri_header[*tri_idx].misc + subtri_idx;
+            *data_idx = g_tri_header[*tri_idx].misc.misc + subtri_idx;
         #ifdef DEVICE_IMAGE_ENABLED
         *tri_header = read_imageui(t_tri_header, *data_idx);
         #else
@@ -333,13 +335,15 @@ inline ulong triangle_pixel_coverage(const int samples_log_2, const uint4 tri_he
 // template <class BlendShaderClass>
 inline sub_group_mask_t determine_ROP_lane_mask(uint c_render_mode_flags) //, local volatile uint* warp_temp) mask of lanes that should process an earlier fragment than this lane
 {
+    /*
     bool reverse_lanes = true;
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) == 0)
     {
         if (!bs_needs_dst(c_render_mode_flags, 0))
             reverse_lanes = false;
     }
-
+    */
+    bool reverse_lanes = false;
     return reverse_lanes ? get_lane_sub_group_mask_lt() : not_sub_group_mask(get_lane_sub_group_mask_le());
 }
 
@@ -397,10 +401,7 @@ inline void execute_ROP_single_sample(
     local volatile uint* restrict ptr_color, 
     local volatile ushort* restrict ptr_depth, 
     local volatile uchar* restrict ptr_stencil,
-    uint c_blending_color, uint c_blending_data,
-    uint c_depth_data,
-    uint c_render_mode_flags,
-    uint c_stencil_data
+    rop_config_t rop_config
 )
 {
     blend_shader_input_t blend_shader_input;
@@ -409,8 +410,8 @@ inline void execute_ROP_single_sample(
     uint color = float4_to_uint(&fs_out->gl_FragColor);
 
     // per-fragment enabled operations
-    bool stencil_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0;
-    bool depth_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0;
+    bool stencil_test_enabled = is_render_mode_flag_enable_stencil(rop_config.render_mode);
+    bool depth_test_enabled = is_render_mode_flag_enable_depth(rop_config.render_mode);
 
     // TODO: Optimize, ordering on primitive is not always required.
             
@@ -418,32 +419,39 @@ inline void execute_ROP_single_sample(
     uchar stencil = *ptr_stencil;
     
     if (stencil_test_enabled) {
-        if (!stencil_test(stencil, c_stencil_data)) {
-            stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_sfail(c_stencil_data));
+        if (!stencil_test(stencil, rop_config.stencil_data)) {
+            stencil_operation(ptr_stencil, rop_config.stencil_data, get_stencil_operation_sfail(rop_config.stencil_data));
             return;
         }
     }
 
     // depth test
     if (depth_test_enabled) {
-        if (!depth_test(depth, *ptr_depth, c_depth_data)) {
+        if (!depth_test(depth, *ptr_depth, rop_config.depth_data)) {
             if (stencil_test_enabled)
-                stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dfail(c_stencil_data));
+                stencil_operation(ptr_stencil, rop_config.stencil_data, get_stencil_operation_dfail(rop_config.stencil_data));
             return;
         }
-        *ptr_depth = depth;
+        if (get_enabled_depth_data(rop_config.enabled_data)) *ptr_depth = depth;
     }
 
     // stencil op post depth test
     if (stencil_test_enabled) {
-        stencil_operation(ptr_stencil, c_stencil_data, get_stencil_operation_dpass(c_stencil_data));
+        stencil_operation(ptr_stencil, rop_config.stencil_data, get_stencil_operation_dpass(rop_config.stencil_data));
     }
     
     // blending
     run_blend_shader(&blend_shader_output, color, *ptr_color,
-        c_blending_color, c_blending_data, c_render_mode_flags);
-    if (blend_shader_output.write_color)
-        *ptr_color = blend_shader_output.color;
+        rop_config.blending_color, rop_config.blending_data.misc, rop_config.render_mode.flags);
+    if (blend_shader_output.write_color) {
+        cl_uint enabled_color_mask = 0;
+        if (get_enabled_red_data(rop_config.enabled_data)) enabled_color_mask |= 0x000000FF;
+        if (get_enabled_green_data(rop_config.enabled_data)) enabled_color_mask |= 0x0000FF00;
+        if (get_enabled_blue_data(rop_config.enabled_data)) enabled_color_mask |= 0x00FF0000;
+        if (get_enabled_alpha_data(rop_config.enabled_data)) enabled_color_mask |= 0xFF000000;
+
+        *ptr_color = (*ptr_color & ~enabled_color_mask) | (enabled_color_mask & blend_shader_output.color);
+    }
     
     return;
     
@@ -475,6 +483,7 @@ kernel
     __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
 #endif
 void fine_raster_single_sample(
+    global const void* gl_uniforms,
     FS_KERNEL_PARAMS
 
     global int* restrict a_fine_counter,
@@ -503,19 +512,14 @@ void fine_raster_single_sample(
     global const triangle_data_t* restrict g_tri_data,
     #endif
     ro_vertex_buffer_t vertex_buffer,
+    constant rop_config_t* restrict g_rop_config,
 
-    const uint   c_blending_color,
-    const uint   c_blending_data,
-    const ulong  c_clear_write_values, 
+    const ulong  c_clear_write_values,
     const ushort c_clear_enabled_data,
-    const ushort c_enabled_data,
     const uint   c_color_buffer_mode,
-    const uint   c_depth_data,
     const int    c_max_bin_segs,
     const int    c_max_subtris,
     const int    c_max_tile_segs,
-    const uint   c_render_mode_flags,
-    const uint   c_stencil_data,
     const int    c_viewport_height,
     const int    c_viewport_width,
     const int    c_width_tiles
@@ -531,6 +535,7 @@ void fine_raster_single_sample(
     local volatile uint     s_tri_data_idx      [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  CRTriangleData index
     local volatile ulong    s_triangle_cov      [DEVICE_FINE_SUB_GROUPS][64];          // 10KB coverage mask
     local volatile uint     s_triangle_frag     [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  fragment index
+    local volatile uchar    l_triangle_conf    [DEVICE_FINE_SUB_GROUPS][64];          // 0.25KB  per-triangle configuration
 
     // The required local mem for specific sub-group communications.
     typedef union {
@@ -549,13 +554,14 @@ void fine_raster_single_sample(
     local volatile uint*    w_tri_data_idx      = (local volatile uint*)    &s_tri_data_idx[get_local_id(1)];
     local volatile ulong*   w_triangle_cov      = (local volatile ulong*)   &s_triangle_cov[get_local_id(1)];
     local volatile uint*    w_triangle_frag     = (local volatile uint*)    &s_triangle_frag[get_local_id(1)];
+    local volatile uchar*    sg_triangle_conf   = (local volatile uchar*)    &l_triangle_conf[get_local_id(1)];
 
     local volatile sg_tmp_mem_t *sg_temp = &l_temp[get_sub_group_id()];
 
     if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs || *a_num_tile_segs > c_max_tile_segs)
         return;
 
-    sub_group_mask_t rop_lane_mask = determine_ROP_lane_mask(c_render_mode_flags);
+    sub_group_mask_t rop_lane_mask = determine_ROP_lane_mask(/*c_render_mode_flags*/ 0); // TODO: this may important for unordered primitives rendering 
     cover8x8_setupLUT(s_cover8x8_lut);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -572,8 +578,8 @@ void fine_raster_single_sample(
     bool stencilbuffer_full_clear = 
         (c_clear_enabled_data & CLEAR_ENABLED_STENCIL_CHANNEL_MASK) == CLEAR_ENABLED_STENCIL_CHANNEL_MASK;
 
-    bool depth_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0;
-    bool stencil_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0;
+    // bool depth_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0;
+    // bool stencil_test_enabled = (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0;
 
     // loop over tiles
     for (;;)
@@ -603,8 +609,8 @@ void fine_raster_single_sample(
             // Copy and clear if required framebuffers
             // TODO: Scissor test and dithering.
             bool colorbuffer_needs_load = !colorbuffer_full_clear;
-            bool depthbuffer_needs_load = depth_test_enabled && !depthbuffer_clear;
-            bool stencilbuffer_needs_load = stencil_test_enabled && !stencilbuffer_full_clear;
+            bool depthbuffer_needs_load = /*depth_test_enabled &&*/ !depthbuffer_clear;
+            bool stencilbuffer_needs_load = /*stencil_test_enabled &&*/ !stencilbuffer_full_clear;
 
             #pragma unroll
             for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
@@ -719,6 +725,9 @@ void fine_raster_single_sample(
                         w_tri_data_idx  [idx] = data_idx;
                         w_triangle_frag [idx] = frag;
                         w_triangle_cov  [idx] = coverage;
+                        
+                        triangle_header_t th = *((triangle_header_t*) &tri_header);
+                        sg_triangle_conf[idx] = get_th_misc_primitive_config(th.misc);
                     }
                     tri_write += popcount_sub_group_mask(good_mask);
 
@@ -751,7 +760,9 @@ void fine_raster_single_sample(
             bool active_rop_lane = rop_lane_idx < frag_write - frag_read; 
             int pixel_in_tile;
             ushort depth;
+            uchar conf_idx;
             fragment_shader_output_t fragment_shader_output;
+            rop_config_t rop_config;
 
             if (active_rop_lane)
             {
@@ -768,7 +779,8 @@ void fine_raster_single_sample(
 
                 // TODO: Optimize to avoid running ROP
                 // pre ROP tests
-
+                conf_idx = sg_triangle_conf[tri_buf_idx];
+                rop_config = g_rop_config[conf_idx];
                 // stencil test
                 uchar stencil;
                 bool skill = false;
@@ -776,7 +788,7 @@ void fine_raster_single_sample(
                 // depth test
                 bool zkill = false;
                 
-                if (!skill && (c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
+                if (!skill && (rop_config.render_mode.flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0)
                 {
                 
                     uint4 zdata;
@@ -787,12 +799,12 @@ void fine_raster_single_sample(
                     #endif
                     depth = (zdata.x * pixel_x + zdata.y * pixel_y + zdata.z) >> 16;
                     ushort old_depth = w_tile_depth[pixel_in_tile];
-                    if (!depth_test(depth, old_depth, c_depth_data))
+                    if (!depth_test(depth, old_depth, rop_config.depth_data))
                         zkill = true;
                     else {
                         // TODO: Checkout this
-                        tile_z_upd_max = update_tile_z(old_depth, tile_z_max, c_depth_data); // we are replacing previous zmax => need to update
-                        tile_z_upd_min = update_tile_z(old_depth, tile_z_min, c_depth_data); // we are replacing previous zmax => need to update
+                        tile_z_upd_max = update_tile_z(old_depth, tile_z_max, rop_config.depth_data); // we are replacing previous zmax => need to update
+                        tile_z_upd_min = update_tile_z(old_depth, tile_z_min, rop_config.depth_data); // we are replacing previous zmax => need to update
                     }
                 }
 
@@ -803,6 +815,7 @@ void fine_raster_single_sample(
                     // run fragment shader
                     
                     active_rop_lane = run_fragment_shader(
+                        (global void*)((global uchar*)gl_uniforms + DEVICE_UNIFORM_CAPACITY*conf_idx),
                         FS_KERNEL_ARGS
 
                         &fragment_shader_output,
@@ -840,14 +853,11 @@ void fine_raster_single_sample(
                 if (active_rop_lane) {
                     // check if this lane is processing an earlier fragment
                     if (!any_sub_group_mask(and_sub_group_mask(sg_temp->tile[pixel_in_tile], lt_mask))) {
-                    
+
                         execute_ROP_single_sample(
                             &fragment_shader_output, depth,
                             &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
-                            c_blending_color, c_blending_data,
-                            c_depth_data,
-                            c_render_mode_flags,
-                            c_stencil_data
+                            rop_config 
                         );
                         active_rop_lane = false;
                     }
@@ -862,13 +872,6 @@ void fine_raster_single_sample(
 
         // Write tile back to the framebuffer.
         {
-            bool colorbuffer_full_masked = (c_enabled_data & ENABLED_COLOR_CHANNEL_MASK) == 0;
-            bool depthbuffer_masked = (c_enabled_data & ENABLED_DEPTH_CHANNEL) == 0;
-            bool stencilbuffer_full_masked = (c_enabled_data & ENABLED_STENCIL_CHANNEL_MASK) == 0;
-
-            bool colorbuffer_needs_store = colorbuffer_clear || !colorbuffer_full_masked;
-            bool depthbuffer_needs_store = depthbuffer_clear || (depth_test_enabled && !depthbuffer_masked);
-            bool stencilbuffer_needs_store = stencilbuffer_clear || (stencil_test_enabled && !stencilbuffer_full_masked);
             
             #pragma unroll
             for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
@@ -878,30 +881,23 @@ void fine_raster_single_sample(
 
                 if (surf_x >= c_viewport_width || surf_y >= c_viewport_height) continue;
 
-                if (colorbuffer_needs_store) {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        write_imageui(t_color_buffer, (int2){surf_x, surf_y}, uint_to_uint4(w_tile_color[pixel], c_color_buffer_mode));
-                    #else
-                        write_tex_to_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode, (uint)w_tile_color[pixel]); //); // (uint)w_tile_stencil[pixel]*255); //
-                    #endif
-                }
+                #ifdef DEVICE_IMAGE_ENABLED
+                    write_imageui(t_color_buffer, (int2){surf_x, surf_y}, uint_to_uint4(w_tile_color[pixel], c_color_buffer_mode));
+                #else
+                    write_tex_to_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode, (uint)w_tile_color[pixel]); //); // (uint)w_tile_stencil[pixel]*255); //
+                #endif
 
-                if (depthbuffer_needs_store) {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[pixel]);
-                    #else
-                        g_depth_buffer[surf_x + surf_y*c_viewport_width] = w_tile_depth[pixel];
-                    #endif
-                }
+                #ifdef DEVICE_IMAGE_ENABLED
+                    write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[pixel]);
+                #else
+                    g_depth_buffer[surf_x + surf_y*c_viewport_width] = w_tile_depth[pixel];
+                #endif
 
-                if (stencilbuffer_needs_store) {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        write_imageui(t_stencil_buffer, (int2){surf_x, surf_y}, w_tile_stencil[pixel]);
-                    #else
-                        g_stencil_buffer[surf_x + surf_y*c_viewport_width] = w_tile_stencil[pixel];
-                    #endif
-                }
-                
+                #ifdef DEVICE_IMAGE_ENABLED
+                    write_imageui(t_stencil_buffer, (int2){surf_x, surf_y}, w_tile_stencil[pixel]);
+                #else
+                    g_stencil_buffer[surf_x + surf_y*c_viewport_width] = w_tile_stencil[pixel];
+                #endif
 
             }
             

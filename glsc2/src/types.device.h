@@ -7,7 +7,6 @@
 #include "constants.device.h"
 #endif
 
-
 // defining primitives for c and cl context
 #ifdef __OPENCL_VERSION__
 typedef uint cl_uint;
@@ -16,58 +15,72 @@ typedef short cl_short;
 typedef bool cl_bool;
 typedef uint2 cl_uint2;
 typedef uint4 cl_uint4;
+typedef uchar cl_uchar;
 #else
 #include <CL/opencl.h>
 #endif
 
 #ifdef DEVICE_SUB_GROUP_ENABLED
-typedef struct {
-    #if     (DEVICE_SUB_GROUP_THREADS <= 8)
-        cl_uchar mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 16)
-        cl_ushort mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 32)
-        cl_uint mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 64)
-        cl_ulong mask;
-    #elif   (DEVICE_SUB_GROUP_THREADS <= 128)
-        cl_uint4 mask;
-    #else
-        #error DEVICE_SUB_GROUP_THREADS too large to be supported. 
-    #endif
+typedef struct
+{
+#if (DEVICE_SUB_GROUP_THREADS <= 8)
+    cl_uchar mask;
+#elif (DEVICE_SUB_GROUP_THREADS <= 16)
+    cl_ushort mask;
+#elif (DEVICE_SUB_GROUP_THREADS <= 32)
+    cl_uint mask;
+#elif (DEVICE_SUB_GROUP_THREADS <= 64)
+    cl_ulong mask;
+#elif (DEVICE_SUB_GROUP_THREADS <= 128)
+    cl_uint4 mask;
+#else
+#error DEVICE_SUB_GROUP_THREADS too large to be supported.
+#endif
 } sub_group_mask_t;
 #endif
 
 // render mode methods
-typedef struct {
+typedef struct
+{
     cl_uint flags;
 } render_mode_t;
 
-inline cl_bool is_render_mode_flag_triangle_fan(const render_mode_t render_mode) {
-    return (render_mode.flags & RENDER_MODE_FLAG_TRIANGLE_FAN) != 0; 
+inline cl_bool is_render_mode_flag_triangle_fan(const render_mode_t render_mode)
+{
+    return (render_mode.flags & RENDER_MODE_FLAG_TRIANGLE_FAN) != 0;
 }
 
-inline cl_bool is_render_mode_flag_triangle_strip(const render_mode_t render_mode) {
-    return (render_mode.flags & RENDER_MODE_FLAG_TRIANGLE_STRIP) != 0; 
+inline cl_bool is_render_mode_flag_triangle_strip(const render_mode_t render_mode)
+{
+    return (render_mode.flags & RENDER_MODE_FLAG_TRIANGLE_STRIP) != 0;
 }
 
-inline cl_bool is_render_mode_flag_enable_depth(const render_mode_t render_mode) {
-    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0; 
+inline cl_bool is_render_mode_flag_enable_depth(const render_mode_t render_mode)
+{
+    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0;
 }
 
-inline cl_bool is_render_mode_flag_enable_lerp(const render_mode_t render_mode) {
-    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_LERP) != 0; 
+inline cl_bool is_render_mode_flag_enable_stencil(const render_mode_t render_mode) {
+    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_STENCIL) != 0;
 }
 
-inline cl_bool is_render_mode_flag_enable_cull_front(const render_mode_t render_mode) {
-    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_CULL_FRONT) != 0; 
+inline cl_bool is_render_mode_flag_enable_lerp(const render_mode_t render_mode)
+{
+    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_LERP) != 0;
 }
 
-inline cl_bool is_render_mode_flag_enable_cull_back(const render_mode_t render_mode) {
-    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_CULL_BACK) != 0; 
+inline cl_bool is_render_mode_flag_enable_cull_front(const render_mode_t render_mode)
+{
+    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_CULL_FRONT) != 0;
 }
 
-typedef enum {
+inline cl_bool is_render_mode_flag_enable_cull_back(const render_mode_t render_mode)
+{
+    return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_CULL_BACK) != 0;
+}
+
+typedef enum
+{
     FRONT = 0,
     BACK = 1
 } face_t;
@@ -78,47 +91,56 @@ typedef enum {
 #define TH_MISC_BITFLIPS 12
 
 #define TH_MISC_PRIMITIVE_CONFIG_POSITION (TH_MISC_FACE_POSITION - TRIANGLE_PRIMITIVE_CONFIGS_LOG2)
-#define TH_MISC_DEPTH_SIZE_LOG ((TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_BITFLIPS)/2)
+#define TH_MISC_DEPTH_SIZE_LOG ((TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_BITFLIPS) / 2)
 
 #define TH_MISC_ZMAX_POSITION (TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_DEPTH_SIZE_LOG)
 #define TH_MISC_ZMIN_POSITION (TH_MISC_BITFLIPS)
 
-typedef struct {
+typedef struct
+{
     cl_uint misc;
 } triangle_header_misc_t;
 
-inline face_t get_th_misc_face(const triangle_header_misc_t th_misc) { 
-    return (face_t)(th_misc.misc >> TH_MISC_FACE_POSITION); 
+inline face_t get_th_misc_face(const triangle_header_misc_t th_misc)
+{
+    return (face_t)(th_misc.misc >> TH_MISC_FACE_POSITION);
 }
-inline cl_uint get_th_misc_primitive_config(const triangle_header_misc_t th_misc) { 
-    return (th_misc.misc >> TH_MISC_PRIMITIVE_CONFIG_POSITION) & (TRIANGLE_PRIMITIVE_CONFIGS - 1); 
+inline cl_uint get_th_misc_primitive_config(const triangle_header_misc_t th_misc)
+{
+    return (th_misc.misc >> TH_MISC_PRIMITIVE_CONFIG_POSITION) & (TRIANGLE_PRIMITIVE_CONFIGS - 1);
 }
-inline cl_ushort get_th_misc_zmax(const triangle_header_misc_t th_misc) {
+inline cl_ushort get_th_misc_zmax(const triangle_header_misc_t th_misc)
+{
     const cl_uint LOST_BITS = 16 - (TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_ZMAX_POSITION);
     cl_uint depth = (th_misc.misc >> (TH_MISC_ZMAX_POSITION - LOST_BITS)) | (LOST_BITS - 1); // bound to upper
     return depth & 0xFFFFu;
 }
-inline cl_ushort get_th_misc_zmin(const triangle_header_misc_t th_misc) { 
+inline cl_ushort get_th_misc_zmin(const triangle_header_misc_t th_misc)
+{
     const cl_uint LOST_BITS = 16 - (TH_MISC_ZMAX_POSITION - TH_MISC_ZMIN_POSITION);
     cl_uint depth = (th_misc.misc >> (TH_MISC_ZMIN_POSITION - LOST_BITS)) & ~(LOST_BITS - 1); // bound to lower
     return depth & 0xFFFFu;
 }
 
-inline void set_th_misc_face(triangle_header_misc_t* th_misc, face_t face) { 
+inline void set_th_misc_face(triangle_header_misc_t *th_misc, face_t face)
+{
     th_misc->misc &= (1u << TH_MISC_FACE_POSITION) - 1;
     th_misc->misc |= ((cl_uint)face << TH_MISC_FACE_POSITION);
 }
-inline void set_th_misc_primitive_config(triangle_header_misc_t* th_misc, cl_uint primitive_config) { 
+inline void set_th_misc_primitive_config(triangle_header_misc_t *th_misc, cl_uint primitive_config)
+{
     th_misc->misc &= ~((cl_uint)(TRIANGLE_PRIMITIVE_CONFIGS - 1) << TH_MISC_PRIMITIVE_CONFIG_POSITION);
     th_misc->misc |= (primitive_config << TH_MISC_PRIMITIVE_CONFIG_POSITION);
 }
-inline void set_th_misc_zmax(triangle_header_misc_t* th_misc, cl_ushort zmax) {
+inline void set_th_misc_zmax(triangle_header_misc_t *th_misc, cl_ushort zmax)
+{
     const cl_uint VALID_BITS = (TH_MISC_PRIMITIVE_CONFIG_POSITION - TH_MISC_ZMAX_POSITION);
     const cl_uint LOST_BITS = 16 - VALID_BITS;
     th_misc->misc &= ~(VALID_BITS << TH_MISC_ZMAX_POSITION);
     th_misc->misc |= ((cl_uint)zmax >> LOST_BITS) << TH_MISC_ZMAX_POSITION;
 };
-inline void set_th_misc_zmin(triangle_header_misc_t* th_misc, cl_ushort zmin) {
+inline void set_th_misc_zmin(triangle_header_misc_t *th_misc, cl_ushort zmin)
+{
     const cl_uint VALID_BITS = (TH_MISC_ZMAX_POSITION - TH_MISC_ZMIN_POSITION);
     const cl_uint LOST_BITS = 16 - VALID_BITS;
     th_misc->misc &= ~(VALID_BITS << TH_MISC_ZMIN_POSITION);
@@ -127,41 +149,42 @@ inline void set_th_misc_zmin(triangle_header_misc_t* th_misc, cl_ushort zmin) {
 
 typedef struct
 {
-    cl_short v0x;    // Subpixels relative to viewport center. Valid if triSubtris = 1.
+    cl_short v0x; // Subpixels relative to viewport center. Valid if triSubtris = 1.
     cl_short v0y;
     cl_short v1x;
     cl_short v1y;
     cl_short v2x;
     cl_short v2y;
 
-    triangle_header_misc_t misc;   // triSubtris=1: (zmin:20, f01:4, f12:4, f20:4), triSubtris>=2: (subtriBase)
+    triangle_header_misc_t misc; // triSubtris=1: (zmin:20, f01:4, f12:4, f20:4), triSubtris>=2: (subtriBase)
 } triangle_header_t;
 
 typedef struct
 {
-    cl_uint zx;     // zx * sampleX + zy * sampleY + zb = lerp(CR_DEPTH_MIN, CR_DEPTH_MAX, (clipZ / clipW + 1) / 2)
+    cl_uint zx; // zx * sampleX + zy * sampleY + zb = lerp(CR_DEPTH_MIN, CR_DEPTH_MAX, (clipZ / clipW + 1) / 2)
     cl_uint zy;
     cl_uint zb;
     cl_uint zslope; // (abs(zx) + abs(zy)) * (samplesPerPixel / 2)
 
-    int wx;     // wx * (sampleX * 2 + 1) + wy * (sampleY * 2 + 1) + wb = minClipW / clipW * CR_BARY_MAX
+    int wx; // wx * (sampleX * 2 + 1) + wy * (sampleY * 2 + 1) + wb = minClipW / clipW * CR_BARY_MAX
     int wy;
     int wb;
 
-    int ux;     // ux * (sampleX * 2 + 1) + uy * (sampleY * 2 + 1) + ub = baryU * minClipW / clipW * CR_BARY_MAX
+    int ux; // ux * (sampleX * 2 + 1) + uy * (sampleY * 2 + 1) + ub = baryU * minClipW / clipW * CR_BARY_MAX
     int uy;
     int ub;
 
-    int vx;     // vx * (sampleX * 2 + 1) + vy * (sampleY * 2 + 1) + vb = baryV * minClipW / clipW * CR_BARY_MAX
+    int vx; // vx * (sampleX * 2 + 1) + vy * (sampleY * 2 + 1) + vb = baryV * minClipW / clipW * CR_BARY_MAX
     int vy;
     int vb;
 
-    unsigned int vi0;    // Vertex indices.
+    unsigned int vi0; // Vertex indices.
     unsigned int vi1;
     unsigned int vi2;
 } triangle_data_t;
 
-typedef struct {
+typedef struct
+{
     unsigned int offset;
     unsigned int stride;
     unsigned int misc; // size[3], type[3], normalized[1], vertex_attrib_pointer_active[1]
@@ -182,8 +205,9 @@ typedef struct
 } render_mode_t;
 */
 
-typedef struct {
-    unsigned short width, height, misc;
+typedef struct
+{
+    cl_ushort misc;
     /*
     unsigned int internalformat : 4;
     unsigned int wrap_s : 2;
@@ -193,37 +217,167 @@ typedef struct {
     */
 } sampler2D_t;
 
-/*
-typedef union {
-    struct {
-        unsigned short width, height, misc;
-    };
-    cl_uint2 _;
-} sampler2D_t;
- */
+unsigned int get_sampler2D_internalformat(sampler2D_t sampler2D) { return (sampler2D.misc >> 0) & 0xFu; }
+unsigned int get_sampler2D_wrap_s(sampler2D_t sampler2D) { return (sampler2D.misc >> 4) & 0x3u; }
+unsigned int get_sampler2D_wrap_t(sampler2D_t sampler2D) { return (sampler2D.misc >> 6) & 0x3u; }
+unsigned int get_sampler2D_min_filter(sampler2D_t sampler2D) { return (sampler2D.misc >> 8) & 0x7u; }
+unsigned int get_sampler2D_mag_filter(sampler2D_t sampler2D) { return (sampler2D.misc >> 11) & 0x1u; }
 
-
-unsigned int get_sampler2D_internalformat(sampler2D_t sampler2D)  { return (sampler2D.misc >>  0) & 0xFu; }
-unsigned int get_sampler2D_wrap_s(sampler2D_t sampler2D)          { return (sampler2D.misc >>  4) & 0x3u; }
-unsigned int get_sampler2D_wrap_t(sampler2D_t sampler2D)          { return (sampler2D.misc >>  6) & 0x3u; }
-unsigned int get_sampler2D_min_filter(sampler2D_t sampler2D)      { return (sampler2D.misc >>  8) & 0x7u; }
-unsigned int get_sampler2D_mag_filter(sampler2D_t sampler2D)      { return (sampler2D.misc >> 11) & 0x1u; }
-
-void set_sampler2D_internalformat(sampler2D_t* sampler2D, unsigned short internalformat) 
-{ 
-    sampler2D->misc = (sampler2D->misc & ~0xFu) | (internalformat & 0xFu); 
+void set_sampler2D_internalformat(sampler2D_t *sampler2D, unsigned short internalformat)
+{
+    sampler2D->misc = (sampler2D->misc & ~0xFu) | (internalformat & 0xFu);
 }
 
-void set_sampler2D_wrap_s(sampler2D_t* sampler2D, unsigned short wrap_s) 
-{ 
+void set_sampler2D_wrap_s(sampler2D_t *sampler2D, unsigned short wrap_s)
+{
     sampler2D->misc &= ~(0x3u << 4);
     sampler2D->misc |= wrap_s << 4;
 }
 
-void set_sampler2D_wrap_t(sampler2D_t* sampler2D, unsigned short wrap_t) 
-{ 
+void set_sampler2D_wrap_t(sampler2D_t *sampler2D, unsigned short wrap_t)
+{
     sampler2D->misc &= ~(0x3u << 6);
     sampler2D->misc |= wrap_t << 6;
 }
+
+typedef struct
+{
+    cl_uint misc;
+} blending_data_t;
+
+void set_blending_data_equation(blending_data_t *blending_data, cl_uint rgb, cl_uint alpha)
+{
+    blending_data->misc &= ~(0xFu << 0);
+    blending_data->misc |= (rgb & 0x3u) << 0;
+    blending_data->misc |= (alpha & 0x3u) << 2;
+}
+void set_blending_data_function_src(blending_data_t *blending_data, cl_uint rgb, cl_uint alpha)
+{
+    blending_data->misc &= ~(0xFFu << 16);
+    blending_data->misc |= (rgb & 0xFu) << 16;
+    blending_data->misc |= (alpha & 0xFu) << 20;
+}
+void set_blending_data_function_dst(blending_data_t *blending_data, cl_uint rgb, cl_uint alpha)
+{
+    blending_data->misc &= ~(0xFFu << 24);
+    blending_data->misc |= (rgb & 0xFu) << 24;
+    blending_data->misc |= (alpha & 0xFu) << 28;
+}
+
+typedef struct
+{
+    cl_uint front_misc;
+    cl_uint back_misc;
+} stencil_data_t;
+
+void set_stencil_data_func(stencil_data_t *stencil_data, face_t face, cl_uint func, cl_uint mask, cl_uint ref)
+{
+    cl_uint *face_misc = face == FRONT ? &stencil_data->front_misc : &stencil_data->back_misc;
+    *face_misc &= ~(0x7u << 0);
+    *face_misc |= (func & 0x7u) << 0;
+
+    *face_misc &= ~(0xFFu << 16);
+    *face_misc |= (mask & 0xFFu) << 16;
+
+    *face_misc &= ~(0xFFu << 24);
+    *face_misc |= (ref & 0xFFu) << 24;
+}
+void set_stencil_data_op(stencil_data_t *stencil_data, face_t face, cl_uint sfail, cl_uint dpass, cl_uint dpfail)
+{
+    cl_uint *face_misc = face == FRONT ? &stencil_data->front_misc : &stencil_data->back_misc;
+    *face_misc &= ~(0x7u << 4);
+    *face_misc |= (sfail & 0x7u) << 4;
+
+    *face_misc &= ~(0x7u << 8);
+    *face_misc |= (dpass & 0x7u) << 8;
+
+    *face_misc &= ~(0x7u << 12);
+    *face_misc |= (dpfail & 0x7u) << 12;
+}
+
+typedef struct
+{
+    cl_uint misc;
+    cl_ushort near, far; // near[16], far[16]
+} depth_data_t;
+
+void set_depth_data_func(depth_data_t *depth_data, cl_uint func)
+{
+    depth_data->misc &= ~(0x7u << 0);
+    depth_data->misc |= (func & 0x7u) << 0;
+}
+
+void set_depth_data_range(depth_data_t *depth_data, cl_ushort near, cl_ushort far)
+{
+    depth_data->near = near;
+    depth_data->far = far;
+}
+
+typedef struct
+{
+    cl_ushort misc;
+} enabled_data_t;
+
+cl_uint get_enabled_red_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 8) & 0x1u;
+}
+cl_uint get_enabled_green_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 9) & 0x1u;
+}
+cl_uint get_enabled_blue_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 10) & 0x1u;
+}
+cl_uint get_enabled_alpha_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 11) & 0x1u;
+}
+cl_uchar get_enabled_stencil_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 0) & 0xFFu;
+}
+cl_bool get_enabled_depth_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 12) & 0x1u;
+}
+
+void set_enabled_color_data(enabled_data_t *enabled_data, cl_bool red, cl_bool green, cl_bool blue, cl_bool alpha)
+{
+    enabled_data->misc &= ~(0xFu << 8);
+    enabled_data->misc |= (red & 0x1u) << 8;
+    enabled_data->misc |= (green & 0x1u) << 9;
+    enabled_data->misc |= (blue & 0x1u) << 10;
+    enabled_data->misc |= (alpha & 0x1u) << 11;
+}
+void set_enabled_stencil_data(enabled_data_t *enabled_data, cl_uchar mask)
+{
+    enabled_data->misc &= ~(0xFFu << 0);
+    enabled_data->misc |= mask;
+}
+void set_enabled_depth_data(enabled_data_t *enabled_data, cl_bool mask)
+{
+    enabled_data->misc &= ~(0x1u << 12);
+    enabled_data->misc |= ((cl_ushort)mask & 0x1u) << 12;
+}
+
+typedef struct
+{
+    render_mode_t render_mode;
+    blending_data_t blending_data;
+    cl_uint blending_color;
+    cl_uint stencil_data;
+    cl_uint depth_data;
+    enabled_data_t enabled_data;
+} rop_config_t;
+
+typedef struct
+{
+    sampler2D_t sampler2D;
+#ifndef DEVICE_IMAGE_ENABLED
+    cl_ushort width, height;
+#endif
+} gl_texture_data_t;
 
 #endif

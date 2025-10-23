@@ -4,9 +4,8 @@ PROJECT = pipeline.exe
 
 SRCS = test.cc
 
-LD_PROJECT_FLAGS ?= 
+LD_PROJECT_FLAGS ?= -D'DEVICE_IMAGE_SUPPORT=0'
 
-OPTS ?=
-
+OPTS ?= 
 
 include ../common.mk

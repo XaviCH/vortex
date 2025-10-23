@@ -152,6 +152,8 @@ inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, l
     return value;
 }
 
+
+
 inline uint __attribute__((overloadable)) local_scan_inclusive_min(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
@@ -351,6 +353,43 @@ inline void local_1dim_barrier(cl_mem_fence_flags flags) {
             barrier(flags);
         #endif
     #endif
+}
+
+// TODO: wrap all sync function using this generics
+static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive(void (func)(uint*,uint), uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_linear_id();
+    local volatile uint* ptr = &l_temp[local_id];
+    
+    *ptr = value;
+
+    #pragma unroll
+    for(uint i=1; i<get_local_size(0); i=i*2) {
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= i) {
+            func(&value, ptr[-i]);
+            *ptr = value;
+        }
+    }
+
+    return value;
+}
+
+static inline uint __attribute__((overloadable)) local_scan_inclusive(void (func)(uint*,uint), uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_linear_id();
+    local volatile uint* ptr = &l_temp[local_id];
+    
+    local_1dim_scan_inclusive(func, value, l_temp);
+
+    #pragma unroll
+    for(uint i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= i) {
+            func(&value, ptr[-i]);
+            *ptr = value;
+        }
+    }
+
+    return value;
 }
 
 /**

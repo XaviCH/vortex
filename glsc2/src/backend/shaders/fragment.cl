@@ -16,11 +16,8 @@ inline float4 get_varying_at_vertex(
     ro_vertex_buffer_t vertex_buffer
 ) {
     size_t idx =  vert_idx * (sizeof(vertex_shader_output_t) / sizeof(float4)) + varying_idx + 1;
-    #ifdef DEVICE_IMAGE_ENABLED
-        return read_imagef(vertex_buffer, idx);
-    #else
-        return vertex_buffer[idx];
-    #endif
+
+    return read_vertex_buffer(vertex_buffer, idx);
 }
 
 inline float4 interpolate_varying(
@@ -40,6 +37,7 @@ typedef struct {
 
 #define FS_MAIN(...) \
     inline bool gl_fragment_shader( \
+        global void* gl_uniforms, \
         FS_KERNEL_PARAMS \
         fragment_shader_output_t* output, \
         ro_vertex_buffer_t vertex_buffer, \

@@ -165,7 +165,7 @@ void bin_raster(
                 int data_idx = tri_idx >> 3;
                 int subtri_idx = tri_idx & 7;
                 if (subtri_idx != 7)
-                    data_idx = g_tri_header[data_idx].misc + subtri_idx;
+                    data_idx = g_tri_header[data_idx].misc.misc + subtri_idx;
 
                 // read triangle
                 #ifdef DEVICE_IMAGE_ENABLED

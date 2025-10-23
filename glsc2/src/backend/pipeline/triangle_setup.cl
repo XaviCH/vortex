@@ -392,18 +392,6 @@ inline void setupTriangle(
     set_th_misc_primitive_config(&th->misc, c_primitive_config);
 }
 
-inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) { 
-    float4 value;
-
-    #ifdef DEVICE_IMAGE_ENABLED
-        value = read_imagef(vertex_buffer, index);
-    #else
-        value = vertex_buffer[index]; 
-    #endif
-
-    return value;
-} 
-
 //------------------------------------------------------------------------
 
 /**

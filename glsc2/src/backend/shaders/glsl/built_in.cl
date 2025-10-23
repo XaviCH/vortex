@@ -23,7 +23,6 @@ float4 mul(const float16 mat, const float4 vec) {
 
     return result;
     /*
-
     float4 *p = (float4*) &mat;
     return (float4){
         dot(p[0], vec),
@@ -61,11 +60,11 @@ float apply_wrap(uint wrap, float value, uint size) {
     }
 }
 
-uint2 gl_sampl(sampler2D_t sampler, float2 coord) {
+uint2 gl_sampl(gl_texture_data_t sampler, float2 coord) {
     uint2 img_coord;
     
-    uint wrap_s = get_sampler2D_wrap_s(sampler);
-    uint wrap_t = get_sampler2D_wrap_t(sampler);
+    uint wrap_s = get_sampler2D_wrap_s(sampler.sampler2D);
+    uint wrap_t = get_sampler2D_wrap_t(sampler.sampler2D);
 
     float coord_x = apply_wrap(wrap_s, coord.x, sampler.width);
     float coord_y = apply_wrap(wrap_t, coord.y, sampler.height);
@@ -78,10 +77,11 @@ uint2 gl_sampl(sampler2D_t sampler, float2 coord) {
     return img_coord;
 }
 
-float4 texture2D(sampler2D_t sampler, image2D_t image, float2 coord) {
+float4 texture2D(gl_texture_data_t sampler, ro_texture2d_t image, float2 coord) {
     uint2 img_coord = gl_sampl(sampler, coord);
     
-    global const uchar* color = image + (img_coord.y*sampler.width + img_coord.x)*4;
+    global const uchar* color = (global const uchar*) image + (img_coord.y*sampler.width + img_coord.x)*4;
+    // global const uchar* color = (global const uchar*) image;
     return (float4) ((float)*color / 255, (float)*(color+1) / 255, (float)*(color+2) / 255, (float)*(color+3) / 255);
 }
 
