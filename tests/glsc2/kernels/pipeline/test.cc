@@ -3,9 +3,9 @@
 #include <chrono>
 #include "glm/gtc/matrix_transform.hpp"
 
-#include <backend/pipeline/triangle_setup.o.c>
-#include <backend/pipeline/bin_raster.o.c>
-#include <backend/pipeline/coarse_raster.o.c>
+//#include <backend/pipeline/triangle_setup.o.c>
+//#include <backend/pipeline/bin_raster.o.c>
+//#include <backend/pipeline/coarse_raster.o.c>
 //#include <backend/pipeline/fine_raster.o.c>
 #include "shader.o.c"
 #include <types.device.h>
@@ -14,6 +14,8 @@
 #include <tests/glsc2/common.h>
 #include <tests/glsc2/debug.hpp>
 #include <tests/glsc2/kernels/common.hpp>
+
+#include <frontend/device.h>
 
 #define CL_TARGET_OPENCL_VERSION 120
 #define TEST_PATH "../../../"
@@ -126,42 +128,6 @@ typedef struct {
 
 int num_samples = 1;
 
-// TEST PARAMETERS
-// Test parameters
-
-glm::ivec2 size;
-glm::ivec2 size_pixels;
-glm::ivec2 size_tiles;
-int32_t num_tiles;
-glm::ivec2 size_bins;
-int32_t num_bins;
-glm::ivec2 viewport_size;
-int32_t round_size;
-int32_t min_batches;
-int32_t max_rounds;
-int32_t max_subtris;
-int32_t max_tris;
-int32_t num_SMs;
-int32_t num_fine_warps;
-int32_t num_tris;
-
-void set_parameters() {
-    size = glm::ivec2(WIDTH, HEIGHT);
-    size_pixels = (size + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-    size_tiles = size_pixels >> CR_TILE_LOG2;
-    num_tiles = size_tiles.x * size_tiles.y;
-    size_bins = (size_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    num_bins = size_bins.x * size_bins.y;
-    viewport_size = glm::ivec2(WIDTH, HEIGHT);
-    round_size  = DEVICE_BIN_SUB_GROUPS * 32;
-    min_batches = CR_BIN_STREAMS_SIZE * 2;
-    max_rounds  = 32;
-    max_tris = maxTris;
-    max_subtris = std::max(MAX_SUBTRIS, maxTris + maxSubtrisSlack);
-    num_SMs = ATTRIBUTE_MULTIPROCESSOR_COUNT;
-    num_fine_warps = std::min(ATTRIBUTE_MAX_THREADS_PER_BLOCK / 32, DEVICE_FINE_SUB_GROUPS);
-    num_tris = NUM_TRIS;
-}
 
 // INPUT PARAMETERS
 cl_int samples_log2 = 0;
@@ -271,8 +237,17 @@ cl_mem gl_texture_units[DEVICE_TEXTURE_UNITS];
 cl_mem gl_texture_data;
 cl_mem g_rop_config;
 
+device_shared_objects_t shared_objects;
+device_context_t device_context;
 
 void create_cl_objects() {
+
+    device_create_shared_objects(&shared_objects);
+    device_create_context(&device_context, &shared_objects);
+    int program_id = device_create_program_from_source(&device_context, shader_o_len, shader_o);
+    device_load_program(&device_context, program_id);
+
+    /*
     CL_CHECK(clGetPlatformIDs(1, &platform_id, NULL));
     CL_CHECK(clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, NULL));
     context = CL_CHECK2(clCreateContext(NULL, 1, &device_id, NULL, NULL,  &_err));
@@ -390,8 +365,10 @@ void create_cl_objects() {
         a_num_bin_segs      = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int), &ZERO, &_err));
         a_num_tile_segs     = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(cl_int), &ZERO, &_err));
     }
+    */
 
     // framebuffer objects
+    /*
     {
         #ifdef DEVICE_IMAGE_ENABLED
         {
@@ -423,10 +400,18 @@ void create_cl_objects() {
         }
         #endif
     }
+    */
+    cl_uint colorbuffer_mode = TEX_RGBA8;
+    int colorbuffer_id = device_create_colorbuffer(&device_context, framebuffer_width, framebuffer_height, colorbuffer_mode);
+    int depthbuffer_id = device_create_depthbuffer(&device_context, framebuffer_width, framebuffer_height);
+    int stencilbuffer_id = device_create_stencilbuffer(&device_context, framebuffer_width, framebuffer_height);
+    device_load_framebuffer(&device_context, colorbuffer_id, depthbuffer_id, stencilbuffer_id, framebuffer_width, framebuffer_height, colorbuffer_mode);
+    device_clear_framebuffer(&device_context, c_clear_write_values, c_clear_enabled_data, c_deferred_clear);
 
+    const int CONFIGS = 2;
+    rop_config_t rop_config[CONFIGS];
     // 
     {
-        const int CONFIGS = 2;
 
         render_mode_t render_mode[CONFIGS] = {
             {
@@ -460,7 +445,7 @@ void create_cl_objects() {
         set_enabled_depth_data(&enabled_data[1], 1);
 
         printf("INFO: enabled data[0]=%x, enabled data[1]=%x\n", enabled_data[0].misc, enabled_data[1].misc);
-        rop_config_t rop_config[CONFIGS];
+        
         for(int i=0; i<CONFIGS; ++i) {
             rop_config[i] = (rop_config_t) {
                 .render_mode = render_mode[i],
@@ -472,11 +457,49 @@ void create_cl_objects() {
             };
         }
             
-        g_rop_config        = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  sizeof(rop_config), rop_config, &_err));
+        // g_rop_config        = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  sizeof(rop_config), rop_config, &_err));
+    }
+    
+    cl_uchar uniform[CONFIGS][sizeof(cl_float16[3]) + sizeof(cl_uint)];
+
+    // gl_uniform = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY, DEVICE_UNIFORM_CAPACITY * TRIANGLE_PRIMITIVE_CONFIGS, NULL, &_err));
+    {
+        glm::mat4 model = glm::translate(glm::mat4(1), glm::vec3(-1,0,0)); 
+        glm::mat4 perspective = glm::perspective(45.0f, (float)framebuffer_width/(float)framebuffer_height, 0.01f, 1000.0f);
+        glm::mat4 view = glm::lookAt(glm::vec3{2,2,-5}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
+        cl_uint sampler = 0;
+        memcpy(uniform[0],&model[0][0], sizeof(cl_float16));
+        memcpy(&uniform[0][sizeof(cl_float16[1])],&perspective[0][0], sizeof(cl_float16));
+        memcpy(&uniform[0][sizeof(cl_float16[2])],&view[0][0], sizeof(cl_float16));
+        memcpy(&uniform[0][sizeof(cl_float16[3])],&sampler, sizeof(sampler));
+
+        // cl_buffer_region region = {DEVICE_UNIFORM_CAPACITY*0, DEVICE_UNIFORM_CAPACITY*1};
+        // gl_uniforms_0 = CL_CHECK2(clCreateSubBuffer(gl_uniform, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+        // CL_CHECK(clEnqueueWriteBuffer(command_queue, gl_uniforms_0, CL_TRUE, 0, sizeof(uniform[0]), uniform[0], 0, NULL, NULL));
+        //gl_uniforms_0             = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(uniform), uniform, &_err));
+    }
+    {
+        glm::mat4 model = glm::translate(glm::mat4(1), glm::vec3(1,0,0)); 
+        glm::mat4 perspective = glm::perspective(45.0f, (float)framebuffer_width/(float)framebuffer_height, 0.01f, 1000.0f);
+        glm::mat4 view = glm::lookAt(glm::vec3{2,2,-5}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
+        cl_uint sampler = 1;
+        memcpy(uniform[1],&model[0][0], sizeof(cl_float16));
+        memcpy(&uniform[1][sizeof(cl_float16[1])],&perspective[0][0], sizeof(cl_float16));
+        memcpy(&uniform[1][sizeof(cl_float16[2])],&view[0][0], sizeof(cl_float16));
+        memcpy(&uniform[1][sizeof(cl_float16[3])],&sampler, sizeof(sampler));
+        // gl_uniforms_1             = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(uniform), uniform, &_err));
+        // cl_buffer_region region = {DEVICE_UNIFORM_CAPACITY*1, DEVICE_UNIFORM_CAPACITY*2};
+        // gl_uniforms_1 = CL_CHECK2(clCreateSubBuffer(gl_uniform, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
+        // CL_CHECK(clEnqueueWriteBuffer(command_queue, gl_uniforms_1, CL_TRUE, 0, sizeof(uniform[1]), uniform[1], 0, NULL, NULL));
     }
 
+    device_load_config(&device_context, 0, &rop_config[0], uniform[0]);
+    device_load_config(&device_context, 1, &rop_config[1], uniform[1]);
+
     // vertex shader objects
-    vertex_attribute_data_t vertex_attribute_data[] = {
+
+    float vertex_attributes[DEVICE_VERTEX_ATTRIBUTE_SIZE][4];
+    vertex_attribute_data_t vertex_attribute_data[DEVICE_VERTEX_ATTRIBUTE_SIZE] = {
         {
             .offset = 0,
             .stride = sizeof(float[2]),
@@ -494,73 +517,34 @@ void create_cl_objects() {
         },
     };
 
-    gl_vertex_attributes    = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(cl_float4[DEVICE_VERTEX_ATTRIBUTE_SIZE]), NULL, &_err));
-    gl_vertex_attribute_datas = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(vertex_attribute_data), vertex_attribute_data, &_err));
+    // gl_vertex_attributes    = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(cl_float4[DEVICE_VERTEX_ATTRIBUTE_SIZE]), NULL, &_err));
+    // gl_vertex_attribute_datas = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(vertex_attribute_data), vertex_attribute_data, &_err));
 
-    gl_uniform = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY, DEVICE_UNIFORM_CAPACITY * TRIANGLE_PRIMITIVE_CONFIGS, NULL, &_err));
-    {
-        glm::mat4 model = glm::translate(glm::mat4(1), glm::vec3(-1,0,0)); 
-        glm::mat4 perspective = glm::perspective(45.0f, (float)framebuffer_width/(float)framebuffer_height, 0.01f, 1000.0f);
-        glm::mat4 view = glm::lookAt(glm::vec3{2,2,-5}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
-        cl_uint sampler = 0;
-        cl_uchar uniform[sizeof(cl_float16[3]) + sizeof(cl_uint)];
-        memcpy(uniform,&model[0][0], sizeof(cl_float16));
-        memcpy(&uniform[sizeof(cl_float16[1])],&perspective[0][0], sizeof(cl_float16));
-        memcpy(&uniform[sizeof(cl_float16[2])],&view[0][0], sizeof(cl_float16));
-        memcpy(&uniform[sizeof(cl_float16[3])],&sampler, sizeof(sampler));
+    device_load_vertex_attributes(&device_context, vertex_attributes, vertex_attribute_data);
 
-        cl_buffer_region region = {DEVICE_UNIFORM_CAPACITY*0, DEVICE_UNIFORM_CAPACITY*1};
-        gl_uniforms_0 = CL_CHECK2(clCreateSubBuffer(gl_uniform, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
-        CL_CHECK(clEnqueueWriteBuffer(command_queue, gl_uniforms_0, CL_TRUE, 0, sizeof(uniform), uniform, 0, NULL, NULL));
-        //gl_uniforms_0             = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(uniform), uniform, &_err));
-    }
-    {
-        glm::mat4 model = glm::translate(glm::mat4(1), glm::vec3(1,0,0)); 
-        glm::mat4 perspective = glm::perspective(45.0f, (float)framebuffer_width/(float)framebuffer_height, 0.01f, 1000.0f);
-        glm::mat4 view = glm::lookAt(glm::vec3{2,2,-5}, glm::vec3{0,0,0}, glm::vec3{0,1,0});
-        cl_uint sampler = 1;
-        cl_uchar uniform[sizeof(cl_float16[3]) + sizeof(cl_uint)];
-        memcpy(uniform,&model[0][0], sizeof(cl_float16));
-        memcpy(&uniform[sizeof(cl_float16[1])],&perspective[0][0], sizeof(cl_float16));
-        memcpy(&uniform[sizeof(cl_float16[2])],&view[0][0], sizeof(cl_float16));
-        memcpy(&uniform[sizeof(cl_float16[3])],&sampler, sizeof(sampler));
-        // gl_uniforms_1             = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(uniform), uniform, &_err));
-        cl_buffer_region region = {DEVICE_UNIFORM_CAPACITY*1, DEVICE_UNIFORM_CAPACITY*2};
-        gl_uniforms_1 = CL_CHECK2(clCreateSubBuffer(gl_uniform, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION, &region, &_err));
-        CL_CHECK(clEnqueueWriteBuffer(command_queue, gl_uniforms_1, CL_TRUE, 0, sizeof(uniform), uniform, 0, NULL, NULL));
-    }
+    // gl_vertex_attribute_pointer_0 = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(tex), tex, &_err));
+    // gl_vertex_attribute_pointer_1 = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(position), position, &_err));
+    // gl_vertex_attribute_pointer_2 = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(color), color, &_err));
 
-    gl_vertex_attribute_pointer_0 = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(tex), tex, &_err));
-    gl_vertex_attribute_pointer_1 = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(position), position, &_err));
-    gl_vertex_attribute_pointer_2 = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(color), color, &_err));
+    int tex_buffer = device_create_ro_buffer(&device_context, sizeof(tex));
+    int position_buffer = device_create_ro_buffer(&device_context, sizeof(position));
+    int color_buffer = device_create_ro_buffer(&device_context, sizeof(color));
 
-    /*
-    for(int i=0; i<DEVICE_TEXTURE_UNITS; ++i) {
-        cl_mem dummy_tex;
-        int tex_height = 100, tex_width = 100;
-        #ifdef DEVICE_IMAGE_ENABLED
-            cl_image_format image_format = {
-                .image_channel_order = CL_A,
-                .image_channel_data_type = CL_UNSIGNED_INT8,
-            };
+    device_write_on_buffer(&device_context, tex_buffer, 0, sizeof(tex), tex);
+    device_write_on_buffer(&device_context, position_buffer, 0, sizeof(position), position);
+    device_write_on_buffer(&device_context, color_buffer, 0, sizeof(color), color);
 
-            dummy_tex = CL_CHECK2(clCreateImage2D(context, CL_MEM_READ_WRITE, &image_format, tex_width, tex_height, 0, NULL, &_err));
-        #else
-            dummy_tex = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int[tex_width][tex_height]), NULL, &_err));
-        
-        #endif
-        gl_texture_units[i] = dummy_tex; 
-    }
-    */
+    device_bind_buffer_to_vertex_attribute_pointer(&device_context, 0, tex_buffer);
+    device_bind_buffer_to_vertex_attribute_pointer(&device_context, 1, position_buffer);
+    device_bind_buffer_to_vertex_attribute_pointer(&device_context, 2, color_buffer);
+
+    const int LOADED_TEXTURES = 2;
+    ppm_image_t *textures[LOADED_TEXTURES];
+    gl_texture_data_t texture_datas[DEVICE_TEXTURE_UNITS];
 
     {
-        const int LOADED_TEXTURES = 2;
-        ppm_image_t *textures[LOADED_TEXTURES];
         textures[0] = read_ppm(TEST_PATH "/glsc2/assets/dog.ppm");
         textures[1] = read_ppm(TEST_PATH "/glsc2/assets/cat.ppm");
-
-        gl_texture_data_t texture_datas[LOADED_TEXTURES];
-        
 
         for (int texture=0; texture < LOADED_TEXTURES; ++texture) {
             // create sampler object
@@ -575,6 +559,7 @@ void create_cl_objects() {
         }
         
         // create texture units
+        /*
         for(int tex_unit=0; tex_unit<DEVICE_TEXTURE_UNITS; ++tex_unit) {
             cl_mem texture_unit;
             int tex_height, tex_width;
@@ -625,247 +610,31 @@ void create_cl_objects() {
         for (int texture=0; texture < LOADED_TEXTURES; ++texture) {
             printf("INFO: loaded texture[%d]: width=%d, height=%d\n", texture, texture_datas[texture].width, texture_datas[texture].height);
         }
+        */
     }
+
+    int texture_ids[LOADED_TEXTURES];
+    for(int id = 0; id < LOADED_TEXTURES; ++id) {
+        ppm_image_t *image = textures[id];
+        texture_ids[id] = device_create_2d_texture(&device_context, image->x, image->y, TEX_RGBA8);
+        uint8_t* data = (uint8_t*) malloc(image->x*image->y*sizeof(uint8_t[4]));
+        for(uint32_t i=0; i<image->x*image->y; ++i) {
+            data[i*4+0] = image->data[i].red;
+            data[i*4+1] = image->data[i].green;
+            data[i*4+2] = image->data[i].blue;
+            data[i*4+3] = 0xFFu;
+        }
+        device_write_2d_texture(&device_context, texture_ids[id], image->x, image->y, TEX_RGBA8, data);
+        free(data);
+    }
+
+    device_bind_texture_unit(&device_context, 0, texture_ids[0]);
+    device_bind_texture_unit(&device_context, 1, texture_ids[1]);
+
+    device_load_texture_datas(&device_context, texture_datas);
+
 }
 
-void set_cl_kernel_parameters() {
-    cl_kernel kernel;
-    cl_int counter;
-
-    kernel = vertex_shader_kernel;
-    counter = 0;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_vertex_attributes),       &gl_vertex_attributes));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_vertex_attribute_datas),       &gl_vertex_attribute_datas));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_uniforms_0),       &gl_uniforms_0));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_vertex_attribute_pointer_0),       &gl_vertex_attribute_pointer_0));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_vertex_attribute_pointer_1),       &gl_vertex_attribute_pointer_1));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_vertex_attribute_pointer_2),       &gl_vertex_attribute_pointer_2));
-    #ifdef CONF_SETUP_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),     &t_vertex_buffer)); 
-    #else
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
-    #endif
-
-
-    kernel = triangle_setup_kernel; 
-    counter = 0;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_subtris),       &a_num_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_index_buffer),      &g_index_buffer));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_data),          &g_tri_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_subtris),       &g_tri_subtris));
-    #ifdef CONF_SETUP_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),     &t_vertex_buffer)); 
-    #else
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_num_tris),          &c_num_tris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),       &c_max_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_render_mode_flags), &c_render_mode_flags));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_samples_log2),      &c_samples_log2));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_vertex_size),       &c_vertex_size));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),    &c_viewport_width));
-
-    kernel = bin_raster_kernel;
-    counter = 0;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_bin_counter),       &a_bin_counter));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_bin_segs),      &a_num_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_subtris),       &a_num_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_first_seg),     &g_bin_first_seg));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_seg_count),     &g_bin_seg_count));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_seg_data),      &g_bin_seg_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_seg_next),      &g_bin_seg_next));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_total),         &g_bin_total));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_subtris),       &g_tri_subtris));
-    #ifdef CONF_BIN_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_bin_batch_sz),      &c_bin_batch_sz));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_height_bins),       &c_height_bins));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),       &c_max_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_num_bins),          &c_num_bins));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_num_tris),          &c_num_tris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_width_bins),        &c_width_bins));
-
-    kernel = coarse_raster_kernel; 
-    counter = 0;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_coarse_counter),    &a_coarse_counter));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_active_tiles),  &a_num_active_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_bin_segs),      &a_num_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_tile_segs),     &a_num_tile_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_subtris),       &a_num_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_active_tiles),      &g_active_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_first_seg),     &g_bin_first_seg));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_seg_count),     &g_bin_seg_count));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_seg_data),      &g_bin_seg_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_seg_next),      &g_bin_seg_next));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_bin_total),         &g_bin_total));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_first_seg),    &g_tile_first_seg));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_count),    &g_tile_seg_count));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_data),     &g_tile_seg_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_next),     &g_tile_seg_next));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
-    #ifdef CONF_COARSE_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_deferred_clear),    &c_deferred_clear));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_height_tiles),      &c_height_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),       &c_max_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_tile_segs),     &c_max_tile_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_num_bins),          &c_num_bins));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_width_bins),        &c_width_bins));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_width_tiles),       &c_width_tiles));
-    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_local_data),       &g_local_data));
-
-    kernel = fine_raster_kernel;
-    counter = 0;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_uniforms_0),      &gl_uniforms_0));
-    for(int i=0; i<DEVICE_TEXTURE_UNITS; ++i)
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_texture_units[i]), &gl_texture_units[i]));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(gl_texture_data),     &gl_texture_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_fine_counter),      &a_fine_counter));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_active_tiles),  &a_num_active_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_bin_segs),      &a_num_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_subtris),       &a_num_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_tile_segs),     &a_num_tile_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_active_tiles),      &g_active_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_first_seg),    &g_tile_first_seg));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_count),    &g_tile_seg_count));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_data),     &g_tile_seg_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tile_seg_next),     &g_tile_seg_next));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_header),        &g_tri_header));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_color_buffer),      &t_color_buffer));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_depth_buffer),      &t_depth_buffer));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_stencil_buffer),    &t_stencil_buffer));
-    #ifdef CONF_FINE_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_data),          &t_tri_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_tri_header),        &t_tri_header));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(t_vertex_buffer),     &t_vertex_buffer));
-    #else
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_tri_data),          &g_tri_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_vertex_buffer),     &g_vertex_buffer));
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(g_rop_config),       &g_rop_config));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_write_values),       &c_clear_write_values));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_enabled_data),       &c_clear_enabled_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),       &c_max_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_tile_segs),     &c_max_tile_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_width_tiles),       &c_width_tiles));
-}
-
-
-
-// HOST CPY PARAMETRES
-
-std::vector<cl_ushort> h_g_index_buffer;
-std::vector<CRTriangleHeader> h_g_tri_header;
-std::vector<CRTriangleData> h_g_tri_data;
-std::vector<cl_uchar> h_g_tri_subtris;
-std::vector<cl_uchar> h_g_vertex_buffer;
-std::vector<cl_int> h_g_bin_first_seg;
-std::vector<cl_int> h_g_bin_seg_data;
-std::vector<cl_int> h_g_bin_seg_next;
-std::vector<cl_int> h_g_bin_seg_count;
-std::vector<cl_int> h_g_bin_total;
-std::vector<cl_int> h_g_active_tiles;
-std::vector<cl_int> h_g_tile_first_seg;
-std::vector<cl_int> h_g_tile_seg_data;
-std::vector<cl_int> h_g_tile_seg_next;
-std::vector<cl_int> h_g_tile_seg_count;
-std::vector<cl_int> h_a_bin_counter;
-std::vector<cl_int> h_a_coarse_counter;
-std::vector<cl_int> h_a_fine_counter;
-std::vector<cl_int> h_a_num_active_tiles;
-std::vector<cl_int> h_a_num_bin_segs;
-std::vector<cl_int> h_a_num_subtris;
-std::vector<cl_int> h_a_num_tile_segs;
-
-std::vector<cl_uint> h_t_color_buffer;
-std::vector<cl_uint> h_t_depth_buffer;
-
-void downloadDeviceData() {
-    #define READ_BUFFER(_D_BUFFER, _H_VECTOR) \
-        CL_CHECK(clEnqueueReadBuffer(command_queue, _D_BUFFER, CL_TRUE, 0, sizeof(*(_H_VECTOR.data()))*(_H_VECTOR.capacity()), _H_VECTOR.data(), 0, NULL, NULL))
-
-    READ_BUFFER(g_index_buffer, h_g_index_buffer);
-    READ_BUFFER(g_tri_header, h_g_tri_header);
-    READ_BUFFER(g_tri_data, h_g_tri_data);
-    READ_BUFFER(g_tri_subtris, h_g_tri_subtris);
-    READ_BUFFER(g_vertex_buffer, h_g_vertex_buffer);
-    READ_BUFFER(g_bin_first_seg, h_g_bin_first_seg);
-    READ_BUFFER(g_bin_seg_data, h_g_bin_seg_data);
-    READ_BUFFER(g_bin_seg_next, h_g_bin_seg_next);
-    READ_BUFFER(g_bin_seg_count, h_g_bin_seg_count);
-    READ_BUFFER(g_bin_total, h_g_bin_total);
-    READ_BUFFER(g_active_tiles, h_g_active_tiles);
-    READ_BUFFER(g_tile_first_seg, h_g_tile_first_seg);
-    READ_BUFFER(g_tile_seg_data, h_g_tile_seg_data);
-    READ_BUFFER(g_tile_seg_next, h_g_tile_seg_next);
-    READ_BUFFER(g_tile_seg_count, h_g_tile_seg_count);
-    READ_BUFFER(a_bin_counter, h_a_bin_counter);
-    READ_BUFFER(a_coarse_counter, h_a_coarse_counter);
-    READ_BUFFER(a_fine_counter, h_a_fine_counter);
-    READ_BUFFER(a_num_active_tiles, h_a_num_active_tiles);
-    READ_BUFFER(a_num_bin_segs, h_a_num_bin_segs);
-    READ_BUFFER(a_num_subtris, h_a_num_subtris);
-    READ_BUFFER(a_num_tile_segs, h_a_num_tile_segs);
-
-    #undef READ_BUFFER
-
-    size_t origin[] = {0,0,0};
-    size_t region[] = {size.x,size.y,1};
-
-    CL_CHECK(clEnqueueReadImage(command_queue, t_color_buffer, CL_TRUE, origin, region, 0, 0, h_t_color_buffer.data(), 0, NULL, NULL));
-    CL_CHECK(clEnqueueReadImage(command_queue, t_depth_buffer, CL_TRUE, origin, region, 0, 0, h_t_depth_buffer.data(), 0, NULL, NULL));
-}
-
-void uploadHostData() {
-    #define WRITE_BUFFER(_D_BUFFER, _H_VECTOR) \
-        CL_CHECK(clEnqueueWriteBuffer(command_queue, _D_BUFFER, CL_TRUE, 0, sizeof(*(_H_VECTOR.data()))*(_H_VECTOR.capacity()), _H_VECTOR.data(), 0, NULL, NULL))
-
-    WRITE_BUFFER(g_index_buffer, h_g_index_buffer);
-    WRITE_BUFFER(g_tri_header, h_g_tri_header);
-    WRITE_BUFFER(g_tri_data, h_g_tri_data);
-    WRITE_BUFFER(g_tri_subtris, h_g_tri_subtris);
-    WRITE_BUFFER(g_vertex_buffer, h_g_vertex_buffer);
-    WRITE_BUFFER(g_bin_first_seg, h_g_bin_first_seg);
-    WRITE_BUFFER(g_bin_seg_data, h_g_bin_seg_data);
-    WRITE_BUFFER(g_bin_seg_next, h_g_bin_seg_next);
-    WRITE_BUFFER(g_bin_seg_count, h_g_bin_seg_count);
-    WRITE_BUFFER(g_bin_total, h_g_bin_total);
-    WRITE_BUFFER(g_active_tiles, h_g_active_tiles);
-    WRITE_BUFFER(g_tile_first_seg, h_g_tile_first_seg);
-    WRITE_BUFFER(g_tile_seg_data, h_g_tile_seg_data);
-    WRITE_BUFFER(g_tile_seg_next, h_g_tile_seg_next);
-    WRITE_BUFFER(g_tile_seg_count, h_g_tile_seg_count);
-    WRITE_BUFFER(a_bin_counter, h_a_bin_counter);
-    WRITE_BUFFER(a_coarse_counter, h_a_coarse_counter);
-    WRITE_BUFFER(a_fine_counter, h_a_fine_counter);
-    WRITE_BUFFER(a_num_active_tiles, h_a_num_active_tiles);
-    WRITE_BUFFER(a_num_bin_segs, h_a_num_bin_segs);
-    WRITE_BUFFER(a_num_subtris, h_a_num_subtris);
-    WRITE_BUFFER(a_num_tile_segs, h_a_num_tile_segs);
-
-    #undef WRITE_BUFFER
-
-    size_t origin[] = {0,0,0};
-    size_t region[] = {size.x,size.y,1};
-
-    CL_CHECK(clEnqueueWriteImage(command_queue, t_color_buffer, CL_TRUE, origin, region, 0, 0, h_t_color_buffer.data(), 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteImage(command_queue, t_depth_buffer, CL_TRUE, origin, region, 0, 0, h_t_depth_buffer.data(), 0, NULL, NULL));
-}
 
 void setWorkSizeFromSize(glm::ivec2& block_size, glm::ivec2& size_threads, size_t* global_work_size, size_t* local_work_size);
 void setWorkSizeFromNum(glm::ivec2& block_size, uint32_t num_threads, size_t* global_work_size, size_t* local_work_size);
@@ -887,6 +656,7 @@ cl_event launch_parallel_vertex_range_assembly(
     cl_mem      indexes,
     cl_uint     primitive_config
 ) {
+
     cl_event wait_event;
     cl_uint queue = vertex_command_queue_index;
 
@@ -960,14 +730,14 @@ cl_event launch_raster(
 
     {
         block_size = glm::ivec2(DEVICE_SUB_GROUP_THREADS, DEVICE_COARSE_SUB_GROUPS);
-        threads_size = glm::ivec2(num_SMs, 1) * block_size;
+        threads_size = glm::ivec2(DEVICE_NUM_CORES, 1) * block_size;
         setWorkSizeFromSize(block_size, threads_size, global_work_size, local_work_size);
         CL_CHECK(clEnqueueNDRangeKernel(command_queue, coarse_raster_kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
     }
 
     {
         block_size = glm::ivec2(DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS);
-        threads_size = glm::ivec2(num_SMs, 1) * block_size;
+        threads_size = glm::ivec2(DEVICE_NUM_CORES, 1) * block_size;
         setWorkSizeFromSize(block_size, threads_size, global_work_size, local_work_size);
         CL_CHECK(clEnqueueNDRangeKernel(command_queue, fine_raster_kernel, 2, NULL, global_work_size, local_work_size, fragment_event_wait_size, fragment_event_wait_list, &fragment_event));
     }
@@ -978,75 +748,43 @@ cl_event launch_raster(
 int main(int argc, char** argv) {
 
     parse_args(argc, argv);
-    set_parameters();
     set_cl_parameters();
     create_cl_objects();
-    set_cl_kernel_parameters();
-
-    glm::ivec2 block_size, threads_size;
-    size_t global_work_size[2], local_work_size[2], global_work_offset[2];
-
-    cl_event event_wait_list[2];
-
-    for (int queue = 0; queue < vertex_command_queue_size; ++queue)
-        vertex_command_queues[queue] = CL_CHECK2(clCreateCommandQueue(context, device_id, 0, &_err));
-    
-        
-    cl_mem attributes[2] = {gl_vertex_attribute_pointer_0, gl_vertex_attribute_pointer_1};
     
     auto begin = std::chrono::high_resolution_clock::now();
-        
-    event_wait_list[vertex_command_queue_index] = launch_parallel_vertex_range_assembly(
-        vertex_shader_kernel,
-        gl_uniforms_0,
+
+    device_launch_range_triangle_assembly(
+        &device_context,
         sizeof(position)/sizeof(float[3]),
-        2,
-        attributes,
         sizeof(INDEX_BUFFER)/sizeof(*INDEX_BUFFER),
-        g_index_buffer,
+        INDEX_BUFFER,
         0
     );
-    
-    event_wait_list[vertex_command_queue_index] = launch_parallel_vertex_range_assembly(
-        vertex_shader_kernel,
-        gl_uniforms_1,
+
+    device_launch_range_triangle_assembly(
+        &device_context,
         sizeof(position)/sizeof(float[3]),
-        2,
-        attributes,
         sizeof(INDEX_BUFFER)/sizeof(*INDEX_BUFFER),
-        g_index_buffer,
+        INDEX_BUFFER,
         1
     );
 
-    launch_raster(
-        command_queue,
-        num_triangles,
-        vertex_command_queue_index,
-        event_wait_list,
-        0,
-        NULL
-    );
-    
-    CL_CHECK(clFinish(command_queue));
+    device_launch_triangle_rasterization(&device_context);
+
+    device_finish(&device_context);
 
     auto end = std::chrono::high_resolution_clock::now();
-    printf("INFO: cumm_vertices=%d, num_triangles=%d\n", cummulative_vertices, num_triangles);
+
     printf("PERF: exec_time=%d ns\n", std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count());
 
-    size_t origin[] = {0,0,0};
-    size_t region[] = {framebuffer_width,framebuffer_height,1};
-
+    
     uint32_t* result = (uint32_t*) malloc(sizeof(int[framebuffer_height][framebuffer_width]));
 
-    #ifdef CONF_FINE_IMAGE_ENABLED
-    CL_CHECK(clEnqueueReadImage(command_queue, t_color_buffer, CL_TRUE, origin, region, 0, 0, result, 0, NULL, NULL));
-    #else
-    // TODO test more image formats
-    CL_CHECK(clEnqueueReadBuffer(command_queue, t_color_buffer, CL_TRUE, origin[0]*origin[1], region[0]*region[1]*sizeof(uint32_t), result, 0, NULL, NULL));
-    #endif
-    CL_CHECK(clFinish(command_queue));
+    device_get_pixels(&device_context, 0, 0, framebuffer_width, framebuffer_height, result);
 
     print_ppm("output.ppm", framebuffer_width, framebuffer_height, (uint8_t*)result);
+
+    free(result);
 }
 
 void setWorkSizeFromSize(glm::ivec2& block_size, glm::ivec2& size_threads, size_t* global_work_size, size_t* local_work_size) {

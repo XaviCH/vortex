@@ -45,6 +45,12 @@
 #define DEVICE_UNIFORM_CAPACITY (2*1024) // 2 KB for uniforms
 #define DEVICE_TEXTURE_UNITS 8 // max number of active texture units
 #define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
+#define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 8
+#define DEVICE_MAX_NUMBER_TRIANGLES (1UL << 12) // 4096 triangles
+#define DEVICE_MAX_NUMBER_SUBTRIANGLES (1UL << 12) // 4096 subtriangles
+#define DEVICE_VERTICES_SIZE (1UL << 12) // 4096 vertices
+#define DEVICE_VARYING_SIZE 16
+
 // ------
 // KERNEL CONFIG
 // ------
@@ -57,5 +63,13 @@
 #define DEVICE_COARSE_SUB_GROUPS 16
 
 #define DEVICE_FINE_SUB_GROUPS 20
+
+// ------
+// FRONTEND CONFIG
+// ------
+#define HOST_PROGRAMS_SIZE 16
+#define HOST_BUFFERS_SIZE 32
+#define HOST_RENDERBUFFERS_SIZE 8
+#define HOST_TEXTURES_SIZE 8
 
 #endif
