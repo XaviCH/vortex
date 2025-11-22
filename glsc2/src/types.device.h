@@ -223,21 +223,33 @@ unsigned int get_sampler2D_wrap_t(sampler2D_t sampler2D) { return (sampler2D.mis
 unsigned int get_sampler2D_min_filter(sampler2D_t sampler2D) { return (sampler2D.misc >> 8) & 0x7u; }
 unsigned int get_sampler2D_mag_filter(sampler2D_t sampler2D) { return (sampler2D.misc >> 11) & 0x1u; }
 
-void set_sampler2D_internalformat(sampler2D_t *sampler2D, unsigned short internalformat)
+void set_sampler2D_internalformat(sampler2D_t *sampler2D, cl_ushort internalformat)
 {
     sampler2D->misc = (sampler2D->misc & ~0xFu) | (internalformat & 0xFu);
 }
 
-void set_sampler2D_wrap_s(sampler2D_t *sampler2D, unsigned short wrap_s)
+void set_sampler2D_wrap_s(sampler2D_t *sampler2D, cl_ushort wrap_s)
 {
     sampler2D->misc &= ~(0x3u << 4);
     sampler2D->misc |= wrap_s << 4;
 }
 
-void set_sampler2D_wrap_t(sampler2D_t *sampler2D, unsigned short wrap_t)
+void set_sampler2D_wrap_t(sampler2D_t *sampler2D, cl_ushort wrap_t)
 {
     sampler2D->misc &= ~(0x3u << 6);
     sampler2D->misc |= wrap_t << 6;
+}
+
+void set_sampler2D_min_filter(sampler2D_t *sampler2D, cl_ushort min_filter)
+{
+    sampler2D->misc &= ~(0x7u << 8);
+    sampler2D->misc |= (min_filter & 0x7u) << 8;
+}
+
+void set_sampler2D_mag_filter(sampler2D_t *sampler2D, cl_ushort mag_filter)
+{
+    sampler2D->misc &= ~(0x1u << 11);
+    sampler2D->misc |= (mag_filter & 0x1u) << 11;
 }
 
 typedef struct

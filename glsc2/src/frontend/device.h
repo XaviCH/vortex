@@ -3,6 +3,11 @@
 
 #include <CL/opencl.h>
 #include <constants.device.h>
+#include <frontend/types.h>
+
+typedef struct {
+    cl_kernel uniform_data, vertex_attrib_data;
+} device_program_kernel_info_t;
 
 typedef struct {
     cl_platform_id          platform_id;
@@ -20,7 +25,8 @@ typedef struct {
     cl_mem                  mem_stencilbuffer;          // dummy stencilbuffer
     
     size_t                program_size;
-    cl_program              programs        [HOST_PROGRAMS_SIZE];
+    cl_program                      programs        [HOST_PROGRAMS_SIZE];
+    device_program_kernel_info_t    program_kernels [HOST_PROGRAMS_SIZE];
     cl_kernel               kernels         [HOST_PROGRAMS_SIZE][2]; // 0: vertex, 1: fragment
     size_t               buffers_size;
     cl_mem                  buffers         [HOST_BUFFERS_SIZE];
@@ -190,7 +196,7 @@ void device_create_context(device_context_t *context, device_shared_objects_t* s
  * @post creates a program from a binary source file
  * @return id of the program created.
  */
-int device_create_program_from_source(device_context_t* context, size_t source_size, const unsigned char* source_code);
+int device_create_program_from_binary(device_context_t* context, size_t source_size, const unsigned char* source_code);
 
 
 
@@ -469,12 +475,12 @@ void device_finish(device_context_t* context) {
     CL_CHECK(clFinish(context->raster_command_queue));
 }
 
-int device_create_program_from_source(device_context_t* context, size_t source_size, const unsigned char* source_code) 
+int device_create_program_from_binary(device_context_t* context, size_t size, const unsigned char* binary) 
 {
     device_shared_objects_t* shared = context->shared_objects;
     size_t program_id = shared->program_size;
 
-    CL_ASSIGN_CHECK(shared->programs[program_id], clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &source_size, &source_code, NULL, &error));
+    CL_ASSIGN_CHECK(shared->programs[program_id], clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &size, &binary, NULL, &error));
     CL_CHECK(clBuildProgram(shared->programs[program_id], 1, &shared->device_id, NULL, NULL, NULL));
     CL_ASSIGN_CHECK(shared->kernels[program_id][0], clCreateKernel(shared->programs[program_id], "gl_vertex_shader", &error));
     CL_ASSIGN_CHECK(shared->kernels[program_id][1], clCreateKernel(shared->programs[program_id], "fine_raster_single_sample", &error));
@@ -482,6 +488,105 @@ int device_create_program_from_source(device_context_t* context, size_t source_s
     shared->program_size += 1;
 
     return program_id;
+}
+
+size_t device_get_program_uniform_size(device_shared_objects_t* shared, size_t program_id) 
+{
+    cl_kernel* kernel = &shared->program_kernels->uniform_data;
+
+    CL_ASSIGN_CHECK(*kernel, clCreateKernel(shared->programs[program_id], "gl_uniform_data", &error));
+    
+    cl_uint uniform_size;
+    CL_CHECK(clGetKernelInfo(*kernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &uniform_size, NULL));
+
+    return uniform_size;
+}
+
+size_t device_get_program_vertex_attrib_size(device_shared_objects_t* shared, size_t program_id)
+{
+    cl_kernel* kernel = &shared->program_kernels->vertex_attrib_data;
+
+    CL_ASSIGN_CHECK(*kernel, clCreateKernel(shared->programs[program_id], "gl_attribute_data", &error));
+    
+    cl_uint vertex_attib_size;
+    CL_CHECK(clGetKernelInfo(*kernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_attib_size, NULL));
+
+    return vertex_attib_size;
+}
+
+static uint32_t size_from_name_type(const char* name_type) {
+    #define RETURN_IF_SIZE_FROM(_TYPE)                              \
+        if (strncmp(name_type, _TYPE, sizeof(_TYPE) - 1) == 0) {    \
+            substr_size = name_type + sizeof(_TYPE) - 1;            \
+            if (*substr_size == '*' || *substr_size == '\0') return 1;                     \
+            return atoi(substr_size);                               \
+        }
+
+    const char* substr_size;
+    RETURN_IF_SIZE_FROM("float");
+    RETURN_IF_SIZE_FROM("int");
+    RETURN_IF_SIZE_FROM("short");
+    RETURN_IF_SIZE_FROM("char");
+    RETURN_IF_SIZE_FROM("bool");
+    #undef RETURN_IF_SIZE_FROM
+
+    // OpenGL - OpenCL special types
+    if (strcmp(name_type, "sampler2D_t") == 0) return 1;
+    #ifdef HOSTGPU
+    if (strcmp(name_type, "image_t") == 0) return 1;
+    #else
+    if (strncmp(name_type, "uchar", sizeof("uchar") -1) == 0) return 1;
+    #endif
+    printf("%s\n", name_type);
+}
+static uint32_t type_from_name_type(const char* name_type) {
+    if (strncmp(name_type, "float",  sizeof("float") -1)  == 0) return GL_FLOAT;
+    if (strncmp(name_type, "int",    sizeof("int")   -1)  == 0) return GL_INT;
+    if (strncmp(name_type, "short",  sizeof("short") -1)  == 0) return GL_SHORT;
+    if (strncmp(name_type, "char",   sizeof("char")  -1)  == 0) return GL_BYTE;
+    if (strncmp(name_type, "bool",   sizeof("bool")  -1)  == 0) return GL_BYTE;
+    
+    // OpenGL - OpenCL special types
+    // if (strcmp(name_type, "sampler2D_t") == 0) return SAMPLER2D_T;
+    // if (strncmp(name_type, "uchar*", sizeof("uchar*")-1)  == 0) return IMAGE_T;
+
+    // 
+    #ifdef DEBUG
+    printf("%s\n", name_type);
+    CL_UNSUPORTED_MAPING();
+    #else
+    return 0;
+    #endif
+}
+
+void device_get_program_uniform_arg_data(device_shared_objects_t* shared, size_t program_id, size_t location, arg_data_t* arg_data) 
+{
+    cl_kernel kernel = shared->program_kernels->uniform_data;
+
+    char name[128];
+    char type_name[32];
+
+    CL_CHECK(clGetKernelArgInfo(kernel, location, CL_KERNEL_ARG_NAME,        sizeof(name),       &name,      NULL));
+    CL_CHECK(clGetKernelArgInfo(kernel, location, CL_KERNEL_ARG_TYPE_NAME,   sizeof(type_name),  &type_name, NULL));
+
+    arg_data->size = size_from_name_type(type_name);
+    arg_data->type = type_from_name_type(type_name);
+    strcpy(arg_data->name, name);
+}
+
+void device_get_program_vertex_attrib_arg_data(device_shared_objects_t* shared, size_t program_id, size_t location, arg_data_t* arg_data) 
+{
+    cl_kernel kernel = shared->program_kernels->vertex_attrib_data;
+
+    char name[128];
+    char type_name[32];
+
+    CL_CHECK(clGetKernelArgInfo(kernel, location, CL_KERNEL_ARG_NAME,        sizeof(name),       &name,      NULL));
+    CL_CHECK(clGetKernelArgInfo(kernel, location, CL_KERNEL_ARG_TYPE_NAME,   sizeof(type_name),  &type_name, NULL));
+
+    arg_data->size = size_from_name_type(type_name);
+    arg_data->type = type_from_name_type(type_name);
+    strcpy(arg_data->name, name);
 }
 
 static size_t get_bytes_from_colorbuffer_mode(cl_uint color_buffer_mode) 
