@@ -86,13 +86,6 @@ mask_container_t _masks = {
 
 pixel_store_t _pixel_store = { .unpack_aligment = 4 };
 
-cl_command_queue  _vertex_attrib_command_queues[MAX_VERTEX_ATTRIBS];
-unsigned char     _vertex_attrib_enable[MAX_VERTEX_ATTRIBS]; // TODO: use it as checker for state
-unsigned char     _vertex_attrib_state[MAX_VERTEX_ATTRIBS];
-vertex_attrib_u   _vertex_attribs[MAX_VERTEX_ATTRIBS];
-
-active_texture_t _active_textures[MAX_COMBINED_TEXTURE_IMAGE_UNITS]; // defines what textures are active
-
 clear_data_t _clear_data = {
     .color = { 0 , 0, 0, 0 },
     .stencil = 0,
@@ -148,7 +141,7 @@ cl_ulong c_clear_write_values;
 cl_ushort c_clear_enabled_data = 0;
 active_deferred_clear_t _deferred_clear;
 
-// Host state
+// Host State
 static uint8_t                      vertex_attibute_updated;
 static cl_float4                    vertex_attributes           [DEVICE_VERTEX_ATTRIBUTE_SIZE];
 static vertex_attribute_data_t      vertex_attribute_datas      [DEVICE_VERTEX_ATTRIBUTE_SIZE];
@@ -165,6 +158,7 @@ static uint8_t                  rop_config_updated;
 static uint32_t                 rop_config_count;
 static rop_config_t             rop_config;
 
+static uint8_t                  _uniform_data_updated;
 static size_t                   _current_program;
 static size_t                   _program_sz;
 static program_t                _programs                [HOST_PROGRAMS_SIZE];
@@ -174,12 +168,18 @@ static size_t                   _framebuffer_binding;
 static size_t                   _framebuffer_sz;
 static framebuffer_t            _framebuffers   [HOST_FRAMEBUFFER_SIZE];
 
+static size_t                   _buffer_binding;
+static size_t                   _buffer_sz;
+static buffer_t                 _buffers        [HOST_BUFFERS_SIZE];
 
+static size_t                   _renderbuffer_binding;
+static size_t                   _renderbuffer_sz;
+static renderbuffer_t           _renderbuffers  [HOST_RENDERBUFFERS_SIZE];
 
+static GLenum _hint;
+static GLenum _error;
 
-
-
-// Device state
+// Device State
 static device_shared_objects_t      device_shared_objects;
 static size_t                       context_sz;
 static device_context_t*            contexts[HOST_PROGRAMS_SIZE];
@@ -213,6 +213,15 @@ void __context_constructor__()
     _texture_sz = 0;
     _texture_binding = 0;
 
+    _buffer_binding = 0;
+    _buffer_sz = 0;
+
+    _renderbuffer_binding = 0;
+    _renderbuffer_sz = 0;
+
+    _hint = GL_DONT_CARE;
+    _error = GL_NO_ERROR;
+
     device_create_shared_objects(&device_shared_objects);
     context_sz = 0;
 } 
@@ -222,116 +231,52 @@ void __context_constructor__()
 
 GLboolean _kernel_load_status;
 
-GLuint _buffer_binding          = 0;
-GLuint _renderbuffer_binding    = 0;
-GLuint _texture_binding         = 0;
-GLuint _current_program         = 0;
-
-buffer_t        _buffers        [MAX_BUFFER];
-renderbuffer_t  _renderbuffers  [MAX_RENDERBUFFER];
-
 // Depth
 GLenum      _depth_func = DEPTH_FUNC_LESS;
 depth_range_t _depth_range = { .n=0.0, .f=1.0};
 
-/****** SHORCUTS MACROS ******/
-#define COLOR_ATTACHMENT0 _renderbuffers[_framebuffers[_framebuffer_binding].color_attachment0.position]
-
-#define RENDERBUFFER_COLOR_ATTACHMENT0 _renderbuffers[_framebuffers[_framebuffer_binding].color_attachment0.position]
-#define TEXTURE_COLOR_ATTACHMENT0 _textures[_framebuffers[_framebuffer_binding].color_attachment0.position]
-
-#define DEPTH_ATTACHMENT _renderbuffers[_framebuffers[_framebuffer_binding].depth_attachment.position]
-#define STENCIL_ATTACHMENT _renderbuffers[_framebuffers[_framebuffer_binding].stencil_attachment.position]
-
-#define FRAMEBUFFER _framebuffers[_framebuffer_binding]
-#define CURRENT_PROGRAM _programs[_current_program]
-
-
 /****** Interface for utils & inline functions ******\
  * Utility or inline function are implemented at the end of the file. 
 */
-void* getCommandQueue();
 
-unsigned int size_from_name_type(const char*);
-unsigned int type_from_name_type(const char*);
-
-unsigned int sizeof_type(GLenum type) {
-    switch (type)
-    {
-    case GL_BYTE:
-    case GL_UNSIGNED_BYTE:
-        return 1;
-    case GL_SHORT:
-    case GL_UNSIGNED_SHORT:
-        return 2;
-    case GL_INT:
-    case GL_UNSIGNED_INT:
-    case GL_FLOAT:
-        return 4;
-    case SAMPLER2D_T:
-        return sizeof(sampler2D_t);
-    case IMAGE_T:
-        #ifdef HOSTGPU
-        #else
-        return sizeof(cl_mem);
-        #endif
-    }
-    NOT_IMPLEMENTED;
-} 
-
-GLenum _error;
 
 #ifdef DEBUG
-#define CASE(enum) case enum: strcpy(error_name, #enum); break;
-
-#define SET_GL_ERROR(error) \
-    { \
-        printf("DEBUG: %s throws a "#error" at %s:%d\n", __func__, __FILE__, __LINE__); \
-        exit(error); \
-    }
-
-#undef CASE
+    #define SET_GL_ERROR(error) \
+        { \
+            printf("DEBUG: %s throws a "#error" at %s:%d\n", __func__, __FILE__, __LINE__); \
+            exit(error); \
+        }
 #else
-#define SET_GL_ERROR(error) \
-    { _error = error; }
+    #define SET_GL_ERROR(error) \
+        { _error = error; }
 #endif
 
+static void flush_device_context(device_context_t* context);
+static uint32_t is_valid_program(GLuint program);
+static GLboolean* get_enabled_pointer(GLenum cap);
+static render_mode_t get_render_mode_flags(GLenum mode);
+static size_t sizeof_vertex_attribute_type(GLenum type);
 
 
-/************ OpenGL Interface Implementations ************\
- * 
- * 
-*/
+
 // TODO: Dependant texture throws this if (id >= MAX_COMBINED_TEXTURE_IMAGE_UNITS) RETURN_ERROR(GL_INVALID_OPERATION);
 GL_APICALL void GL_APIENTRY glActiveTexture (GLenum texture) 
 {
     uint32_t texture_unit = texture - GL_TEXTURE0;
-    if (texture_unit >= DEVICE_TEXTURE_UNITS) 
-    {
-        SET_GL_ERROR(GL_INVALID_ENUM);
-        return;
-    }
+
+    if (texture_unit >= DEVICE_TEXTURE_UNITS) RETURN_ERROR(GL_INVALID_VALUE); // TODO: MAX_COMBINED_TEXTURE_IMAGE_UNITS
+
     active_texture_unit = texture_unit;
     _texture_binding = texture_unit_bindings[active_texture_unit];
 }
 
 GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer) 
 {
-    if (target == GL_ARRAY_BUFFER) 
-    {
-        if (buffer != 0 && !_buffers[buffer].used) 
-        {
-            SET_GL_ERROR(GL_INVALID_OPERATION);
-        } 
-        else 
-        {
-            _buffer_binding = buffer;
-        }
-    } 
-    else 
-    {
-        SET_GL_ERROR(GL_INVALID_ENUM);
-    } 
+    if (target != GL_ARRAY_BUFFER) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (buffer >= _buffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    _buffer_binding = buffer;
 }
 
 GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer) 
@@ -340,27 +285,21 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer
 
     if (framebuffer >= _framebuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    _framebuffer_updated = 1;
+    if (_current_program > 0)
+    {
+        flush_device_context(contexts[_current_program-1]);
+    }
+
     _framebuffer_binding = framebuffer;
 }
 
 GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuffer) 
 {
-    if (target == GL_RENDERBUFFER) 
-    {
-        if (!_renderbuffers[renderbuffer].used)
-        {
-            SET_GL_ERROR(GL_INVALID_OPERATION);
-        }
-        else
-        {
-            _renderbuffer_binding = renderbuffer;
-        }
-    } 
-    else
-    {
-        SET_GL_ERROR(GL_INVALID_ENUM);
-    }
+    if (target != GL_RENDERBUFFER) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (renderbuffer >= _renderbuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    _renderbuffer_binding = renderbuffer;
 }
 
 GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture) 
@@ -371,14 +310,13 @@ GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture)
 
     texture_unit_updated = 1;
     texture_unit_bindings[active_texture_unit] = texture;
-
     _texture_binding = texture;
 }
 
 GL_APICALL void GL_APIENTRY glBlendColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) 
 {
     _blend_data.color = (blend_color_t) 
-    { // TODO: Compress it to 32 bits
+    {
         .red = red,
         .green = green,
         .blue = blue,
@@ -397,6 +335,19 @@ static inline GLenum gl_equation_to_blend_equation (GLenum mode)
     }
 }
 
+static GLboolean is_valid_blend_equation(GLenum mode)
+{
+    switch (mode)
+    {
+        default:
+            return GL_FALSE;
+        case GL_FUNC_ADD:
+        case GL_FUNC_SUBTRACT:
+        case GL_FUNC_REVERSE_SUBTRACT:
+            return GL_TRUE;
+    }
+}
+
 GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode) 
 {
     glBlendEquationSeparate(mode, mode);
@@ -404,10 +355,14 @@ GL_APICALL void GL_APIENTRY glBlendEquation (GLenum mode)
 
 GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum modeAlpha) 
 {
+    if (is_valid_blend_equation(modeRGB) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (is_valid_blend_equation(modeAlpha) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+    
     _blend_data.equation = (blend_equation_t) 
     {
-        .modeRGB    = gl_equation_to_blend_equation(modeRGB),
-        .modeAlpha  = gl_equation_to_blend_equation(modeAlpha),
+        .modeRGB    = modeRGB,
+        .modeAlpha  = modeAlpha,
     };
 }
 
@@ -415,7 +370,7 @@ inline GLenum gl_function_to_blend_function (GLenum factor)
 {
     switch (factor)
     {
-        case GL_ZERO:                       return BLEND_ZERO;                           
+        case GL_ZERO:                       return BLEND_ZERO;
         case GL_ONE:                        return BLEND_ONE;                            
         case GL_SRC_COLOR:                  return BLEND_SRC_COLOR;                      
         case GL_ONE_MINUS_SRC_COLOR:        return BLEND_ONE_MINUS_SRC_COLOR;            
@@ -434,6 +389,31 @@ inline GLenum gl_function_to_blend_function (GLenum factor)
     }
 }
 
+static GLboolean is_valid_blend_function(GLenum mode)
+{
+    switch (mode)
+    {
+        default:
+            return GL_FALSE;
+        case GL_ZERO:
+        case GL_ONE:
+        case GL_SRC_COLOR:
+        case GL_ONE_MINUS_SRC_COLOR:
+        case GL_SRC_ALPHA:
+        case GL_ONE_MINUS_SRC_ALPHA:
+        case GL_DST_ALPHA:
+        case GL_ONE_MINUS_DST_ALPHA:
+        case GL_DST_COLOR:
+        case GL_ONE_MINUS_DST_COLOR:
+        case GL_SRC_ALPHA_SATURATE:             
+        case GL_CONSTANT_COLOR:       
+        case GL_ONE_MINUS_CONSTANT_COLOR:       
+        case GL_CONSTANT_ALPHA:       
+        case GL_ONE_MINUS_CONSTANT_ALPHA:
+            return GL_TRUE;
+    }
+}
+
 GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) 
 {
     glBlendFuncSeparate(sfactor, dfactor, sfactor, dfactor);
@@ -441,122 +421,155 @@ GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor)
 
 GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) 
 {
-    _blend_data.func = (blend_func_t) 
+    if (is_valid_blend_function(sfactorRGB) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (is_valid_blend_function(dfactorRGB) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+    
+    if (is_valid_blend_function(sfactorAlpha) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+    
+    if (is_valid_blend_function(dfactorAlpha) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+    
+    _blend_data.func = (blend_func_t)
     {
-        .srcRGB     = gl_function_to_blend_function(sfactorRGB), 
-        .srcAlpha   = gl_function_to_blend_function(sfactorAlpha),
-        .dstRGB     = gl_function_to_blend_function(dfactorRGB), 
-        .dstAlpha   = gl_function_to_blend_function(dfactorAlpha),
+        .srcRGB     = sfactorRGB, 
+        .srcAlpha   = sfactorAlpha,
+        .dstRGB     = dfactorRGB, 
+        .dstAlpha   = dfactorAlpha,
     };
 }
 
-uint32_t array_buffers[16];
-
 GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage) 
 {
-    if (target == GL_ARRAY_BUFFER)
+    if (target != GL_ARRAY_BUFFER) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (_buffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (size == 0) RETURN_ERROR(GL_INVALID_VALUE); // TODO: Is size==0 valid?
+
+    buffer_t* buffer = &_buffers[_buffer_binding-1];
+    uint32_t is_inizialized = buffer->size != 0;
+    device_shared_objects_t *shared = &device_shared_objects;
+
+    if (is_inizialized) 
     {
-        cl_int error;
-        cl_mem_flags mem_flags = CL_MEM_READ_ONLY;
-        if (data != NULL)
-        {
-            mem_flags |= CL_MEM_COPY_HOST_PTR;
-        }
-
-        array_buffers[_buffer_binding] = device_create_ro_buffer(device_context[_current_program], size);
-        device_write_on_buffer(device_context[_current_program], array_buffers[_buffer_binding], 0, size, data);
-
-        cl_mem buffer_mem = clCreateBuffer(_getContext(), mem_flags, size, data, &error);
-        if (error == CL_OUT_OF_RESOURCES)
-        {
-            SET_GL_ERROR(GL_OUT_OF_MEMORY);
-            return;
-        }
-        CL_CHECK(error);
-
-        _buffers[_buffer_binding].mem = buffer_mem;
-        _buffers[_buffer_binding].size = size;
-        _buffers[_buffer_binding].usage = usage;
-    } 
-    else
+        if (buffer->size != size || buffer->usage != usage) RETURN_ERROR(GL_INVALID_OPERATION);
+    }
+    else 
     {
-        SET_GL_ERROR(GL_INVALID_ENUM);
-    } 
+        buffer->size = size;
+        buffer->usage = usage;
+        buffer->id = device_create_ro_buffer(shared, size);
+        // TODO: Set CL_OUT_OF_RESOURCES if no memory available
+    }
+
+    if (data != NULL)
+    {
+        device_write_on_buffer(shared, buffer->id, 0, size, data);
+    }
 }
 
 GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLsizeiptr size, const void *data) 
 {
-    if (target != GL_ARRAY_BUFFER) {
-        SET_GL_ERROR(GL_INVALID_ENUM);
-        return;
-    }
-    if (_buffer_binding == 0) {
-        SET_GL_ERROR(GL_INVALID_OPERATION);
-        return;
-    }
-    if (offset < 0 || size < 0 ) {
-        SET_GL_ERROR(GL_INVALID_VALUE);
-        return;
+    if (target != GL_ARRAY_BUFFER) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (_buffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (offset < 0 || size < 0 ) RETURN_ERROR(GL_INVALID_VALUE);
+
+    buffer_t *buffer = &_buffers[_buffer_binding-1];
+
+    if (offset + size > buffer->size) RETURN_ERROR(GL_INVALID_VALUE);
+
+    device_write_on_buffer(&device_shared_objects, buffer->id, offset, size, data);
+}
+
+typedef struct { uint32_t width, height; } attachment_size_t;
+
+static attachment_size_t get_attachment_size(attachment_t* attachment) 
+{
+    attachment_size_t size;
+
+    if (attachment->target == GL_RENDERBUFFER) 
+    {
+        renderbuffer_t *renderbuffer = &_renderbuffers[attachment->binding-1];
+        size = (attachment_size_t) {
+            .width  = renderbuffer->width,
+            .height = renderbuffer->height,
+        };
     } 
-    if (offset + size > _buffers[_buffer_binding].size) {
-        SET_GL_ERROR(GL_INVALID_VALUE);
-        return;
+    else // GL_TEXTURE_2D 
+    {
+        texture_t *texture = &_textures[attachment->binding-1];
+        size = (attachment_size_t) {
+            .width  = texture->width,
+            .height = texture->height,
+        };
     }
-    cl_command_queue command_queue = getCommandQueue(); 
-    CL_CHECK(clEnqueueWriteBuffer(command_queue, _buffers[_buffer_binding].mem, CL_TRUE, offset, size, data, 0, NULL, NULL));
+
+    return size;
 }
 
 GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) 
 {
-    if (target != GL_FRAMEBUFFER) {
-        SET_GL_ERROR(GL_INVALID_ENUM);
-        return 0;
-    };
+    if (target != GL_FRAMEBUFFER) RETURN_ERROR_WITH_VALUE(GL_INVALID_ENUM, 0);
 
-    // TODO: if target exist, otherwise return GL_FRAMEBUFFER_UNDEFINED
-    
-    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding];
-    
-    // TODO: if attachment complete, otherwise return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT
-    
-    if (   framebuffer->color_attachment0.position == 0 
-        && framebuffer->depth_attachment.position == 0 
-        && framebuffer->stencil_attachment.position == 0
-        ) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
+    if (_buffer_binding == 0) NOT_IMPLEMENTED;
 
-    GLsizei width = 0, height = 0;
-    if (framebuffer->color_attachment0.position) {
-        if (width == 0) width = COLOR_ATTACHMENT0.width;
-        else if (width != COLOR_ATTACHMENT0.width) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-        if (height == 0) height = COLOR_ATTACHMENT0.height;
-        else if (height != COLOR_ATTACHMENT0.height) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    
+    uint32_t is_color_attached = framebuffer->color_attachment0.binding;
+    uint32_t is_depth_attached = framebuffer->depth_attachment.binding;
+    uint32_t is_stencil_attached = framebuffer->stencil_attachment.binding;
+    
+    uint32_t any_attachment = 
+        is_color_attached   ||
+        is_depth_attached   ||
+        is_stencil_attached ;
+
+    if (!any_attachment) return GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;
+
+    attachment_size_t common_size = {0,0};
+    attachment_size_t tmp_size = {0,0};
+
+    if (is_color_attached) 
+    {
+        common_size = get_attachment_size(&framebuffer->color_attachment0);
     }
 
-    if (framebuffer->depth_attachment.position) {
-        if (width == 0) width = DEPTH_ATTACHMENT.width;
-        else if (width != DEPTH_ATTACHMENT.width) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-        if (height == 0) height = DEPTH_ATTACHMENT.height;
-        else if (height != DEPTH_ATTACHMENT.height) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (is_depth_attached) 
+    {
+        tmp_size = get_attachment_size(&framebuffer->depth_attachment);
+        if (common_size.width == 0 && common_size.height == 0) 
+        {
+            common_size = tmp_size;
+        } 
+        else if (common_size.width != tmp_size.width || common_size.height != tmp_size.height) 
+        {
+            return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+        }
     }
 
-    if (framebuffer->stencil_attachment.position) {
-        if (width == 0) width = STENCIL_ATTACHMENT.width;
-        else if (width != STENCIL_ATTACHMENT.width) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
-        if (height == 0) height = STENCIL_ATTACHMENT.height;
-        else if (height != STENCIL_ATTACHMENT.height) return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+    if (is_stencil_attached) 
+    {
+        tmp_size = get_attachment_size(&framebuffer->stencil_attachment);
+        if (common_size.width == 0 && common_size.height == 0) 
+        {
+            common_size = tmp_size;
+        } 
+        else if (common_size.width != tmp_size.width || common_size.height != tmp_size.height) 
+        {
+            return GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
+        }
     }
-
-    // TODO: Checkout internal formats
 
     return GL_FRAMEBUFFER_COMPLETE;
 }
 
-framebuffer_data_t get_framebuffer_data();
-uint32_t get_clear_color();
-uint16_t get_clear_depth();
-uint8_t get_clear_stencil();
+static uint32_t get_clear_color();
+static uint16_t get_clear_depth();
+static uint8_t get_clear_stencil();
 
-cl_ulong get_clear_write_values() {
+static cl_ulong get_clear_write_values() {
     cl_ulong clear_write_values;
 
     cl_ulong clear_color = get_clear_color();
@@ -571,7 +584,7 @@ cl_ulong get_clear_write_values() {
     return clear_write_values;
 };
 
-cl_ushort get_clear_enabled_data(GLbitfield mask) {
+static cl_ushort get_clear_enabled_data(GLbitfield mask) {
     cl_ushort clear_enabled_data;
 
     cl_ushort enabled_color = 0;
@@ -597,12 +610,10 @@ cl_ushort get_clear_enabled_data(GLbitfield mask) {
     return clear_enabled_data;
 };
 
-/**
- * 
- */
+/*
 void clear_framebuffer() {
     printf("DEBUG: Forced framebuffer clear.\n");
-    
+
     cl_kernel kernel = _kernels.force_clear;
     cl_command_queue command_queue = getCommandQueue();
 
@@ -637,83 +648,27 @@ void clear_framebuffer() {
     }
 
     CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, NULL));
-
-    /*
-    typedef struct {
-        cl_mem mem;
-        uint32_t width, internalformat;
-    } buffer_info_t; 
-
-    GLenum mask = 
-        (_deferred_clear.colorbuffer    ? GL_COLOR_BUFFER_BIT   : 0) |
-        (_deferred_clear.depthbuffer    ? GL_DEPTH_BUFFER_BIT   : 0) |
-        (_deferred_clear.stencilbuffer  ? GL_STENCIL_BUFFER_BIT : 0) ;
-
-    buffer_info_t buffer_info;
-
-    if (FRAMEBUFFER.color_attachment0.target == GL_RENDERBUFFER) {
-
-        renderbuffer_t* colorbuffer = &_renderbuffers[FRAMEBUFFER.color_attachment0.position];
-        
-        buffer_info = (buffer_info_t) {
-            .mem = colorbuffer->mem,
-            .width = colorbuffer->width,
-            .internalformat = colorbuffer->internalformat,
-        };
-    } else {
-        texture_t* texture = &_textures[FRAMEBUFFER.color_attachment0.position];
-        
-        buffer_info = (buffer_info_t) {
-            .mem = texture->mem,
-            .width = texture->width,
-            .internalformat = texture->internalformat,
-        };
-    }
-
-    cl_uint scissor_enabled, mask_color_r, mask_color_g, mask_color_b, mask_color_a, mask_depth;
-
-    scissor_enabled = _enableds.scissor_test;
-    mask_color_r = _masks.color.r;
-    mask_color_g = _masks.color.g;
-    mask_color_b = _masks.color.b;
-    mask_color_a = _masks.color.a;
-    mask_depth = _masks.depth;
-
-    setKernelArg(_kernels.clear, 0, sizeof(cl_mem), &buffer_info.mem);
-    setKernelArg(_kernels.clear, 1, sizeof(cl_mem), &DEPTH_ATTACHMENT.mem);
-    setKernelArg(_kernels.clear, 2, sizeof(cl_mem), &STENCIL_ATTACHMENT.mem);
-    setKernelArg(_kernels.clear, 3, sizeof(cl_uint), &buffer_info.internalformat);
-    setKernelArg(_kernels.clear, 4, sizeof(cl_uint), &buffer_info.width);
-    setKernelArg(_kernels.clear, 5, sizeof(cl_uint), &mask);
-    setKernelArg(_kernels.clear, 6, sizeof(cl_float4), &_clear_data.color);
-    setKernelArg(_kernels.clear, 7, sizeof(cl_float), &_clear_data.depth);
-    setKernelArg(_kernels.clear, 8, sizeof(cl_int), &_clear_data.stencil);
-    setKernelArg(_kernels.clear, 9, sizeof(cl_uint), &scissor_enabled);
-    setKernelArg(_kernels.clear,10, sizeof(cl_int), &_scissor_data.left);
-    setKernelArg(_kernels.clear,11, sizeof(cl_int), &_scissor_data.bottom);
-    setKernelArg(_kernels.clear,12, sizeof(cl_uint), &_scissor_data.width);
-    setKernelArg(_kernels.clear,13, sizeof(cl_uint), &_scissor_data.height);
-    setKernelArg(_kernels.clear,14, sizeof(cl_uint), &mask_color_r);
-    setKernelArg(_kernels.clear,15, sizeof(cl_uint), &mask_color_g);
-    setKernelArg(_kernels.clear,16, sizeof(cl_uint), &mask_color_b);
-    setKernelArg(_kernels.clear,17, sizeof(cl_uint), &mask_color_a);
-    setKernelArg(_kernels.clear,18, sizeof(cl_uint), &mask_depth);
-    setKernelArg(_kernels.clear,19, sizeof(cl_uint), &_masks.stencil);
-    enqueueNDRangeKernel(getCommandQueue(), _kernels.clear, COLOR_ATTACHMENT0.height * COLOR_ATTACHMENT0.width);
-    */
 } 
+*/
 
 GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) 
 {
-    if (mask & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT) == 0)
-        RETURN_ERROR(GL_INVALID_VALUE);
+    GLbitfield valid_mask = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
+
+    if (mask & valid_mask == 0) RETURN_ERROR(GL_INVALID_VALUE);
     
-    // TODO: This clear can be done smarter
-    if (c_clear_enabled_data) 
-        clear_framebuffer();
-    
-    c_clear_write_values = get_clear_write_values();
-    c_clear_enabled_data = get_clear_enabled_data(mask);
+    if (_current_program == 0) NOT_IMPLEMENTED;
+
+    device_context_t *context = &contexts[_current_program-1];
+
+    flush_device_context(context);
+
+    device_clear_framebuffer(
+        context,
+        get_clear_write_values(),
+        get_clear_enabled_data(mask),
+        1
+    );
 }
 
 GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) 
@@ -746,37 +701,39 @@ GL_APICALL void GL_APIENTRY glColorMask (GLboolean red, GLboolean green, GLboole
     };
 }
 
-GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data) {
+GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data)
+{
     NOT_IMPLEMENTED;
 }
 
 GL_APICALL GLuint GL_APIENTRY glCreateProgram (void)
 {
-    if (context_sz < HOST_PROGRAMS_SIZE) {
-        contexts[context_sz] = (device_context_t*) malloc(sizeof(device_context_t));
-        device_create_context(contexts[context_sz], &device_shared_objects);
-        return context_sz++;
-    }
+    if (context_sz >= HOST_PROGRAMS_SIZE) RETURN_ERROR_WITH_VALUE(GL_OUT_OF_MEMORY, 0);
 
-    SET_GL_ERROR(GL_OUT_OF_MEMORY);
-    return 0;
+    contexts[context_sz] = (device_context_t*) malloc(sizeof(device_context_t));
+    
+    device_create_context(contexts[context_sz], &device_shared_objects);
+    
+    context_sz += 1;
+    
+    return context_sz;
 }
 
 GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) 
 {
     switch (mode)
     {
-    case GL_FRONT:
-    case GL_BACK:
-    case GL_FRONT_AND_BACK:
-        _rasterization_data.cull_face = mode;
-        return;
-    default:
-        SET_GL_ERROR(GL_INVALID_ENUM);
+        default: 
+            RETURN_ERROR(GL_INVALID_ENUM);
+        case GL_FRONT:
+        case GL_BACK:
+        case GL_FRONT_AND_BACK:
     }
+
+    _rasterization_data.cull_face = mode;
 }
 
-static inline GLenum gl_function_to_depth_function (GLenum func) {
+static inline GLenum gl_depth_function_to_device_depth_function (GLenum func) {
     switch (func)
     {
         case GL_NEVER:      return DEPTH_FUNC_NEVER;
@@ -793,50 +750,49 @@ static inline GLenum gl_function_to_depth_function (GLenum func) {
 
 GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) 
 {
-    _depth_func = gl_function_to_depth_function(func);
+    switch (func)
+    {
+        default:            
+            RETURN_ERROR(GL_INVALID_ENUM);
+        case GL_NEVER:
+        case GL_LESS:
+        case GL_EQUAL:
+        case GL_LEQUAL:
+        case GL_GREATER:
+        case GL_NOTEQUAL:
+        case GL_GEQUAL:
+        case GL_ALWAYS:
+    }
+
+    _depth_func = func;
 }
 
-GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) {
+GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) 
+{
     _masks.depth = flag;
 }
 
-GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) {
-    NOT_IMPLEMENTED;
-    _depth_range = (depth_range_t) {.n=n, .f=f};
+GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) 
+{
+    _depth_range = (depth_range_t) 
+    {
+        .n=n,
+        .f=f
+    };
 }
 
-GL_APICALL void GL_APIENTRY glDisable (GLenum cap) {
-    switch (cap)
-    {
-    case GL_SCISSOR_TEST:
-        _enableds.scissor_test = GL_FALSE;
-        break;
-    case GL_STENCIL_TEST:
-        _enableds.stencil_test = GL_FALSE;
-        break;
-    case GL_DEPTH_TEST:
-        _enableds.depth_test = GL_FALSE;
-        break;
-    case GL_BLEND:
-        _enableds.blend = GL_FALSE;
-        break;
-    case GL_DITHER:
-        _enableds.dither = GL_FALSE;
-        break;
-    case GL_CULL_FACE:
-        _enableds.cull_face = GL_FALSE;
-        break;
-    default:
-        NOT_IMPLEMENTED;
-    }
+GL_APICALL void GL_APIENTRY glDisable (GLenum cap) 
+{
+    GLboolean* enabled_ptr = get_enabled_pointer(cap);
+
+    if (enabled_ptr == NULL) RETURN_ERROR(GL_INVALID_ENUM);
+
+    *enabled_ptr = GL_FALSE;
 }
 
 GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) 
 {
-    if (index >= GL_MAX_VERTEX_ATTRIBS) {
-        SET_GL_ERROR(GL_INVALID_VALUE);
-        return;
-    }
+    if (index >= GL_MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);
 
     vertex_attibute_updated = 1;
     vertex_attribute_datas[index].misc &= ~VERTEX_ATTRIBUTE_ACTIVE_POINTER;
@@ -899,8 +855,6 @@ inline int32_t get_primitive_offset(GLenum mode) {
     }
 } 
 
-#define WARP_SIZE 32 // TODO: Check this value
-#define GROUP_SIZE 512 // TODO: Check this value
 #define NUM_GROUP 32 // TODO: Check this value
 cl_context _context;
 
@@ -916,136 +870,13 @@ cl_mem _vertex_out_subbuffer; //
 #define VS_VARYING_INDEX_0_RESERVED (1 << 0)
 #define VS_LAST_AS_FIRST            (1 << 1)
 
-// RAS data
-cl_command_queue _rasterization_command_queues[NUM_GROUP];
-cl_mem _rasterization_bin_data[NUM_GROUP];
 
-inline cl_uint get_vertex_size() {
-    return sizeof(cl_float4) * (_programs[_current_program].varying_size + 1);
-}
-
-inline cl_uint get_render_mode_flags(GLenum mode) {
-    cl_uint render_mode_flags = RENDER_MODE_FLAG_ENABLE_LERP;
-    if (_enableds.depth_test)
-        render_mode_flags |= RENDER_MODE_FLAG_ENABLE_DEPTH;
-    if (_enableds.stencil_test)
-        render_mode_flags |= RENDER_MODE_FLAG_ENABLE_STENCIL;
-    if (_enableds.blend)
-        render_mode_flags |= RENDER_MODE_FLAG_ENABLE_BLENDER;
-    if (_enableds.cull_face) {
-        if (_rasterization_data.cull_face == GL_FRONT || _rasterization_data.cull_face == GL_FRONT_AND_BACK)
-            render_mode_flags |= RENDER_MODE_FLAG_ENABLE_CULL_FRONT;
-        if (_rasterization_data.cull_face == GL_BACK || _rasterization_data.cull_face == GL_FRONT_AND_BACK)
-            render_mode_flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
-    }
-    
-    if (mode == GL_TRIANGLE_FAN) {
-        render_mode_flags |= RENDER_MODE_FLAG_TRIANGLE_FAN;
-    } else if (mode == GL_TRIANGLE_STRIP) {
-        render_mode_flags |= RENDER_MODE_FLAG_TRIANGLE_STRIP;
-    }
-
-    return render_mode_flags;
-}
-
-
-
-
-framebuffer_data_t get_framebuffer_data() {
-
-    attachment_t *color, *depth, *stencil;
-    color   = &FRAMEBUFFER.color_attachment0;
-    depth   = &FRAMEBUFFER.depth_attachment;
-    stencil = &FRAMEBUFFER.stencil_attachment;
-
-    framebuffer_data_t framebuffer;
-    
-    if (color->position) {
-        if (color->target == GL_RENDERBUFFER) {
-            renderbuffer_t *colorbuffer = &_renderbuffers[color->position];
-            framebuffer.color = (buffer_data_t) {
-                .mem = colorbuffer->mem,
-                .internalformat = colorbuffer->internalformat,
-            };
-            framebuffer.width = colorbuffer->width;
-            framebuffer.height = colorbuffer->height; 
-        } else {
-            texture_t *colorbuffer = &_textures[color->position];
-            framebuffer.color = (buffer_data_t) {
-                .mem = colorbuffer->mem,
-                .internalformat = colorbuffer->internalformat,
-            };
-            framebuffer.width = colorbuffer->width;
-            framebuffer.height = colorbuffer->height; 
-        }
-    }
-    if (depth->position) {
-        if (depth->target == GL_RENDERBUFFER) {
-            renderbuffer_t *depthbuffer = &_renderbuffers[depth->position];
-            framebuffer.depth = (buffer_data_t) {
-                .mem = depthbuffer->mem,
-                .internalformat = depthbuffer->internalformat,
-            };
-            framebuffer.width = depthbuffer->width;
-            framebuffer.height = depthbuffer->height; 
-        } else {
-            texture_t *depthbuffer = &_textures[depth->position];
-            framebuffer.depth = (buffer_data_t) {
-                .mem = depthbuffer->mem,
-                .internalformat = depthbuffer->internalformat,
-            };
-            framebuffer.width = depthbuffer->width;
-            framebuffer.height = depthbuffer->height; 
-        }
-    } else {
-        framebuffer.depth.mem = _rasterization_mem.globals.depthbuffer;
-    }
-    if (stencil->position) {
-        if (stencil->target == GL_RENDERBUFFER) {
-            renderbuffer_t *stencilbuffer = &_renderbuffers[stencil->position];
-            framebuffer.stencil = (buffer_data_t) {
-                .mem = stencilbuffer->mem,
-                .internalformat = stencilbuffer->internalformat,
-            };
-            framebuffer.width = stencilbuffer->width;
-            framebuffer.height = stencilbuffer->height; 
-        } else {
-            texture_t *stencilbuffer = &_textures[stencil->position];
-            framebuffer.stencil = (buffer_data_t) {
-                .mem = stencilbuffer->mem,
-                .internalformat = stencilbuffer->internalformat,
-            };
-            framebuffer.width = stencilbuffer->width;
-            framebuffer.height = stencilbuffer->height; 
-        }
-    } else {
-        framebuffer.stencil.mem = _rasterization_mem.globals.stencilbuffer;
-    }
-
-    return framebuffer;
-}
 
 inline uint32_t get_deferred_clear() {
     return c_clear_enabled_data != 0;
 }
 
-inline uint32_t get_fragment_arg_offset() {
-    uint32_t size = 0;
-    
-    size += CURRENT_PROGRAM.texture_unit_size * 2; // texture object and sampling object
-
-    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (CURRENT_PROGRAM.uniforms_data[uniform].fragment_location != -1) {
-            ++size;
-        }
-    }
-
-    return size;
-}
-
-inline uint32_t rgba_to_uint32(GLenum format, GLfloat r, GLfloat g, GLfloat b, GLfloat a) {
-    if (format != GL_RGBA8) NOT_IMPLEMENTED;
-
+static inline uint32_t rgba_to_uint32(GLfloat r, GLfloat g, GLfloat b, GLfloat a) {
     return 
         ((uint32_t)(r * 0xFF) <<  0) |
         ((uint32_t)(g * 0xFF) <<  8) |
@@ -1053,9 +884,8 @@ inline uint32_t rgba_to_uint32(GLenum format, GLfloat r, GLfloat g, GLfloat b, G
         ((uint32_t)(a * 0xFF) << 24) ;
 }
 
-inline uint32_t get_blending_color() {
+static inline uint32_t get_blending_color() {
     return rgba_to_uint32(
-        COLOR_ATTACHMENT0.internalformat, 
         _blend_data.color.red, 
         _blend_data.color.green, 
         _blend_data.color.blue, 
@@ -1074,9 +904,10 @@ inline uint32_t get_blending_data() {
 
     return blend_data;
 }
-inline uint32_t get_clear_color() {
+
+static inline uint32_t get_clear_color() 
+{
     return rgba_to_uint32(
-        COLOR_ATTACHMENT0.internalformat, 
         _clear_data.color.red, 
         _clear_data.color.green, 
         _clear_data.color.blue, 
@@ -1089,18 +920,7 @@ inline uint16_t get_clear_depth() {
 inline uint8_t  get_clear_stencil() {
     return _clear_data.stencil;
 }
-inline uint32_t get_color_buffer_mode() {
-    switch(COLOR_ATTACHMENT0.internalformat) {
-        default:
-        case GL_R8: return TEX_R8;
-        case GL_RG8: return TEX_RG8;
-        case GL_RGB8: return TEX_RGB8;
-        case GL_RGBA4: return TEX_RGBA4;
-        case GL_RGB5_A1: return TEX_RGB5_A1;
-        case GL_RGB565: return TEX_RGB565;
-        case GL_RGBA8: return TEX_RGBA8;
-    }
-}
+
 inline uint32_t get_depth_data() {
     uint32_t depth_data = 0;
 
@@ -1110,7 +930,7 @@ inline uint32_t get_depth_data() {
     return depth_data;
 }
 
-inline uint get_num_tris(GLenum mode, GLsizei count) {
+inline uint32_t get_num_tris(GLenum mode, GLsizei count) {
     switch (mode)
     {
         default:
@@ -1159,324 +979,11 @@ inline uint32_t get_stencil_data() {
     return stencil_data;
 }
 
-void run_vertex_shader(GLuint start, GLuint end, GLsizei count) {
-    cl_command_queue command_queue = getCommandQueue();
-    
-    cl_kernel kernel = _programs[_current_program].vertex_kernel;
-    size_t global_work_size[1];
-    global_work_size[0] = end - start;
-
-    // upload vertex attribute data
-    // TODO: map host memory
-    CL_CHECK(clEnqueueWriteBuffer(command_queue, _vertex_attributes_mem, CL_FALSE, 0, sizeof(_vertex_attributes), _vertex_attributes, 0, NULL, NULL));
-    CL_CHECK(clEnqueueWriteBuffer(command_queue, _vertex_attribute_data_mem, CL_FALSE, 0, sizeof(_vertex_attribute_data), _vertex_attribute_data, 0, NULL, NULL));
-
-    // arrange vertex attribute buffers
-    cl_mem vertex_array_mem[MAX_VERTEX_ATTRIBS];
-    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        vertex_attrib_pointer_t *pointer = &_vertex_attribs[attrib].pointer;
-        cl_mem vertex_attribute_mem;
-
-        if (pointer->binding) {
-            vertex_attribute_mem = _buffers[pointer->binding].mem;
-        } else if (pointer->pointer != NULL) {
-            size_t buffer_in_size = count*sizeof_type(pointer->type)*pointer->size+pointer->stride;
-            vertex_attribute_mem = createBuffer(CL_MEM_HOST_READ_ONLY | CL_MEM_USE_HOST_PTR, buffer_in_size, pointer->pointer);
-        } else {
-            vertex_attribute_mem = _dummy_buffer;
-        }
-
-        setKernelArg(kernel, CURRENT_PROGRAM.vertex_attribs_data[attrib].vertex_location, sizeof(cl_mem), &vertex_attribute_mem);
-        vertex_array_mem[attrib]=vertex_attribute_mem;
-    }
-
-    // TODO: uniforms could be compressed an uploaded from a single constant buffer
-    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
-            setKernelArg(kernel, 
-                CURRENT_PROGRAM.uniforms_data[uniform].vertex_location, 
-                sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
-                &CURRENT_PROGRAM.uniforms_mem[uniform]
-            );
-        }
-    }
-
-    global_work_size[0] = end - start;
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL));
-
-    // release host memory
-    for (int attrib=0; attrib < CURRENT_PROGRAM.active_vertex_attribs; ++attrib) {
-        if (_vertex_attrib_enable[attrib] && !_vertex_attribs[attrib].pointer.binding && _vertex_attribs[attrib].pointer.pointer != NULL) {
-            CHECK_CL(clReleaseMemObject(vertex_array_mem[attrib]));
-        }
-    }
-
-    
-    cl_uint c_vertex_size = get_vertex_size();
-    uint32_t varying = CURRENT_PROGRAM.varying_size;
-    size_t size = c_vertex_size*end;
-    float* vertex_buffer = (float*) malloc(size);
-    CL_CHECK(clEnqueueReadBuffer(command_queue, _rasterization_mem.globals.vertex_buffer, CL_TRUE, 0, size, vertex_buffer, 0, NULL, NULL));
-    for (int vertex=0; vertex < end; ++vertex) {
-        int offset = vertex*(c_vertex_size/sizeof(float));
-        printf("vertex=%d: ", vertex);
-        for (int var=0; var < varying + 1; ++var) {
-            printf("[%d](%f,%f,%f,%f) ", var, vertex_buffer[offset+var*4], vertex_buffer[offset+var*4+1], vertex_buffer[offset+var*4+2], vertex_buffer[offset+var*4+3]);
-        }
-        printf("\n");
-    }
-    free(vertex_buffer);
-    
-    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (CURRENT_PROGRAM.uniforms_data[uniform].vertex_location != -1) {
-            size_t size = CURRENT_PROGRAM.uniforms_data[uniform].size * sizeof_type(CURRENT_PROGRAM.uniforms_data[uniform].type);
-            float* uniform_data = (float*) malloc(size);
-            CL_CHECK(clEnqueueReadBuffer(command_queue, CURRENT_PROGRAM.uniforms_mem[uniform], CL_TRUE, 0, size, uniform_data, 0, NULL, NULL));
-            for(int i=0; i<size/sizeof(float); ++i) printf("[%d]:%f,",i,uniform_data[i]);
-            printf("\n");
-        }
-    }
-    
-    // for(int i=0; i<c_vertex_size*end/sizeof(float); ++i) 
-    // printf("\n");
-
-}
-
-void run_bin_raster(GLenum mode, GLsizei count) {
-    cl_command_queue command_queue = getCommandQueue();
-
-    cl_kernel kernel = _kernels.bin_raster;
-    size_t global_work_size[2], local_work_size[2];
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-
-    framebuffer_data_t framebuffer = get_framebuffer_data();
-    cl_uint zero = 0;
-
-    cl_uint c_num_tris = get_num_tris(mode, count);
-    cl_uint c_samples_log2 = 0; // number of samples per pixel
-    cl_uint c_vertex_size = get_vertex_size();
-    cl_uint c_viewport_height = framebuffer.height;
-    cl_uint c_viewport_width = framebuffer.width;
-
-    uint32_t arg_offset;
-    #ifdef DEVICE_IMAGE_ENABLED
-    arg_offset = 1;
-    #else
-    arg_offset = 0;
-    #endif
-
-    cl_uint c_height_pixels = (c_viewport_height + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-    cl_uint c_width_pixels = (c_viewport_width + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-
-    cl_uint c_height_tiles = c_height_pixels >> CR_TILE_LOG2;
-    cl_uint c_width_tiles = c_width_pixels >> CR_TILE_LOG2;
-    cl_uint c_height_bins = (c_height_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    cl_uint c_width_bins = (c_width_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    cl_uint c_num_bins =  c_width_bins * c_height_bins;
-
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.bin_counter, 0, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, 0, 0, sizeof(zero), &zero);
-
-    CL_CHECK(clSetKernelArg(kernel, 11 + arg_offset, sizeof(c_height_bins),       &c_height_bins));
-    CL_CHECK(clSetKernelArg(kernel, 14 + arg_offset, sizeof(c_num_bins),          &c_num_bins));
-    CL_CHECK(clSetKernelArg(kernel, 15 + arg_offset, sizeof(c_num_tris),          &c_num_tris));
-    CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_width_bins),        &c_width_bins));
-
-    local_work_size[1] = DEVICE_BIN_SUB_GROUPS;
-    global_work_size[0] =  local_work_size[0] * CR_BIN_STREAMS_SIZE;
-    global_work_size[1] = local_work_size[1] * 1;
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
-
-    cl_uint test;
-    clEnqueueReadBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, CL_TRUE, 0, sizeof(cl_uint), &test, 0, NULL, NULL);
-    printf("run bin raster: %d\n", test);
-}
-
-void run_coarse_raster(GLenum mode, GLsizei count) {
-    cl_command_queue command_queue = getCommandQueue();
-
-    cl_kernel kernel = _kernels.coarse_raster;
-    size_t global_work_size[2], local_work_size[2];
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-
-    framebuffer_data_t framebuffer = get_framebuffer_data();
-    cl_uint zero = 0;
-
-    cl_uint c_num_tris = get_num_tris(mode, count);
-    cl_uint c_samples_log2 = 0; // number of samples per pixel
-    cl_uint c_vertex_size = get_vertex_size();
-    cl_uint c_viewport_height = framebuffer.height;
-    cl_uint c_viewport_width = framebuffer.width;
-    cl_uint c_deferred_clear = get_deferred_clear();
-
-    cl_uint c_height_pixels = (c_viewport_height + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-    cl_uint c_width_pixels = (c_viewport_width + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-
-    cl_uint c_height_tiles = c_height_pixels >> CR_TILE_LOG2;
-    cl_uint c_width_tiles = c_width_pixels >> CR_TILE_LOG2;
-    cl_uint c_height_bins = (c_height_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    cl_uint c_width_bins = (c_width_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    cl_uint c_num_bins =  c_width_bins * c_height_bins;
-
-    uint32_t arg_offset;
-    #ifdef CONF_COARSE_IMAGE_ENABLED
-    arg_offset = 1;
-    #else
-    arg_offset = 0;
-    #endif
-
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.coarse_counter, 0, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_active_tiles, 0, 0, sizeof(zero), &zero);
-    // enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_bin_segs, 0, 0, sizeof(zero), &zero);
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.num_tile_segs, 0, 0, sizeof(zero), &zero);
-
-    CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_deferred_clear),    &c_deferred_clear));
-    CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_height_tiles),      &c_height_tiles));
-    CL_CHECK(clSetKernelArg(kernel, 21 + arg_offset, sizeof(c_num_bins),          &c_num_bins));
-    CL_CHECK(clSetKernelArg(kernel, 22 + arg_offset, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, 23 + arg_offset, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, 24 + arg_offset, sizeof(c_width_bins),        &c_width_bins));
-    CL_CHECK(clSetKernelArg(kernel, 25 + arg_offset, sizeof(c_width_tiles),       &c_width_tiles));
-    
-    local_work_size[1] = CONF_COARSE_SUB_GROUPS;
-    global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
-    global_work_size[1] = local_work_size[1] * 1;
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
-
-    cl_uint test;
-    clEnqueueReadBuffer(command_queue, _rasterization_mem.atomics.num_tile_segs, CL_TRUE, 0, sizeof(cl_uint), &test, 0, NULL, NULL);
-    printf("run coarse raster: %d\n", test);
-}
-
-void run_fragment_shader(GLenum mode) {
-    cl_command_queue command_queue = getCommandQueue();
-    cl_kernel kernel = CURRENT_PROGRAM.fragment_kernel;
-
-    size_t global_work_size[2], local_work_size[2];
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-    uint32_t arg_offset = get_fragment_arg_offset();
-
-    framebuffer_data_t framebuffer = get_framebuffer_data();
-    cl_uint zero = 0;
-
-    #ifdef CONF_FINE_IMAGE_ENABLED
-    arg_offset +=1;
-    #endif
-
-    cl_uint c_samples_log2 = 0; // number of samples per pixel
-    cl_uint c_render_mode_flags = get_render_mode_flags(mode);
-    cl_uint c_vertex_size = get_vertex_size();
-    cl_uint c_viewport_height = framebuffer.height;
-    cl_uint c_viewport_width = framebuffer.width;
-    cl_uint c_deferred_clear = get_deferred_clear();
-
-    cl_uint c_height_pixels = (c_viewport_height + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-    cl_uint c_width_pixels = (c_viewport_width + CR_TILE_SIZE - 1) & -CR_TILE_SIZE;
-
-    cl_uint c_height_tiles = c_height_pixels >> CR_TILE_LOG2;
-    cl_uint c_width_tiles = c_width_pixels >> CR_TILE_LOG2;
-    cl_uint c_height_bins = (c_height_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    cl_uint c_width_bins = (c_width_tiles + CR_BIN_SIZE -1) >> CR_BIN_LOG2;
-    cl_uint c_num_bins =  c_width_bins * c_height_bins;
-
-    cl_uint   c_blending_color = get_blending_color();
-    cl_uint   c_blending_data = get_blending_data(); 
-    cl_uint   c_clear_color = get_clear_color(); 
-    cl_ushort c_clear_depth = get_clear_depth(); 
-    cl_uchar  c_clear_stencil = get_clear_stencil(); 
-    cl_uint   c_color_buffer_mode = get_color_buffer_mode(); 
-    cl_uint   c_depth_data = get_depth_data(); //get_depth_data(); 
-    cl_uint   c_stencil_data = get_stencil_data(); 
-
-    cl_ushort c_enabled_data = get_enabled_data(framebuffer);
-
-    printf("dclear=%x, clear_mask=%x, draw_mask=%x\n", c_deferred_clear, c_clear_enabled_data, c_enabled_data);
-
-    enqueueWriteBuffer(command_queue, _rasterization_mem.atomics.fine_counter, 0, 0, sizeof(zero), &zero);
-
-    for(int uniform = 0; uniform < CURRENT_PROGRAM.active_uniforms; ++uniform) {
-        if (CURRENT_PROGRAM.uniforms_data[uniform].fragment_location != -1) {
-            setKernelArg(kernel, 
-                CURRENT_PROGRAM.uniforms_data[uniform].fragment_location, 
-                sizeof(CURRENT_PROGRAM.uniforms_mem[uniform]),
-                &CURRENT_PROGRAM.uniforms_mem[uniform]
-            );
-        }
-    }
-    for(int sampler = 0; sampler < CURRENT_PROGRAM.texture_unit_size; ++sampler) {
-
-        texture_t *texture_unit = _textures + _active_textures[CURRENT_PROGRAM.sampler_value[sampler]].binding;
-
-        texture_unit->wraps.s;
-
-        sampler2D_t sampler2D = {
-            .width = texture_unit->width,
-            .height = texture_unit->height,
-            // .internalformat = texture_unit->internalformat,
-            // .wraps = texture_unit->wraps,
-        };
-        set_sampler2D_wrap_s(&sampler2D, texture_unit->wraps.s);
-        set_sampler2D_wrap_t(&sampler2D, texture_unit->wraps.t);
-
-        setKernelArg(kernel,
-            CURRENT_PROGRAM.sampler_data[sampler].fragment_location,
-            sizeof(sampler2D_t),
-            &sampler2D
-        );
-
-        setKernelArg(kernel,
-            CURRENT_PROGRAM.image_data[sampler].fragment_location,
-            sizeof(texture_unit->mem),
-            &texture_unit->mem
-        );
-    }
-
-    CL_CHECK(clSetKernelArg(kernel, 11 + arg_offset, sizeof(cl_mem),  &framebuffer.color.mem));
-    CL_CHECK(clSetKernelArg(kernel, 12 + arg_offset, sizeof(cl_mem),  &framebuffer.depth.mem));
-    CL_CHECK(clSetKernelArg(kernel, 13 + arg_offset, sizeof(cl_mem),  &framebuffer.stencil.mem));
-
-    CL_CHECK(clSetKernelArg(kernel, 16 + arg_offset, sizeof(c_blending_color),    &c_blending_color));
-    CL_CHECK(clSetKernelArg(kernel, 17 + arg_offset, sizeof(c_blending_data),     &c_blending_data));
-    // CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_clear_color),       &c_clear_color));
-    // CL_CHECK(clSetKernelArg(kernel, 19 + arg_offset, sizeof(c_clear_depth),       &c_clear_depth));
-    // CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_clear_stencil),     &c_clear_stencil));
-    CL_CHECK(clSetKernelArg(kernel, 18 + arg_offset, sizeof(c_clear_write_values),     &c_clear_write_values));
-    CL_CHECK(clSetKernelArg(kernel, 19 + arg_offset, sizeof(c_clear_enabled_data),     &c_clear_enabled_data));
-    CL_CHECK(clSetKernelArg(kernel, 20 + arg_offset, sizeof(c_enabled_data),    &c_enabled_data));
-    CL_CHECK(clSetKernelArg(kernel, 21 + arg_offset, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
-    // CL_CHECK(clSetKernelArg(kernel, 22 + arg_offset, sizeof(c_deferred_clear),    &c_deferred_clear));
-    CL_CHECK(clSetKernelArg(kernel, 22 + arg_offset, sizeof(c_depth_data),    &c_depth_data));
-
-    CL_CHECK(clSetKernelArg(kernel, 26 + arg_offset, sizeof(c_render_mode_flags), &c_render_mode_flags));
-    CL_CHECK(clSetKernelArg(kernel, 27 + arg_offset, sizeof(c_stencil_data), &c_stencil_data));
-    CL_CHECK(clSetKernelArg(kernel, 28 + arg_offset, sizeof(c_viewport_height),   &c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, 29 + arg_offset, sizeof(c_viewport_width),    &c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, 30 + arg_offset, sizeof(c_width_tiles),       &c_width_tiles));
-
-    local_work_size[1] = CONF_FINE_SUB_GROUPS;
-    global_work_size[0] =  local_work_size[0] * DEVICE_NUM_CORES;
-    global_work_size[1] = local_work_size[1] * 1;
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
-
-    // size_t size = framebuffer.width*framebuffer.height;
-    // uint16_t* depth_buffer = (uint16_t*) malloc(size);
-    // CL_CHECK(clEnqueueReadBuffer(command_queue, framebuffer.depth.mem, CL_TRUE, 0, size, depth_buffer, 0, NULL, NULL));
-    // for(int i=0; i<40; ++i) printf("[%d]:%d, ", i, depth_buffer[i]);
-}
-
-void reset_deferred_clear() {
-    c_clear_enabled_data = 0;
-}
-
 static uint32_t require_flush_context(device_context_t* context) {
     return 0;
 }
 
-static void flush_device_context(device_context_t* context) {
-    device_launch_triangle_rasterization(context);
-}
+
 
 static render_mode_t get_render_mode() {
     render_mode_t render_mode;
@@ -1499,140 +1006,146 @@ static rop_config_t get_rop_config(GLenum mode) {
     return rop_config;
 }
 
-GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) {
-    if (!_current_program) RETURN_ERROR(GL_INVALID_OPERATION);
+static size_t update_current_context() 
+{
+    device_context_t* device_context = contexts[_current_program-1];
 
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
+    uint32_t new_config_required = rop_config_updated || _uniform_data_updated;
 
-    if (first < 0) RETURN_ERROR(GL_INVALID_VALUE);
-
-    // if (first != 0) NOT_IMPLEMENTED;
-    if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
-
-    uint32_t clear_required = get_deferred_clear();
-    uint32_t flush_required = 0;
-
-    device_context_t* device_context = contexts[_current_program];
-    int config_id;
+    rop_config_count = (rop_config_count + new_config_required) % TRIANGLE_PRIMITIVE_CONFIGS;
     
+    uint32_t flush_required = 
+        texture_unit_updated    ||
+        (
+            new_config_required && 
+            device_config_is_full(device_context)
+        );
+
+    if (flush_required)
+    {
+        flush_device_context(device_context);
+    }
+
     if (vertex_attibute_updated)
     {
         device_load_vertex_attributes(device_context, vertex_attributes, vertex_attribute_datas);
         vertex_attibute_updated = 0;
     }
 
-    if (clear_required)
-    {
-        flush_required = 1;
-    }
-
     if (texture_unit_updated) {
-        flush_required = 1;
-    }
+        gl_texture_data_t texture_datas[DEVICE_TEXTURE_UNITS];
 
-    if (rop_config_updated)
-    {
-        config_id = get_new_config_id();
-        if (config_id == -1) {
-            config_id = 0;
-            flush_required = 1;
+        for (size_t i = 0; i < DEVICE_TEXTURE_UNITS; ++i)
+        {
+            texture_t *texture = &_textures[texture_unit_bindings[i]];
+            gl_texture_data_t *texture_data = &texture_datas[i];
+            sampler2D_t *sampler2D = &texture_data->sampler2D;
+
+            set_sampler2D_internalformat(sampler2D, texture->internalformat);
+            set_sampler2D_mag_filter(sampler2D, texture->wraps.mag_filter);
+            set_sampler2D_min_filter(sampler2D, texture->wraps.min_filter);
+            set_sampler2D_wrap_s(sampler2D, texture->wraps.s);
+            set_sampler2D_wrap_t(sampler2D, texture->wraps.t);
+
+            #ifndef DEVICE_IMAGE_ENABLED
+            {
+                texture_data->height = texture->height;
+                texture_data->width = texture->width;
+            }
+            #endif
         }
-    }
 
-    if (flush_required) 
-    {
-        flush_device_context(device_context);
-    }
-
-
-    if (clear_required)
-    {
-        cl_ulong clear_write_values =  c_clear_write_values;
-        cl_ushort clear_enabled_data = c_clear_enabled_data;
-        cl_uint deferred_clear = get_deferred_clear();
-
-        device_clear_framebuffer(device_context, clear_write_values, clear_enabled_data, deferred_clear);
-    }
-
-    if (texture_unit_updated) {
         device_load_texture_datas(device_context, texture_datas);
-        texture_unit_updated = 0;
     }
 
-    rop_config_t rop_config = get_rop_config(mode);
-    if (rop_config_updated)
+    if (new_config_required)
     {
-        device_load_config(device_context, config_id, &rop_config, &programs[current_program].uniform_data);
-        rop_config_updated = 0;
+        device_load_config(device_context, rop_config_count, &rop_config, &_programs[_current_program].uniform_data);
     }
 
-    device_launch_arrays_triangle_assembly(device_context, count - first, count);
+    vertex_attibute_updated = 0;
+    texture_unit_updated = 0;
+    rop_config_updated = 0;
+    _uniform_data_updated = 0;
+
+    return rop_config_count;
 }
 
+GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) 
+{
+    if (_current_program == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
+
+    if (first < 0) RETURN_ERROR(GL_INVALID_VALUE);
+
+    if (first != 0) NOT_IMPLEMENTED;
+
+    if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
+
+    device_context_t* device_context = contexts[_current_program-1];
+
+    size_t config_id = update_current_context();
+    
+    device_launch_arrays_triangle_assembly(device_context, config_id, count - first, count);
+}
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices)
 {
     if (!IS_DRAW_MODE(mode)) RETURN_ERROR(GL_INVALID_ENUM);
+
     if (count < 0) RETURN_ERROR(GL_INVALID_VALUE);
+    
     if (end < start) RETURN_ERROR(GL_INVALID_VALUE);
-    if (type != GL_UNSIGNED_SHORT) RETURN_ERROR(GL_INVALID_ENUM); // Maybe implementation dependant
+    
+    if (type != GL_UNSIGNED_SHORT) RETURN_ERROR(GL_INVALID_ENUM);
 
     if (start != 0) NOT_IMPLEMENTED;
+    
     if (count == 0) return;
 
-    if (require_flush_context(device_context)) 
-    {
-        flush_device_context(device_context);
-    }
-    rop_config_t rop_config = get_rop_config(mode);
-    device_launch_range_triangle_assembly(device_context, end - start, count, indices, rop_config);
-    
-};
+    device_context_t* device_context = contexts[_current_program-1];
 
-GL_APICALL void GL_APIENTRY glEnable (GLenum cap) {
-    switch (cap)
-    {
-    case GL_SCISSOR_TEST:
-        _enableds.scissor_test = GL_TRUE;
-        break;
-    case GL_STENCIL_TEST:
-        _enableds.stencil_test = GL_TRUE;
-        break;
-    case GL_DEPTH_TEST:
-        _enableds.depth_test = GL_TRUE;
-        break;
-    case GL_BLEND:
-        _enableds.blend = GL_TRUE;
-        break;
-    case GL_DITHER:
-        _enableds.dither = GL_TRUE;
-        break;
-    case GL_CULL_FACE:
-        _enableds.cull_face = GL_TRUE;
-        break;
-    default:
-        NOT_IMPLEMENTED;
-    }
+    size_t config_id = update_current_context();
+
+    device_launch_range_triangle_assembly(device_context, end - start, count, indices, config_id);
+}
+
+GL_APICALL void GL_APIENTRY glEnable (GLenum cap) 
+{
+    GLboolean* enabled_ptr = get_enabled_pointer(cap);
+
+    if (enabled_ptr == NULL) RETURN_ERROR(GL_INVALID_ENUM);
+
+    *enabled_ptr = GL_TRUE;
 }
 
 GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index) 
 {
-    if (index >= DEVICE_VERTEX_ATTRIBUTE_SIZE) 
-    {
-        SET_GL_ERROR(GL_INVALID_VALUE);
-        return;
-    } 
+    if (index >= DEVICE_VERTEX_ATTRIBUTE_SIZE) RETURN_ERROR(GL_INVALID_VALUE);
     
     vertex_attibute_updated = 1;
     vertex_attribute_datas[index].misc |= VERTEX_ATTRIBUTE_ACTIVE_POINTER;
 }
 
-GL_APICALL void GL_APIENTRY glFinish (void) {
-    CHECK_CL(clFinish(getCommandQueue()));
+GL_APICALL void GL_APIENTRY glFinish (void) 
+{
+    glFlush();
+
+    if (_current_program > 0) 
+    {
+        device_finish(contexts[_current_program-1]);
+    }
+    else NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glFlush (void) {
-    CHECK_CL(clFlush(getCommandQueue()));
+GL_APICALL void GL_APIENTRY glFlush (void) 
+{
+    if (_current_program > 0) 
+    {
+        flush_device_context(contexts[_current_program-1]);
+    }
+    else NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) 
@@ -1641,12 +1154,10 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum att
 
     if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    if (renderbuffer != 0) {
-        // TODO: Check if texture exist and with a target == textarget, if not RETURN_ERROR(GL_INVALID_OPERATION); 
-        if (renderbuffertarget != GL_RENDERBUFFER) NOT_IMPLEMENTED;
-    }
+    if (renderbuffertarget != GL_RENDERBUFFER) RETURN_ERROR(GL_INVALID_ENUM);
 
     attachment_t *attachment_ptr;
+
     switch (attachment)
     {
     case GL_COLOR_ATTACHMENT0: 
@@ -1662,9 +1173,11 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum att
         NOT_IMPLEMENTED;
     }
 
+    _framebuffer_updated = 1;
+
     *attachment_ptr = (attachment_t) {
-        .target = renderbuffertarget,
-        .position = renderbuffer,
+        .target = GL_RENDERBUFFER,
+        .binding = renderbuffer,
     };
 
 }
@@ -1674,8 +1187,6 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attach
     if (target != GL_FRAMEBUFFER) NOT_IMPLEMENTED;
 
     if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
-
-    if (texture == 0) return; // TODO: Handle this
 
     if (textarget != GL_TEXTURE_2D) RETURN_ERROR(GL_INVALID_ENUM);
 
@@ -1700,10 +1211,11 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attach
     }
 
     _framebuffer_updated = 1;
+    
     *attachment_ptr = (attachment_t) 
     {
         .target = textarget,
-        .position = texture,
+        .binding = texture,
     };
 
 }
@@ -1720,38 +1232,35 @@ GL_APICALL void GL_APIENTRY glFrontFace (GLenum mode) {
     }
 }
 
-GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers) {
-    GLuint _id = 1; // _id = 0 is reserved for ARRAY_BUFFER
+GL_APICALL void GL_APIENTRY glGenBuffers (GLsizei n, GLuint *buffers)
+{
+    for (size_t i=0; i<n && _buffer_sz < HOST_BUFFERS_SIZE; ++i) 
+    {
+        _buffers[_buffer_sz].size = 0;
 
-    while(n > 0 && _id < 256) {
-        if (!_buffers[_id].used) {
-            _buffers[_id].used = GL_TRUE;
-            *buffers = _id;
-
-            buffers += 1; 
-            n -= 1;
-        }
-        _id += 1;
+        buffers[i] = _buffer_sz + 1;
+        
+        _buffer_sz += 1;
     }
 }
 
-GL_APICALL void GL_APIENTRY glGenerateMipmap (GLenum target) {}; // NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glGenerateMipmap (GLenum target) NOT_IMPLEMENTED;
 
 GL_APICALL void GL_APIENTRY glGenFramebuffers (GLsizei n, GLuint *framebuffers) 
 {
-    for (size_t i=0; i<n && _framebuffer_sz < HOST_FRAMEBUFFER_SIZE; ++i) 
+    for (size_t i=0; i<n && _framebuffer_sz < HOST_FRAMEBUFFER_SIZE; ++i)
     {
         _framebuffers[_framebuffer_sz] = (framebuffer_t) {
             .color_attachment0 = {
-                .position = 0,
+                .binding = 0,
                 .target = 0,
             },
             .depth_attachment = {
-                .position = 0,
+                .binding = 0,
                 .target = 0,
             },
             .stencil_attachment = {
-                .position = 0,
+                .binding = 0,
                 .target = 0,
             },
         };
@@ -1761,22 +1270,20 @@ GL_APICALL void GL_APIENTRY glGenFramebuffers (GLsizei n, GLuint *framebuffers)
     }
 }
 
-GL_APICALL void GL_APIENTRY glGenRenderbuffers (GLsizei n, GLuint *renderbuffers) {
-    GLuint id = 1; // id = 0 is reserved for ARRAY_BUFFER
+GL_APICALL void GL_APIENTRY glGenRenderbuffers (GLsizei n, GLuint *renderbuffers)
+{
+    for (size_t i=0; i<n && _renderbuffer_sz < HOST_RENDERBUFFERS_SIZE; ++i) 
+    {
+        renderbuffer_t *renderbuffer = &_renderbuffers[_renderbuffer_sz];
 
-    while(n > 0 && id < MAX_RENDERBUFFER) {
-        if (!_renderbuffers[id].used) {
-            _renderbuffers[id].used = GL_TRUE;
-            *renderbuffers = id;
+        renderbuffer->width = 0;
+        renderbuffer->height = 0;
 
-            renderbuffers += 1; 
-            n -= 1;
-        }
-        id += 1;
+        renderbuffers[i] = _renderbuffer_sz + 1;
+        
+        _renderbuffer_sz += 1;
     }
 }
-
-
 
 GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures) 
 {
@@ -1800,10 +1307,11 @@ GL_APICALL void GL_APIENTRY glGenTextures (GLsizei n, GLuint *textures)
 
 GL_APICALL GLint GL_APIENTRY glGetAttribLocation (GLuint program, const GLchar *name) 
 {
-    program_t* program_ptr = &programs[program];
+    if (program == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    // TOOD:
-    // if (!program_ptr->last_load_attempt) RETURN_ERROR(GL_INVALID_OPERATION);
+    program_t* program_ptr = &_programs[program-1];
+
+    // TOOD: if (!program_ptr->last_load_attempt) RETURN_ERROR(GL_INVALID_OPERATION);
     
     for(size_t attrib=0; attrib<program_ptr->vertex_attrib_sz; ++attrib) 
     {
@@ -1813,8 +1321,16 @@ GL_APICALL GLint GL_APIENTRY glGetAttribLocation (GLuint program, const GLchar *
     return -1;
 }
 
-GL_APICALL void GL_APIENTRY glGetBooleanv (GLenum pname, GLboolean *data) {
-    NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glGetBooleanv (GLenum pname, GLboolean *data) 
+{
+    switch (pname)
+    {
+    case GL_DEPTH_WRITEMASK:
+        *data = _masks.depth;
+        return;
+    default:
+        RETURN_ERROR(GL_INVALID_ENUM);
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetBufferParameteriv (GLenum target, GLenum pname, GLint *params) {
@@ -1836,7 +1352,6 @@ GL_APICALL void GL_APIENTRY glGetFramebufferAttachmentParameteriv (GLenum target
     NOT_IMPLEMENTED;
 }
 
-// TODO:
 GL_APICALL GLenum GL_APIENTRY glGetGraphicsResetStatus (void) {
     NOT_IMPLEMENTED;
 }
@@ -1847,10 +1362,10 @@ GL_APICALL void GL_APIENTRY glGetIntegerv (GLenum pname, GLint *data)
     {
     case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
         *data = GL_RGBA;
-        break;
+        return;
     case GL_IMPLEMENTATION_COLOR_READ_TYPE:
         *data = GL_UNSIGNED_SHORT_4_4_4_4;
-        break;
+        return;
     case GL_FRAMEBUFFER_BINDING: 
         *data = _framebuffer_binding; 
         return;
@@ -1863,19 +1378,25 @@ GL_APICALL void GL_APIENTRY glGetIntegerv (GLenum pname, GLint *data)
     case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS:
         *data = DEVICE_VERTEX_TEXTURE_UNITS + DEVICE_TEXTURE_UNITS;
         return;
+    case GL_DEPTH_FUNC:
+        *data = _depth_func;
+        return;
     default:
-        NOT_IMPLEMENTED;
+        RETURN_ERROR(GL_INVALID_ENUM);
     }
 }
 
-GL_APICALL void GL_APIENTRY glGetProgramiv (GLuint program, GLenum pname, GLint *params) {
+GL_APICALL void GL_APIENTRY glGetProgramiv (GLuint program, GLenum pname, GLint *params) 
+{
+    if (is_valid_program(program) == GL_FALSE) RETURN_ERROR(GL_INVALID_OPERATION);
+
     switch (pname)
     {
     case GL_LINK_STATUS:
-        *params = _programs[program].last_load_attempt;
+        *params = _programs[program-1].last_load_attempt;
         break;
     default:
-        NOT_IMPLEMENTED;
+        RETURN_ERROR(GL_INVALID_ENUM);
     }
 }
 
@@ -1905,8 +1426,14 @@ GL_APICALL void GL_APIENTRY glGetnUniformiv (GLuint program, GLint location, GLs
 
 GL_APICALL GLint GL_APIENTRY glGetUniformLocation (GLuint program, const GLchar *name) 
 {
-    for(size_t uniform=0; uniform<programs[program].uniform_sz; ++uniform) {
-        if (strcmp(name, programs[program].uniform_arg_datas[uniform].name) == 0) return uniform;
+    if (is_valid_program(program) == GL_FALSE) RETURN_ERROR_WITH_VALUE(GL_INVALID_OPERATION, -1);
+
+    program_t *program_ptr = &_programs[program-1];
+
+    // TOOD: if (!program_ptr->last_load_attempt) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    for(size_t uniform=0; uniform < program_ptr->uniform_sz; ++uniform) {
+        if (strcmp(name, program_ptr->uniform_arg_datas[uniform].name) == 0) return uniform;
     }
 
     return -1;
@@ -1924,321 +1451,207 @@ GL_APICALL void GL_APIENTRY glGetVertexAttribPointerv (GLuint index, GLenum pnam
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode) {
-    NOT_IMPLEMENTED;
+
+GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode) 
+{
+    if (target != GL_GENERATE_MIPMAP_HINT) RETURN_ERROR(GL_INVALID_ENUM);
+
+    switch (mode)
+    {
+    default:
+        RETURN_ERROR(GL_INVALID_ENUM);
+    case GL_FASTEST:
+    case GL_NICEST:
+    case GL_DONT_CARE:
+    }
+
+    _hint = mode;
 }
 
-GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap) NOT_IMPLEMENTED;
+GL_APICALL GLboolean GL_APIENTRY glIsEnabled (GLenum cap) 
+{
+    GLboolean *enabled_ptr = get_enabled_pointer(cap);
 
-GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) {
-    if (width <= (GLfloat) 0.0) RETURN_ERROR(GL_INVALID_VALUE);
+    if (enabled_ptr == NULL) RETURN_ERROR_WITH_VALUE(GL_INVALID_ENUM, GL_FALSE);
+
+    return *enabled_ptr;
+}
+
+GL_APICALL void GL_APIENTRY glLineWidth (GLfloat width) 
+{
+    if (width <= (GLfloat) 0) RETURN_ERROR(GL_INVALID_VALUE);
 
     _rasterization_data.line_width = width;
 };
 
-GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) {
+GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param) 
+{
     switch (pname)
     {
-    case GL_UNPACK_ALIGNMENT:
-        if (param != 1 && param != 2 && param != 4 && param != 8) RETURN_ERROR(GL_INVALID_VALUE);
-        _pixel_store.unpack_aligment = param;
-        return;
-    default:
-        RETURN_ERROR(GL_INVALID_ENUM);
+        case GL_UNPACK_ALIGNMENT:
+            switch (param)
+            {
+                default:
+                    RETURN_ERROR(GL_INVALID_VALUE);
+                case 1:
+                case 2:
+                case 4:
+                case 8:
+                    _pixel_store.unpack_aligment = param;
+            }
+        default:
+            RETURN_ERROR(GL_INVALID_ENUM);
     }
 }
 
-GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) {
+GL_APICALL void GL_APIENTRY glPolygonOffset (GLfloat factor, GLfloat units) 
+{
     _rasterization_data.polygon_offset = (polygon_offset_t) {
         .factor = factor,
         .units = units
     };
 }
 
-static uint32_t is_valid_program(GLuint program) 
-{
-    return program < context_sz;
-}
-
 GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat, const void *binary, GLsizei length)
 {
     if (!is_valid_program(program)) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    program_t *program_ptr = &programs[program];
+    program_t *program_ptr = &_programs[program-1];
     device_shared_objects_t* shared = &device_shared_objects;
 
     program_ptr->program_id = device_create_program_from_binary(shared, length, binary);
     program_ptr->uniform_sz = device_get_program_uniform_size(shared, program_ptr->program_id);
+
     for(size_t i=0; i<program_ptr->uniform_sz; ++i) 
     {
         device_get_program_uniform_arg_data(shared, program_ptr->program_id, i, &program_ptr->uniform_arg_datas[i]);
     }
-    // Vertex data
+
     program_ptr->vertex_attrib_sz = device_get_program_vertex_attrib_size(shared, program_ptr->program_id);
+
     for(size_t i=0; i<program_ptr->vertex_attrib_sz; ++i) 
     {
         device_get_program_vertex_attrib_arg_data(shared, program_ptr->program_id, i, &program_ptr->vertex_attrib_arg_datas[i]);
     }
+}
 
-    /*
-    if (_programs[program].program) RETURN_ERROR(GL_INVALID_OPERATION);
-    // TODO: Check binaryFormat
-    cl_uint vertex_kernel_num_args, fragment_kernel_num_args;
-
-    if (binaryFormat == POCL_BINARY) {
-        printf("DEBUG: Linking program=%d.\n", program);
-        _programs[program].program=createProgramWithBinary(binary, length); // TODO: NOT HERE, but check to send Host OpenCL programs
-        buildProgram(_programs[program].program);
-        // TODO: Check this logic
-        _programs[program].last_load_attempt        = GL_TRUE;
-        _programs[program].last_validation_attempt  = GL_TRUE;
-        _programs[program].vertex_kernel            = createKernel(_programs[program].program, VERTEX_SHADER_FNAME);
-        _programs[program].fragment_kernel          = createKernel(_programs[program].program, FRAGMENT_SHADER_FNAME);
-
-        clGetKernelInfo(_programs[program].vertex_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_kernel_num_args, NULL);
-        vertex_kernel_num_args -= 1; // vertex_buffer do not included
-
-        cl_kernel_arg_address_qualifier addr_qualifier;
-        cl_kernel_arg_type_qualifier type_qualifier;
-        cl_kernel_arg_access_qualifier access_qualifier;
-
-        for(cl_uint arg=2; arg < vertex_kernel_num_args; ++arg) {
-            char name[ARG_NAME_SIZE];
-            char type_name[32];
-            uint32_t size, type;
-
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_ADDRESS_QUALIFIER,  sizeof(addr_qualifier),     &addr_qualifier,    NULL);
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_TYPE_QUALIFIER,     sizeof(type_qualifier),     &type_qualifier,    NULL);
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_ACCESS_QUALIFIER,   sizeof(access_qualifier),   &access_qualifier,  NULL);
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_NAME,               sizeof(name),               &name,              NULL);
-            clGetKernelArgInfo(_programs[program].vertex_kernel, arg, CL_KERNEL_ARG_TYPE_NAME,          sizeof(type_name),          &type_name,         NULL);
-            size = size_from_name_type(type_name);
-            type = type_from_name_type(type_name);
-
-            printf("name=%s type=%s size=%d type=%x addr_q=%x type_q=%x\n",name, type_name, size, type, addr_qualifier, type_qualifier);
-
-            if (strncmp(GL_POSITION, name, sizeof(GL_POSITION)) == 0) {
-                _programs[program].gl_position_location = arg;
-                continue;
-            };
-
-            arg_data_t *arg_data;
-
-            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT) {
-                arg_data = _programs[program].uniforms_data + _programs[program].active_uniforms;
-                _programs[program].uniforms_mem[_programs[program].active_uniforms] = createBuffer(CL_MEM_READ_ONLY, sizeof_type(type)*size, NULL);
-                _programs[program].uniforms_array_size[_programs[program].active_uniforms] = 1; // TODO: Not supported more than one
-                _programs[program].active_uniforms += 1;
-            } else if (type == GL_FLOAT && (
-                       addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_CONST
-                    || addr_qualifier == CL_KERNEL_ARG_ADDRESS_PRIVATE)) {
-                arg_data = _programs[program].vertex_attribs_data + _programs[program].active_vertex_attribs;
-                _programs[program].active_vertex_attribs += 1;
-            } else if (type == GL_FLOAT 
-                    && addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL 
-                    && type_qualifier == CL_KERNEL_ARG_TYPE_NONE) {
-                arg_data = _programs[program].varying_data + _programs[program].varying_size;
-                _programs[program].varying_size += 1;
-            } else {
-                _programs[program].last_load_attempt = GL_FALSE;
-                strcpy(_programs[program].log, "Failed load attempt");
-                return;
-            }
-
-            *arg_data = (arg_data_t) {
-                .vertex_location    = arg,
-                .fragment_location  = -1,
-                .size               = size,
-                .type               = type, 
-            };
-            strcpy(&arg_data->name, &name[1]);
-            printf("names: %s\n", arg_data->name); 
-        }
-
-        clGetKernelInfo(_programs[program].fragment_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &fragment_kernel_num_args, NULL);
-        fragment_kernel_num_args -=1;
-        printf("kernel args frag: %d\n", fragment_kernel_num_args);
-        uint32_t n_images = 0, n_samplers = 0;
-
-        for(cl_uint arg=0; arg < fragment_kernel_num_args; ++arg) {
-            cl_kernel_arg_address_qualifier addr_qualifier;
-            cl_kernel_arg_type_qualifier type_qualifier;
-            cl_kernel_arg_access_qualifier access_qualifier;
-            char name[ARG_NAME_SIZE];
-            char type_name[32];
-            uint32_t size, type;
-
-            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_ADDRESS_QUALIFIER,  sizeof(addr_qualifier),     &addr_qualifier,    NULL);
-            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_TYPE_QUALIFIER,     sizeof(type_qualifier),     &type_qualifier,    NULL);
-            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_ACCESS_QUALIFIER,   sizeof(access_qualifier),   &access_qualifier,  NULL);
-            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_NAME,               sizeof(name),               &name,              NULL);
-            clGetKernelArgInfo(_programs[program].fragment_kernel, arg, CL_KERNEL_ARG_TYPE_NAME,          sizeof(type_name),          &type_name,         NULL);
-            size = size_from_name_type(type_name);
-            type = type_from_name_type(type_name);
-
-            printf("name=%s type=%s size=%d type=%x addr_q=%x type_q=%x\n",name, type_name, size, type, addr_qualifier, type_qualifier);
-
-            if (strcmp(GL_FRAGCOLOR, name) == 0) {
-                _programs[program].gl_fragcolor_location = arg;
-                continue;
-            };
-            if (strcmp(GL_FRAGCOORD, name) == 0) {
-                _programs[program].gl_fragcoord_location = arg;
-                continue;
-            };
-            if (strcmp(GL_DISCARD, name) == 0) {
-                _programs[program].gl_discard_location = arg;
-                continue;
-            };
-
-            arg_data_t *arg_data;
-            int exist = 0;
-
-            int is_sampler_or_image = 0;
-
-            if (addr_qualifier == CL_KERNEL_ARG_ADDRESS_CONSTANT && type != IMAGE_T) {
-                int find = -1;
-                for(int uniform; uniform < _programs[program].active_uniforms; ++uniform) {
-                    if (strcmp(&name[1], _programs[program].uniforms_data[uniform].name) == 0) {
-                        find = uniform;
-                        break;
-                    }
-                }
-                if (find == -1) {
-                    arg_data = _programs[program].uniforms_data + _programs[program].active_uniforms;
-                    _programs[program].uniforms_mem[_programs[program].active_uniforms] = createBuffer(CL_MEM_READ_ONLY, sizeof_type(type)*size, NULL);
-                    _programs[program].uniforms_array_size[_programs[program].active_uniforms] = 1; // TODO: Not supported more than one
-                    _programs[program].active_uniforms += 1;
-                } else {
-                    arg_data = _programs[program].uniforms_data + find; 
-                    exist = 1;                   
-                    // TODO: type checker
-                }
-            } else if (type == GL_FLOAT && addr_qualifier == CL_KERNEL_ARG_ADDRESS_GLOBAL && type_qualifier == CL_KERNEL_ARG_TYPE_CONST) {
-                
-                int find = -1;
-                for(int varying=0; varying <_programs[program].varying_size; ++varying) {
-                    if (strcmp(name, _programs[program].varying_data[varying].name) == 0) {
-                        find = varying;
-                        break;
-                    }
-                }
-                if (find == -1) {
-                    _programs[program].last_load_attempt = GL_FALSE;
-                    strcpy(_programs[program].log, "Failed load attempt");
-                    return;
-                }
-                arg_data = _programs[program].varying_data + find;
-                exist = 1;
-                
-            } else if (type == SAMPLER2D_T) {
-                arg_data = _programs[program].sampler_data + n_samplers;
-                ++n_samplers;
-                ++_programs[program].texture_unit_size;
-                is_sampler_or_image = 1;
-            } else if (type == IMAGE_T) {
-                arg_data = _programs[program].image_data + n_images;
-                ++n_images;
-                is_sampler_or_image = 1;
-            } else  {
-                // errors on the compiler
-                if (strcmp(name, "test") == 0) continue;
-                _programs[program].last_load_attempt = GL_FALSE;
-                strcpy(_programs[program].log, "Failed load attempt");
-                return;
-            }
-
-            if (exist) {
-                arg_data->fragment_location = arg;
-            } else {
-                *arg_data = (arg_data_t) {
-                    .vertex_location    = -1,
-                    .fragment_location  = arg,
-                    .size               = size,
-                    .type               = type, 
-                };
-                strcpy(arg_data->name, &name[1 - is_sampler_or_image]); 
-            }
-        }
-        if (n_images != n_samplers) {
-            _programs[program].last_load_attempt = GL_FALSE;
-            strcpy(_programs[program].log, "Failed load attempt");
-            return;
-        }
-
-        // varying data
-        cl_kernel varying_kernel = createKernel(_programs[program].program, "gl_varying_data");
-        cl_uint varying_num_args;
-        clGetKernelInfo(varying_kernel,CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &varying_num_args, NULL);
+static void update_colorbuffer() 
+{
+    device_context_t *context = contexts[_current_program-1]; 
+    
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    
+    if (framebuffer->color_attachment0.target == GL_RENDERBUFFER) {
+        renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->color_attachment0.binding-1]; 
         
-        _programs[program].varying_size = varying_num_args - 1;
+        device_load_renderbuffer_to_colorbuffer(
+            context, 
+            renderbuffer->id, 
+            get_texture_mode_from_internalformat(renderbuffer->internalformat)
+        );
+    } 
+    else
+    {
+        texture_t *texture = &_textures[framebuffer->color_attachment0.binding-1];
+        
+        device_load_texture_to_colorbuffer(
+            context, 
+            texture->id,
+            get_texture_mode_from_internalformat(texture->internalformat)
+        );
+    }
+}
 
-    } else NOT_IMPLEMENTED;
+static void update_depthbuffer() 
+{
+    device_context_t *context = contexts[_current_program-1]; 
+    
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
 
-    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, 0, sizeof(cl_mem), &_vertex_attributes_mem));
-    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, 1, sizeof(cl_mem), &_vertex_attribute_data_mem));
-    #ifdef CONF_FINE_IMAGE_ENABLED
-    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.textures.vertex_buffer));
-    #else 
-    CL_CHECK(clSetKernelArg(_programs[program].vertex_kernel, vertex_kernel_num_args, sizeof(cl_mem), &_rasterization_mem.globals.vertex_buffer));
-    #endif
+    if (framebuffer->depth_attachment.target == GL_RENDERBUFFER) {
+        renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->depth_attachment.binding-1]; 
+        
+        device_load_renderbuffer_to_depthbuffer(
+            context, 
+            renderbuffer->id, 
+            get_texture_mode_from_internalformat(renderbuffer->internalformat)
+        );
+    } 
+    else
+    {
+        texture_t *texture = &_textures[framebuffer->depth_attachment.binding-1];
+        
+        device_load_texture_to_depthbuffer(
+            context, 
+            texture->id,
+            get_texture_mode_from_internalformat(texture->internalformat)
+        );
+    }
+}
 
-    _programs[program].fragment_kernel = createKernel(_programs[program].program, "fine_raster_single_sample");
-    */
+static void update_stencilbuffer()
+{
+    device_context_t *context = contexts[_current_program-1]; 
+    
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    
+    if (framebuffer->stencil_attachment.target == GL_RENDERBUFFER) {
+        renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->stencil_attachment.binding-1]; 
+        
+        device_load_renderbuffer_to_stencilbuffer(
+            context, 
+            renderbuffer->id, 
+            get_texture_mode_from_internalformat(renderbuffer->internalformat)
+        );
+    } 
+    else
+    {
+        texture_t *texture = &_textures[framebuffer->stencil_attachment.binding-1];
+        
+        device_load_texture_to_stencilbuffer(
+            context, 
+            texture->id,
+            get_texture_mode_from_internalformat(texture->internalformat)
+        );
+    }
+}
+
+static void update_framebuffer() 
+{
+    device_context_t *context = contexts[_current_program]; 
+    
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding];
+    
+    update_colorbuffer();
+
+    update_depthbuffer();
+
+    update_stencilbuffer();    
 }
 
 GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, void *data) 
 {
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
 
-    if (!_framebuffer_binding) NOT_IMPLEMENTED; // Context related
+    if (!_framebuffer_binding) NOT_IMPLEMENTED; // TODO: Context related operation
 
-    cl_kernel readnpixels_kernel;
-    cl_int cl_error;
-    size_t num_pixels;
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
 
-    if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) {
-        num_pixels = bufSize / sizeof(uint32_t);
-        readnpixels_kernel = _kernels.readnpixels.rgba8;
-    } else if (format == GL_RGBA && type == GL_UNSIGNED_SHORT_4_4_4_4) {
-        num_pixels = bufSize / sizeof(uint16_t);
-        readnpixels_kernel = _kernels.readnpixels.rgba4;
-    } else RETURN_ERROR(GL_INVALID_OPERATION);
+    if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    if (!FRAMEBUFFER.color_attachment0.position) NOT_IMPLEMENTED; // No texture or texture buffer attached, maybe throw GL_INVALID_OPERATION?
+    device_context_t *context = contexts[_current_program];
 
-    typedef struct {
-        cl_mem mem;
-        uint32_t width, internalformat;
-    } buffer_info_t; 
-
-    buffer_info_t buffer_info;
-
-    if (FRAMEBUFFER.color_attachment0.target == GL_RENDERBUFFER) {
-
-        renderbuffer_t* colorbuffer = &_renderbuffers[FRAMEBUFFER.color_attachment0.position];
-        
-        if (x+width > colorbuffer->width || y+height > colorbuffer->height) UNDEFINED_BEHAVIOUR;
-
-        buffer_info = (buffer_info_t) {
-            .mem = colorbuffer->mem,
-            .width = colorbuffer->width,
-            .internalformat = colorbuffer->internalformat,
-        };
-    } else {
-        texture_t* texture = &_textures[FRAMEBUFFER.color_attachment0.position];
-        
-        if (x+width > texture->width || y+height > texture->height) UNDEFINED_BEHAVIOUR;
-
-        buffer_info = (buffer_info_t) {
-            .mem = texture->mem,
-            .width = texture->width,
-            .internalformat = texture->internalformat,
-        };
+    flush_device_context(context);
+    if (device_has_triangles_enqueued(context)) 
+    {
+        device_launch_triangle_rasterization(context);
+    } 
+    else if (device_has_clear_pending(context))
+    {
+        device_launch_clear_framebuffer(context);
     }
 
-    device_get_pixels(contexts[_current_program], 0, 0, width, height, data);
-    return;
+    device_launch_read_pixels(contexts, 0, 0, width, height, data);
 
     // TODO: multiple formats and types support
     /*
@@ -2268,48 +1681,50 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
     */
 }
 
-GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) {
-    if (width > MAX_RENDERBUFFER_SIZE || height > MAX_RENDERBUFFER_SIZE) RETURN_ERROR(GL_INVALID_VALUE);
-    if (_renderbuffers[_renderbuffer_binding].mem != NULL) RETURN_ERROR(GL_INVALID_OPERATION); 
-    if (target != GL_RENDERBUFFER) NOT_IMPLEMENTED; // Check what error throw
-
-    size_t size;
-
+static GLboolean is_valid_renderbuffer_internalformat(GLenum internalformat) 
+{
     switch (internalformat)
     {
-    case GL_DEPTH_COMPONENT16:
-    case GL_RGBA4:
-    case GL_RGB5_A1:
-    case GL_RGB565:
-        size = sizeof(uint16_t[width][height]);
-        break;
-    case GL_STENCIL_INDEX8:
-        size = sizeof(uint8_t[width][height]);
-        break;
-    case GL_RGBA8:
-        size = sizeof(uint32_t[width][height]);
-        break;
-    default:
-        NOT_IMPLEMENTED; // Check what error throw
+        case GL_DEPTH_COMPONENT16:
+        case GL_RGBA4:
+        case GL_RGB5_A1:
+        case GL_RGB565:
+        case GL_STENCIL_INDEX8:
+            return 1;
+        default:
+            return 0;
     }
-
-    // TODO: if (size > remaining_memory) RETURN_ERROR(GL_OUT_OF_MEMORY);
-
-    #ifdef DEVICE_IMAGE_ENABLED
-    NOT_IMPLEMENTED;
-    #else
-    _renderbuffers[_renderbuffer_binding].mem               = createBuffer(MEM_READ_WRITE, size, NULL);
-    #endif
-    _renderbuffers[_renderbuffer_binding].internalformat    = internalformat;
-    _renderbuffers[_renderbuffer_binding].width             = width;
-    _renderbuffers[_renderbuffer_binding].height            = height;
 }
 
-GL_APICALL void GL_APIENTRY glSampleCoverage (GLfloat value, GLboolean invert) {
+GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) 
+{
+    if (target != GL_RENDERBUFFER) RETURN_ERROR(GL_INVALID_ENUM);
+    
+    if (is_valid_renderbuffer_internalformat(internalformat) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (width > CR_MAXVIEWPORT_SIZE || height > CR_MAXVIEWPORT_SIZE) RETURN_ERROR(GL_INVALID_VALUE);
+    
+    if (width == 0 || height == 0) NOT_IMPLEMENTED;
+
+    if (_renderbuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    renderbuffer_t *renderbuffer = &_renderbuffers[_renderbuffer_binding-1];
+    
+    if (renderbuffer->width != 0 || renderbuffer->height != 0) RETURN_ERROR(GL_INVALID_OPERATION); 
+
+    renderbuffer->id = device_create_renderbuffer(&device_shared_objects, internalformat, width, height);
+    renderbuffer->width = width;
+    renderbuffer->height = height;
+}
+
+GL_APICALL void GL_APIENTRY glSampleCoverage (GLfloat value, GLboolean invert) 
+{
+    // TODO for multisampling
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei height) {
+GL_APICALL void GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei height) 
+{
     if (width < 0 || height < 0) RETURN_ERROR(GL_INVALID_VALUE);
     
     _scissor_data = (scissor_data_t) {
@@ -2339,50 +1754,92 @@ inline GLenum gl_function_to_stencil_function(GLenum func) {
     return -1;
 }
 
-GL_APICALL void GL_APIENTRY glStencilFunc (GLenum func, GLint ref, GLuint mask) {
+static void set_stencil_function(stencil_function_t *stencil_function, GLenum func, GLint ref, GLuint mask)
+{
+    *stencil_function = (stencil_function_t) 
+    {
+        .func = func,
+        .ref = ref,
+        .mask = mask,
+    };
+}
+
+static GLboolean is_valid_face(GLenum face) 
+{
+    switch (face)
+    {
+        default: 
+            return GL_FALSE;
+        case GL_FRONT:
+        case GL_BACK:
+        case GL_FRONT_AND_BACK:
+    }
+
+    return GL_TRUE;
+}
+
+GL_APICALL void GL_APIENTRY glStencilFunc (GLenum func, GLint ref, GLuint mask) 
+{
     glStencilFuncSeparate (GL_FRONT_AND_BACK, func, ref, mask);
 }
 
-GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLint ref, GLuint mask) {
+GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLint ref, GLuint mask) 
+{
+    if (is_valid_face(face) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    switch (func)
+    {
+        default: RETURN_ERROR(GL_INVALID_ENUM);
+        case GL_NEVER:
+        case GL_LESS:
+        case GL_EQUAL:
+        case GL_LEQUAL:
+        case GL_GREATER:
+        case GL_NOTEQUAL:
+        case GL_GEQUAL:
+        case GL_ALWAYS:
+    }
+
     switch (face)
     {
-    case GL_FRONT:
-    case GL_BACK:
-        NOT_IMPLEMENTED;
-    case GL_FRONT_AND_BACK:
-        _stencil_data.front.function = (stencil_function_t) {
-            .func = gl_function_to_stencil_function(func),
-            .ref = ref,
-            .mask = mask,
-        };
-        _stencil_data.back.function = (stencil_function_t) {
-            .func = gl_function_to_stencil_function(func),
-            .ref = ref,
-            .mask = mask,
-        };
-        break;
-    default:
-        RETURN_ERROR(GL_INVALID_ENUM); // TODO: Check this error
+        case GL_FRONT:
+        case GL_FRONT_AND_BACK:
+            set_stencil_function(&_stencil_data.front.function, func, ref, mask);
+        default:
+    }
+
+    switch (face)
+    {
+        case GL_BACK:
+        case GL_FRONT_AND_BACK:
+            set_stencil_function(&_stencil_data.back.function, func, ref, mask);
+        default:
     }
 }
 
-GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask) {
+GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask) 
+{
     glStencilMaskSeparate(GL_FRONT_AND_BACK, mask);
 }
 
-GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask) {
-    switch (face) {
-    case GL_FRONT:
-    case GL_BACK:
-        NOT_IMPLEMENTED;
-    case GL_FRONT_AND_BACK:
-        _masks.stencil = (stencil_mask_t) {
-            .front  = mask,
-            .back   = mask,
-        };
-        break;
-    default:
-        RETURN_ERROR(GL_INVALID_ENUM); // TODO: Check this error
+GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask) 
+{
+    if (is_valid_face(face) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    switch (face)
+    {
+        case GL_FRONT:
+        case GL_FRONT_AND_BACK:
+            _masks.stencil.front = mask;
+        default:
+    }
+
+    switch (face)
+    {
+        case GL_BACK:
+        case GL_FRONT_AND_BACK:
+            _masks.stencil.back = mask;
+        default:
     }
 }
 
@@ -2405,30 +1862,65 @@ inline GLenum gl_operation_to_stencil_operation(GLenum operation) {
     return -1;
 } 
 
-GL_APICALL void GL_APIENTRY glStencilOp (GLenum fail, GLenum zfail, GLenum zpass) {
+static void set_stencil_operation(stencil_operation_t *stencil_operation, GLenum sfail, GLenum dfail, GLenum dpass)
+{
+    *stencil_operation = (stencil_operation_t) 
+    {
+        .sfail = sfail,
+        .dpfail = dfail,
+        .dpass = dpass
+    };
+}
+
+static GLboolean is_valid_stencil_operation(GLenum operation)
+{
+    switch (operation)
+    {
+        default:
+            return GL_FALSE;
+        case GL_KEEP:
+        case GL_ZERO:
+        case GL_REPLACE:
+        case GL_INCR:
+        case GL_DECR:
+        case GL_INVERT:
+        case GL_INCR_WRAP:
+        case GL_DECR_WRAP:
+    }
+
+    return GL_TRUE;
+}
+
+GL_APICALL void GL_APIENTRY glStencilOp (GLenum fail, GLenum zfail, GLenum zpass)
+{
     glStencilOpSeparate(GL_FRONT_AND_BACK, fail, zfail, zpass);
 }
 
-GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) {
+
+GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) 
+{
+    if (is_valid_face(face) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (is_valid_stencil_operation(sfail) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+    
+    if (is_valid_stencil_operation(dpfail) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (is_valid_stencil_operation(dppass) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
+
     switch (face)
     {
-    case GL_FRONT:
-    case GL_BACK:
-        NOT_IMPLEMENTED;
-    case GL_FRONT_AND_BACK:
-        _stencil_data.front.operation = (stencil_operation_t) {
-            .sfail = gl_operation_to_stencil_operation(sfail),
-            .dpfail = gl_operation_to_stencil_operation(dpfail),
-            .dpass = gl_operation_to_stencil_operation(dppass)
-        };
-        _stencil_data.back.operation = (stencil_operation_t) {
-            .sfail = gl_operation_to_stencil_operation(sfail),
-            .dpfail = gl_operation_to_stencil_operation(dpfail),
-            .dpass = gl_operation_to_stencil_operation(dppass)
-        };
-        break;
-    default:
-        RETURN_ERROR(GL_INVALID_ENUM); // TODO: Check this error
+        case GL_FRONT:
+        case GL_FRONT_AND_BACK:
+            set_stencil_operation(&_stencil_data.front.operation, sfail, dpfail, dppass);
+        default:
+    }
+
+    switch (face)
+    {
+        case GL_BACK:
+        case GL_FRONT_AND_BACK:
+            set_stencil_operation(&_stencil_data.back.operation, sfail, dpfail, dppass);
+        default:
     }
 }
 
@@ -2474,7 +1966,6 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
 
     if (texture->width || texture->height) RETURN_ERROR(GL_INVALID_OPERATION); 
     
-    
     if (levels != 1) NOT_IMPLEMENTED; // Mipmaps not supported yet
 
     int texture_mode = get_texture_mode_from_internalformat(internalformat);
@@ -2483,63 +1974,17 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     texture->height = height;
     texture->internalformat = internalformat;
     texture->levels = levels;
-
-    /*
-    GLsizei level = 0;
-    size_t total_pixels = 0;
-    while (level++ < levels) { 
-        total_pixels += width * height;
-        width /= 2;
-        height /= 2;
-    }
-    */
-
-    /*    
-    // https://registry.khronos.org/OpenCL/specs/3.0-unified/html/OpenCL_API.html#_mapping_to_external_image_formats
-    cl_image_format format; 
-    cl_image_desc desc;
-
-    switch (internalformat) {
-        case GL_RGBA8:
-            format.image_channel_order = CL_RGBA;
-            format.image_channel_data_type = CL_UNORM_INT8;
-            break;
-        case GL_RGB8:
-            format.image_channel_order = CL_RGB;
-            format.image_channel_data_type = CL_UNORM_INT8;
-            break;
-        case GL_RG8:
-            format.image_channel_order = CL_RG;
-            format.image_channel_data_type = CL_UNORM_INT8;
-            break;
-        case GL_R8:
-            format.image_channel_order = CL_R;
-            format.image_channel_data_type = CL_UNORM_INT8;
-            break;
-        case GL_RGBA4:
-            NOT_IMPLEMENTED;
-        case GL_RGB5_A1:
-            format.image_channel_order = CL_RGBA;
-            format.image_channel_data_type = CL_UNORM_SHORT_555;
-        case GL_RGB565:
-            format.image_channel_order = CL_RGB;
-            format.image_channel_data_type = CL_UNORM_SHORT_565;
-            break;
-        default:
-            RETURN_ERROR(GL_INVALID_ENUM);
-    }
-
-    desc.image_width = width;
-    desc.image_height = height;
-    desc.image_type = CL_MEM_OBJECT_IMAGE2D;
-    desc.num_mip_levels = levels - 1;
-
-    _texture[_texture_binding].mem = createImage(MEM_READ_ONLY, &format, &desc, NULL);
-    */
 }
 
-GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) NOT_IMPLEMENTED;
-GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glTexParameterf (GLenum target, GLenum pname, GLfloat param) 
+{
+    RETURN_ERROR(GL_INVALID_ENUM);
+}
+
+GL_APICALL void GL_APIENTRY glTexParameterfv (GLenum target, GLenum pname, const GLfloat *params)
+{
+    RETURN_ERROR(GL_INVALID_ENUM);
+}
 
 static GLboolean gl_tex_parameter_to_tex_wrap(GLint param, uint32_t* result) {
     switch (param)
@@ -2558,56 +2003,90 @@ static GLboolean gl_tex_parameter_to_tex_wrap(GLint param, uint32_t* result) {
     return GL_TRUE;
 }
 
+static GLboolean is_tex_parameter_valid(GLenum pname, GLint param)
+{
+    switch (pname)
+    {
+        case GL_TEXTURE_WRAP_S:
+        case GL_TEXTURE_WRAP_T:
+            switch (param)
+            {
+                default: return GL_FALSE;
+                case GL_CLAMP_TO_EDGE:
+                case GL_REPEAT:
+                case GL_MIRRORED_REPEAT:
+            }
+            break;
+        case GL_TEXTURE_MAG_FILTER:
+            switch (param)
+            {
+                default: return GL_FALSE;
+                case GL_NEAREST:
+                case GL_LINEAR:
+            }
+            break;
+        case GL_TEXTURE_MIN_FILTER:
+            switch (param)
+            {
+                default: return GL_FALSE;
+                case GL_NEAREST:
+                case GL_LINEAR:
+                case GL_NEAREST_MIPMAP_NEAREST:
+                case GL_NEAREST_MIPMAP_LINEAR:
+                case GL_LINEAR_MIPMAP_NEAREST:
+                case GL_LINEAR_MIPMAP_LINEAR:
+            }
+            break;
+        default: return GL_FALSE;
+    }
+
+    return GL_TRUE;
+}
+
+static GLint* get_tex_parameter_pointer(GLenum pname) 
+{
+    texture_t *texture = &_textures[_texture_binding-1];
+
+    switch (pname)
+    {
+        case GL_TEXTURE_WRAP_S:
+            return &texture->wraps.s;        
+        case GL_TEXTURE_WRAP_T:
+            return &texture->wraps.t; 
+        case GL_TEXTURE_MIN_FILTER:
+            return &texture->wraps.min_filter; 
+        case GL_TEXTURE_MAG_FILTER:
+            return &texture->wraps.mag_filter; 
+        default:
+            return NULL;
+    }
+}
+
 GL_APICALL void GL_APIENTRY glTexParameteri (GLenum target, GLenum pname, GLint param) 
 {
     if (target != GL_TEXTURE_2D) RETURN_ERROR(GL_INVALID_ENUM);
 
+    if (is_tex_parameter_valid(pname, param) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM); 
+
     if (!_texture_binding) RETURN_ERROR(GL_INVALID_OPERATION);
     
-    texture_t *texture = &_textures[_texture_binding-1];
+    GLint* tex_parameter = get_tex_parameter_pointer(pname);
 
-    // Chekc if value is correct
-    switch (pname)
-    {
-    case GL_TEXTURE_WRAP_S:
-    case GL_TEXTURE_WRAP_T:
-        if (param != GL_CLAMP_TO_EDGE && param != GL_REPEAT && param != GL_MIRRORED_REPEAT) NOT_IMPLEMENTED;
-        break;
-    case GL_TEXTURE_MAG_FILTER:
-        if (param != GL_NEAREST && param != GL_LINEAR) NOT_IMPLEMENTED;
-        break;
-    case GL_TEXTURE_MIN_FILTER:
-        if (param != GL_NEAREST                && param != GL_LINEAR && 
-            param != GL_NEAREST_MIPMAP_NEAREST && param != GL_NEAREST_MIPMAP_LINEAR && 
-            param != GL_LINEAR_MIPMAP_NEAREST  && param != GL_LINEAR_MIPMAP_LINEAR
-            ) NOT_IMPLEMENTED;
-        break;
-    default:
-        NOT_IMPLEMENTED;
-    }
-    // Set value
-    
-    uint32_t value;
-    switch (pname)
-    {
-    case GL_TEXTURE_WRAP_S:
-        gl_tex_parameter_to_tex_wrap(param, &value);
-        texture->wraps.s = value;
-        return;        
-    case GL_TEXTURE_WRAP_T:
-        gl_tex_parameter_to_tex_wrap(param, &value);
-        texture->wraps.t          = value; 
-        return;
-    case GL_TEXTURE_MIN_FILTER:
-        texture->wraps.min_filter = param; 
-        return;
-    case GL_TEXTURE_MAG_FILTER:
-        texture->wraps.mag_filter = param; 
-        return;
-    }
+    *tex_parameter = param;
 }
 
-GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params) NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glTexParameteriv (GLenum target, GLenum pname, const GLint *params) 
+{
+    if (target != GL_TEXTURE_2D) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (is_tex_parameter_valid(pname, *params) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM); 
+
+    if (!_texture_binding) RETURN_ERROR(GL_INVALID_OPERATION);
+    
+    GLint* tex_parameter = get_tex_parameter_pointer(pname);
+
+    *tex_parameter = *params;
+}
 
 GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels) 
 {
@@ -2624,168 +2103,185 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
         RETURN_ERROR(GL_INVALID_VALUE);
 
     if (level != 0) NOT_IMPLEMENTED; // Mipmaps not supported yet
+
     if (xoffset != 0 || yoffset != 0) NOT_IMPLEMENTED; // Subtextures not supported yet
     
     if (texture->internalformat == GL_RGBA8 && format == GL_RGBA && type == GL_UNSIGNED_BYTE ) NOT_IMPLEMENTED; // Only RGBA8 supported yet
 
     int texture_mode = get_texture_mode_from_internalformat(texture->internalformat);
+
     device_write_2d_texture(contexts[_current_program], texture->id, width, height, texture_mode, pixels);
-
-    /*
-    size_t origin[2], region[2], pixel_size;
-    origin[0] = xoffset;
-    origin[1] = yoffset;
-    region[0] = width;
-    region[1] = height;
-
-    if (format == GL_RGBA && type == GL_UNSIGNED_BYTE) pixel_size = sizeof(uint8_t[4]);
-    if (format == GL_RGBA && type == GL_UNSIGNED_SHORT_5_5_5_1) pixel_size = sizeof(uint8_t[2]);
-    if (format == GL_RGBA && type == GL_UNSIGNED_SHORT_5_6_5) pixel_size = sizeof(uint8_t[2]);
-    else if (format == GL_RGBA && type == GL_UNSIGNED_SHORT) pixel_size = sizeof(uint8_t[2]);
-    else if (format == GL_RGB && type == GL_UNSIGNED_BYTE) pixel_size = sizeof(uint8_t[3]);
-    else if (format == GL_RG && type == GL_UNSIGNED_BYTE) pixel_size = sizeof(uint8_t[2]);
-    else if (format == GL_RED && type == GL_UNSIGNED_BYTE) pixel_size = sizeof(uint8_t[1]);
-    else RETURN_ERROR(GL_INVALID_ENUM);
-
-    //enqueueWriteImage(getCommandQueue(), _textures[_texture_binding].mem, &origin, &region, pixel_size*width, 0, pixels);
-    #endif
-    */
 }
 
-
-
-#define ERROR_CHECKER(_COUNT, _SIZE, _TYPE) ({                                                                          \
-    if (!_current_program) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "No current program setted.");                                                          \
-    if (CURRENT_PROGRAM.uniforms_data[location].size != _SIZE) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Size do not match.");                      \
-    if (   CURRENT_PROGRAM.uniforms_data[location].type != GL_BYTE                                                      \
-        && CURRENT_PROGRAM.uniforms_data[location].type != _TYPE)                                                       \
-        RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Type do not match.");                                                                             \
-    if (location >= CURRENT_PROGRAM.active_uniforms) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Location equal or greater than active uniforms.");                                \
-    if (_COUNT < -1 || _COUNT > CURRENT_PROGRAM.uniforms_array_size[location]) RETURN_ERROR_WITH_MESSAGE(GL_INVALID_OPERATION, "Array size is less than -1 or greater than expected.");      \
-    if (location == -1) return;                                                                                         \
-    })
-
-#define GENERIC_UNIFORM(_SIZE, _TYPE, _ARRAY_TYPE, _ARRAY) ({                                                   \
-    ERROR_CHECKER(1, _SIZE, _TYPE);                                                                             \
-    if (CURRENT_PROGRAM.uniforms_data[location].type == GL_BYTE) NOT_IMPLEMENTED;                               \
-    _ARRAY_TYPE value[] = _ARRAY;                                                                               \
-    set_uniform_data(location, sizeof(value), value);                                                                \
-})
-// enqueueWriteBuffer(getCommandQueue(), CURRENT_PROGRAM.uniforms_mem[location], GL_TRUE, 0, sizeof(value), value);
-
-#define GENERIC_UNIFORM_V(_SIZE, _TYPE, _ARRAY_TYPE) ({                                                                         \
-    ERROR_CHECKER(count, _SIZE, _TYPE);                                                                                         \
-    if (CURRENT_PROGRAM.uniforms_data[location].type == GL_BYTE) NOT_IMPLEMENTED;                                               \
-    set_uniform_data(location, sizeof(_ARRAY_TYPE[count][_SIZE]), value);                                                        \
-})
-// enqueueWriteBuffer(getCommandQueue(), CURRENT_PROGRAM.uniforms_mem[location], GL_TRUE, 0, sizeof(_ARRAY_TYPE[count][_SIZE]), value);  \
-
-
-static void set_uniform_data(GLint location, size_t size, void* data) {
-    program_t *program = &programs[current_program];
+static void set_uniform_data(GLint location, size_t size, void* data)
+{
+    program_t *program = &_programs[_current_program-1];
 
     memcpy(program->uniform_data + program->uniform_arg_datas[location].offset, data, size);
 }
 
-GL_APICALL void GL_APIENTRY glUniform1f (GLint location, GLfloat v0) {
-    GENERIC_UNIFORM(1, GL_FLOAT, GLfloat,P99_PROTECT({v0}));
+static GLboolean is_correct_type(arg_data_t* arg_data, size_t size, GLenum type)
+{
+    return arg_data->type == type && arg_data->size == size ? GL_TRUE : GL_FALSE;
 }
-GL_APICALL void GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const GLfloat *value) {
-    GENERIC_UNIFORM_V(1, GL_FLOAT, GLfloat);
+
+static GLboolean is_valid_uniform_data(GLint location, size_t size, GLenum type)
+{
+    if (_current_program == 0) return GL_FALSE;
+
+    program_t *program = &_programs[_current_program-1];
+
+    if (location >= program->uniform_sz) return GL_FALSE;
+
+    arg_data_t *arg_data = &program->uniform_arg_datas[location];
+
+    if (is_correct_type(arg_data, 1, GL_FLOAT) == GL_FALSE) return GL_FALSE;
+
+    return GL_TRUE;
 }
-GL_APICALL void GL_APIENTRY glUniform1i (GLint location, GLint v0) { // TODO: refactor uniforms with samplers
-    GLuint sampler_loc = location - CURRENT_PROGRAM.active_uniforms;
-    if (sampler_loc < CURRENT_PROGRAM.texture_unit_size)
-        CURRENT_PROGRAM.sampler_value[sampler_loc] = v0;
-    else
-        GENERIC_UNIFORM(1, GL_INT, GLint, P99_PROTECT({v0}));
+
+#define GENERIC_UNIFORM(_SIZE, _TYPE, _LOCATION, ...) \
+{ \
+    if (is_valid_uniform_data(_LOCATION, _SIZE, _TYPE) == GL_FALSE) RETURN_ERROR(GL_INVALID_OPERATION); \
+    GLfloat array[] = {__VA_ARGS__}; \
+    set_uniform_data(location, sizeof(array), array); \
 }
-GL_APICALL void GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const GLint *value) {
-    GENERIC_UNIFORM_V(1, GL_INT, GLint);
+
+#define GENERIC_UNIFORM_V(_SIZE, _TYPE, _LOCATION, _ARRAY) \
+{ \
+    if (is_valid_uniform_data(_LOCATION, _SIZE, _TYPE) == GL_FALSE) RETURN_ERROR(GL_INVALID_OPERATION); \
+    set_uniform_data(location, sizeof(_ARRAY[0])*_SIZE, _ARRAY); \
 }
-GL_APICALL void GL_APIENTRY glUniform2f (GLint location, GLfloat v0, GLfloat v1) {
-    GENERIC_UNIFORM(2, GL_FLOAT, GLfloat, P99_PROTECT({v0, v1}));
+
+GL_APICALL void GL_APIENTRY glUniform1f (GLint location, GLfloat v0)
+{
+    GENERIC_UNIFORM(1, GL_FLOAT, location, v0);
 }
-GL_APICALL void GL_APIENTRY glUniform2fv (GLint location, GLsizei count, const GLfloat *value) {
-    GENERIC_UNIFORM_V(2, GL_FLOAT, GLfloat);
+
+GL_APICALL void GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const GLfloat *value) 
+{
+    GENERIC_UNIFORM_V(1, GL_FLOAT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniform2i (GLint location, GLint v0, GLint v1) {
-    GENERIC_UNIFORM(2, GL_INT, GLint, P99_PROTECT({v0, v1}));
+
+GL_APICALL void GL_APIENTRY glUniform1i (GLint location, GLint v0)
+{
+    GENERIC_UNIFORM(1, GL_INT, location, v0);
 }
-GL_APICALL void GL_APIENTRY glUniform2iv (GLint location, GLsizei count, const GLint *value) {
-    GENERIC_UNIFORM_V(2, GL_INT, GLint);
+
+GL_APICALL void GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const GLint *value) 
+{
+    GENERIC_UNIFORM_V(1, GL_INT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniform3f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2) {
-    GENERIC_UNIFORM(3, GL_FLOAT, GLfloat, P99_PROTECT({v0, v1, v2}));
+
+GL_APICALL void GL_APIENTRY glUniform2f (GLint location, GLfloat v0, GLfloat v1)
+{
+    GENERIC_UNIFORM(2, GL_FLOAT, location, v0, v1);
 }
-GL_APICALL void GL_APIENTRY glUniform3fv (GLint location, GLsizei count, const GLfloat *value) {
-    GENERIC_UNIFORM_V(3, GL_FLOAT, GLfloat);
+
+GL_APICALL void GL_APIENTRY glUniform2fv (GLint location, GLsizei count, const GLfloat *value)
+{
+    GENERIC_UNIFORM_V(2, GL_FLOAT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniform3i (GLint location, GLint v0, GLint v1, GLint v2) {
-    GENERIC_UNIFORM(3, GL_INT, GLint, P99_PROTECT({v0, v1, v2}));
+
+GL_APICALL void GL_APIENTRY glUniform2i (GLint location, GLint v0, GLint v1)
+{
+    GENERIC_UNIFORM(2, GL_INT, location, v0, v1);
 }
-GL_APICALL void GL_APIENTRY glUniform3iv (GLint location, GLsizei count, const GLint *value) {
-    GENERIC_UNIFORM_V(3, GL_INT, GLint);
+
+GL_APICALL void GL_APIENTRY glUniform2iv (GLint location, GLsizei count, const GLint *value)
+{
+    GENERIC_UNIFORM_V(2, GL_INT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniform4f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3) {
-    GENERIC_UNIFORM(4, GL_FLOAT, GLfloat, P99_PROTECT({v0, v1, v2, v3}));
+
+GL_APICALL void GL_APIENTRY glUniform3f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2)
+{
+    GENERIC_UNIFORM(3, GL_FLOAT, location, v0, v1, v2);
 }
-GL_APICALL void GL_APIENTRY glUniform4fv (GLint location, GLsizei count, const GLfloat *value) {
-    GENERIC_UNIFORM_V(4, GL_FLOAT, GLfloat);
+
+GL_APICALL void GL_APIENTRY glUniform3fv (GLint location, GLsizei count, const GLfloat *value)
+{
+    GENERIC_UNIFORM_V(3, GL_FLOAT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniform4i (GLint location, GLint v0, GLint v1, GLint v2, GLint v3) {
-    GENERIC_UNIFORM(4, GL_INT, GLint, P99_PROTECT({v0, v1, v2, v3}));
+
+GL_APICALL void GL_APIENTRY glUniform3i (GLint location, GLint v0, GLint v1, GLint v2)
+{
+    GENERIC_UNIFORM(3, GL_INT, location, v0, v1, v2);
 }
-GL_APICALL void GL_APIENTRY glUniform4iv (GLint location, GLsizei count, const GLint *value) {
-    GENERIC_UNIFORM_V(4, GL_INT, GLint);
+
+GL_APICALL void GL_APIENTRY glUniform3iv (GLint location, GLsizei count, const GLint *value)
+{
+    GENERIC_UNIFORM_V(3, GL_INT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniformMatrix2fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+
+GL_APICALL void GL_APIENTRY glUniform4f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)
+{
+    GENERIC_UNIFORM(4, GL_FLOAT, location, v0, v1, v2, v3);
+}
+
+GL_APICALL void GL_APIENTRY glUniform4fv (GLint location, GLsizei count, const GLfloat *value) 
+{
+    GENERIC_UNIFORM_V(4, GL_FLOAT, location, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniform4i (GLint location, GLint v0, GLint v1, GLint v2, GLint v3)
+{
+    GENERIC_UNIFORM(4, GL_INT, location, v0, v1, v2, v3);
+}
+
+GL_APICALL void GL_APIENTRY glUniform4iv (GLint location, GLsizei count, const GLint *value)
+{
+    GENERIC_UNIFORM_V(4, GL_INT, location, value);
+}
+
+GL_APICALL void GL_APIENTRY glUniformMatrix2fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value)
+{
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
 
-    GENERIC_UNIFORM_V(8,GL_FLOAT,GLfloat);
+    GENERIC_UNIFORM_V(8, GL_FLOAT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+
+GL_APICALL void GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value)
+{
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
 
-    GENERIC_UNIFORM_V(16,GL_FLOAT,GLfloat);
+    GENERIC_UNIFORM_V(16, GL_FLOAT, location, value);
 }
-GL_APICALL void GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) {
+GL_APICALL void GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value)
+{
     if (transpose != GL_FALSE) RETURN_ERROR(GL_INVALID_VALUE);
 
-    GENERIC_UNIFORM_V(16,GL_FLOAT,GLfloat);
+    GENERIC_UNIFORM_V(16, GL_FLOAT, location, value);
 }
 
 GL_APICALL void GL_APIENTRY glUseProgram (GLuint program)
 {
-    if (program && _programs[program].last_load_attempt == GL_FALSE) 
-        RETURN_ERROR(GL_INVALID_OPERATION); // TODO: Check if this emits the error or draw function has to
-    
     if (program == _current_program) return; // No change
 
-    flush_device_context(contexts[_current_program]);
-    device_link_contexts(contexts[_current_program], contexts[program]);
-    
+    if (program == 0) 
+    {
+        flush_device_context(contexts[_current_program-1]);
+
+        _current_program = 0;
+
+        return;
+    }
+        
+    if (is_valid_program(program) == GL_FALSE) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    if (_current_program != 0) 
+    {
+        device_context_t *current_context = contexts[_current_program-1]; 
+
+        flush_device_context(current_context);
+        device_link_contexts(current_context, contexts[program-1]);
+    }
+
     _current_program=program;
 }
 
-/*
-#define SET_VERTEX_ATTRIB(index, x, y, z, w) ({                         \
-    if (index>=MAX_VERTEX_ATTRIBS) RETURN_ERROR(GL_INVALID_VALUE);      \
-    _vertex_attrib_state[index] = VEC4;                                 \
-    _vertex_attribs[index].vec4.values[0] = x;                          \
-    _vertex_attribs[index].vec4.values[1] = y;                          \
-    _vertex_attribs[index].vec4.values[2] = z;                          \
-    _vertex_attribs[index].vec4.values[3] = w;                          \
-    })
-*/
-
 static inline void set_vertex_attribute(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) 
 {
-    if (index >= DEVICE_VERTEX_ATTRIBUTE_SIZE) 
-    {
-        SET_GL_ERROR(GL_INVALID_VALUE);
-        return;
-    }
+    if (index >= DEVICE_VERTEX_ATTRIBUTE_SIZE) RETURN_ERROR(GL_INVALID_VALUE);
 
     vertex_attibute_updated = 1;
     vertex_attributes[index] = (cl_float4){x, y, z, w};
@@ -2795,30 +2291,37 @@ GL_APICALL void GL_APIENTRY glVertexAttrib1f (GLuint index, GLfloat x)
 {
     set_vertex_attribute(index, x, 0.f, 0.f, 1.f);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib1fv (GLuint index, const GLfloat *v) 
 {
     set_vertex_attribute(index, v[0], 0.f, 0.f, 1.f);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib2f (GLuint index, GLfloat x, GLfloat y) 
 {
     set_vertex_attribute(index, x, y, 0.f, 1.f);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib2fv (GLuint index, const GLfloat *v) 
 {
     set_vertex_attribute(index, v[0], v[1], 0.f, 1.f);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib3f (GLuint index, GLfloat x, GLfloat y, GLfloat z) 
 {
     set_vertex_attribute(index, x, y, z, 1.f);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib3fv (GLuint index, const GLfloat *v) 
 {
     set_vertex_attribute(index, v[0], v[1], v[2], 1.f);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib4f (GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) 
 {
     set_vertex_attribute(index, x, y, z, w);
 }
+
 GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v) 
 {
     set_vertex_attribute(index, v[0], v[1], v[2], v[3]);
@@ -2884,11 +2387,11 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLe
         return;
     }
 
-    if (stride < 0) {
-        SET_GL_ERROR(GL_INVALID_VALUE);
-        return;
-    } else if (stride == 0) {
-        stride = sizeof_type(type)*size;
+    if (stride < 0) RETURN_ERROR(GL_INVALID_VALUE);
+    
+    if (stride == 0) 
+    {
+        stride = sizeof_vertex_attribute_type(type)*size;
     }
 
     va_active_pointer = vertex_attribute_datas[index].misc & VERTEX_ATTRIBUTE_ACTIVE_POINTER;
@@ -2920,12 +2423,6 @@ GL_APICALL void GL_APIENTRY glViewport (GLint x, GLint y, GLsizei width, GLsizei
 /**** Utils & inline functions ****\
  *
 */
-
-void* getCommandQueue() {
-    static void* command_queue;
-    if (command_queue == NULL) command_queue = createCommandQueue(0);
-    return command_queue;
-}
 
 unsigned int size_from_name_type(const char* name_type) {
     #define RETURN_IF_SIZE_FROM(_TYPE)                              \
@@ -2972,4 +2469,108 @@ unsigned int type_from_name_type(const char* name_type) {
     #else
     return 0;
     #endif
+}
+
+// impl utility functions
+
+static void flush_device_context(device_context_t* context)
+{
+    if (device_has_triangles_enqueued(context)) 
+    {
+        device_launch_triangle_rasterization(context);
+    } 
+    else if (device_has_clear_pending(context))
+    {
+        device_launch_clear_framebuffer(context);
+    }
+}
+
+static uint32_t is_valid_program(GLuint program)
+{
+    return program < _program_sz && program != 0;
+}
+
+static GLboolean* get_enabled_pointer(GLenum cap)
+{
+    switch (cap)
+    {
+    case GL_SCISSOR_TEST:
+        return &_enableds.scissor_test;
+    case GL_STENCIL_TEST:
+        return &_enableds.stencil_test;
+    case GL_DEPTH_TEST:
+        return &_enableds.depth_test;
+    case GL_BLEND:
+        return &_enableds.blend;
+    case GL_DITHER:
+        return &_enableds.dither;
+    case GL_CULL_FACE:
+        return &_enableds.cull_face;
+    default:
+        return NULL;
+    }
+}
+
+static render_mode_t get_render_mode_flags(GLenum mode)
+{
+    render_mode_t render_mode_flags;
+
+    render_mode_flags.flags = RENDER_MODE_FLAG_ENABLE_LERP; // always lerp enabled
+
+    if (_enableds.depth_test) render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_DEPTH;
+
+    if (_enableds.stencil_test) render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_STENCIL;
+
+    if (_enableds.blend) render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_BLENDER;
+
+    if (_enableds.cull_face) 
+    {
+        switch (_rasterization_data.cull_face)
+        {
+            case GL_FRONT:
+            case GL_FRONT_AND_BACK:
+                render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_FRONT;
+            default:
+        }
+
+        switch (_rasterization_data.cull_face)
+        {
+            case GL_BACK:
+            case GL_FRONT_AND_BACK:
+                render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
+            default:
+        }
+    }
+    
+    switch (mode)
+    {
+        case GL_TRIANGLE_FAN:
+            render_mode_flags.flags |= RENDER_MODE_FLAG_TRIANGLE_FAN;
+            break;
+        case GL_TRIANGLE_STRIP:
+            render_mode_flags.flags |= RENDER_MODE_FLAG_TRIANGLE_STRIP;
+            break;
+        default:
+    }
+
+    return render_mode_flags;
+}
+
+static size_t sizeof_vertex_attribute_type(GLenum type)
+{
+    switch (type)
+    {
+        case GL_BYTE:
+        case GL_UNSIGNED_BYTE:
+            return 1;
+        case GL_SHORT:
+        case GL_UNSIGNED_SHORT:
+            return 2;
+        case GL_INT:
+        case GL_UNSIGNED_INT:
+        case GL_FLOAT:
+            return 4;
+        default:
+            return 0;
+    }
 }

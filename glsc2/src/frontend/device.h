@@ -35,6 +35,7 @@ typedef struct {
     size_t                textures_size;
     cl_mem                  textures        [HOST_TEXTURES_SIZE];
 
+    cl_command_queue    queue;
 } device_shared_objects_t;
 
 typedef struct {
@@ -263,6 +264,7 @@ void device_create_shared_objects(device_shared_objects_t* shared)
 
     CL_ASSIGN_CHECK(shared->mem_vertex_attrib_pointer, clCreateBuffer(shared->context, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &error));
 
+    CL_ASSIGN_CHECK(shared->queue, clCreateCommandQueue(shared->context, shared->device_id, 0, &error));
 }
 
 void device_create_context(device_context_t *context, device_shared_objects_t* shared) {
@@ -613,25 +615,25 @@ static cl_image_format get_image_format_from_colorbuffer_mode(cl_uint color_buff
 
     switch (color_buffer_mode) {
         case TEX_R8:
-            image_format = {
+            image_format = (cl_image_format) {
                 .image_channel_order = CL_R,
                 .image_channel_data_type = CL_UNSIGNED_INT8,
             };
             break;
         case TEX_RG8:
-            image_format = {
+            image_format = (cl_image_format) {
                 .image_channel_order = CL_RG,
                 .image_channel_data_type = CL_UNSIGNED_INT8,
             };
             break;
         case TEX_RGB8:
-            image_format = {
+            image_format = (cl_image_format) {
                 .image_channel_order = CL_RGB,
                 .image_channel_data_type = CL_UNSIGNED_INT8,
             };
             break;
         case TEX_RGB565:
-            image_format = {
+            image_format = (cl_image_format) {
                 .image_channel_order = CL_RGB,
                 .image_channel_data_type = CL_UNORM_SHORT_565,
             };
@@ -640,14 +642,14 @@ static cl_image_format get_image_format_from_colorbuffer_mode(cl_uint color_buff
             CL_UNSUPORTED_MAPING("TEX_RGBA4");
             break;
         case TEX_RGB5_A1:
-            image_format = {
+            image_format = (cl_image_format) {
                 .image_channel_order = CL_RGBA,
                 .image_channel_data_type = CL_UNORM_SHORT_555,
             };
             break;
         default:
         case TEX_RGBA8:
-            image_format = {
+            image_format = (cl_image_format) {
                 .image_channel_order = CL_RGBA,
                 .image_channel_data_type = CL_UNSIGNED_INT8,
             };
@@ -726,9 +728,8 @@ int device_create_stencilbuffer(device_context_t* context, size_t width, size_t 
     return renderbuffer_id;
 }
 
-int device_create_ro_buffer(device_context_t* context, size_t size) 
+int device_create_ro_buffer(device_shared_objects_t* shared, size_t size) 
 {
-    device_shared_objects_t* shared = context->shared_objects;
     size_t buffer_id = shared->buffers_size;
 
     CL_ASSIGN_CHECK(shared->buffers[buffer_id], clCreateBuffer(shared->context, CL_MEM_READ_ONLY, size, NULL, &error));
@@ -801,10 +802,9 @@ void device_write_2d_texture(device_context_t* context, size_t texture_id, size_
     #endif
 }
 
-void device_write_on_buffer(device_context_t* context, size_t buffer_id, size_t offset, size_t size, const void* data) 
+void device_write_on_buffer(device_shared_objects_t* shared, size_t buffer_id, size_t offset, size_t size, const void* data) 
 {
-    cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
-    device_shared_objects_t* shared = context->shared_objects;
+    cl_command_queue queue = shared->queue;
 
     CL_CHECK(clEnqueueWriteBuffer(
         queue,
@@ -976,11 +976,20 @@ void device_load_framebuffer(device_context_t *context, size_t colorbuffer_id, s
     CL_CHECK(clSetKernelArg(kernel, 25 + offset, sizeof(c_viewport_height),   &c_viewport_height));
     CL_CHECK(clSetKernelArg(kernel, 26 + offset, sizeof(c_viewport_width),    &c_viewport_width));
     CL_CHECK(clSetKernelArg(kernel, 27 + offset, sizeof(c_width_tiles),       &c_width_tiles));
-    
 }
 
 void device_clear_framebuffer(device_context_t *context, cl_ulong clear_write_values, cl_ushort clear_enabled_data, cl_uint deferred_clear) 
 {
+    if (context->c_deferred_clear) // pending clear
+    {
+        if (context->cummulative_vertices)
+        {
+        }
+        else
+        {
+
+        }
+    }
     context->c_clear_write_values = clear_write_values;
     context->c_clear_enabled_data = clear_enabled_data;
     context->c_deferred_clear = deferred_clear;
@@ -1161,12 +1170,12 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
     }
 
     // triangle setup
-    static cl_uint vertex_offset_arg = 5;
-    static cl_uint primitive_config_arg = vertex_offset_arg+6;
+    const cl_uint vertex_offset_arg = 5;
+    const cl_uint primitive_config_arg = vertex_offset_arg+6;
 
     {
         size_t gwo = context->assembled_triangles;
-        size_t gws = size/3; // for GL_TRIANGLES mode
+        size_t gws = size/3; // for GL_TRIANGLES mode, TODO: add other modes
         cl_uint vertex_offset = context->cummulative_vertices;
         
 
@@ -1277,7 +1286,30 @@ static void device_launch_triangle_rasterization(device_context_t *context) {
 
 }
 
-void device_get_pixels(device_context_t *context, size_t x, size_t y, size_t width, size_t height, void* pixels) 
+static void device_launch_clear_framebuffer(device_context_t *context) {
+    printf("DEBUG: Forced framebuffer clear.\n");
+
+    cl_kernel kernel = context->clear_kernel;
+    cl_command_queue command_queue = context->raster_command_queue;
+
+    cl_uint count = 0; 
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &context->t_color_buffer));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &context->t_depth_buffer));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &context->t_stencil_buffer));
+    #ifndef DEVICE_IMAGE_ENABLED
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(context->c_color_buffer_mode), &context->c_color_buffer_mode));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(context->c_viewport_width), &context->c_viewport_width));
+    #endif
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(context->c_clear_write_values), &context->c_clear_write_values));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(context->c_clear_enabled_data), &context->c_clear_enabled_data));
+
+    size_t global_work_offset[2] = {0, 0};
+    size_t global_work_size[2] = {context->c_viewport_width, context->c_viewport_height};
+
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, NULL));
+}
+
+void device_launch_read_pixels(device_context_t *context, size_t x, size_t y, size_t width, size_t height, void* pixels) 
 {
     cl_command_queue queue = context->raster_command_queue;
 

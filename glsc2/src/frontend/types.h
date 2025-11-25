@@ -108,16 +108,14 @@ typedef struct
 } active_texture_t;
 
 typedef struct {
-    GLboolean used;
-    GLenum target;
     GLsizeiptr size;
     GLenum usage;
-    cl_mem mem;
+    uint32_t id;
 } buffer_t;
 
 typedef struct {
     GLenum target;
-    uint32_t position;
+    uint32_t binding;
 } attachment_t;
 
 typedef struct {
@@ -130,6 +128,7 @@ typedef struct {
     GLenum internalformat;
     GLsizei width, height;
     GLboolean used;
+    size_t id;
 } renderbuffer_t;
 
 typedef struct { GLfloat n, f; } depth_range_t;
@@ -149,9 +148,9 @@ typedef struct {
     stencil_operation_t operation;
 } stencil_face_data_t;
 
-// typedef struct { 
-//     stencil_face_data_t front, back; 
-// } stencil_data_t;
+typedef struct { 
+    stencil_face_data_t front, back; 
+} stencil_data_t;
 
 typedef struct {
     GLint left, bottom;
