@@ -108,6 +108,8 @@
 #define TEX_RGBA4                           4
 #define TEX_RGB5_A1                         5
 #define TEX_RGB565                          6
+#define TEX_STENCIL_INDEX8                  7
+#define TEX_DEPTH_COMPONENT16               8
 
 // Depth
 #define DEPTH_FUNC_NEVER                            0

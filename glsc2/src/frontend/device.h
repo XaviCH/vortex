@@ -1,6 +1,7 @@
 #ifndef FRONTEND_DEVICE_H
 #define FRONTEND_DEVICE_H
 
+
 #include <CL/opencl.h>
 #include <constants.device.h>
 #include <frontend/types.h>
@@ -197,7 +198,7 @@ void device_create_context(device_context_t *context, device_shared_objects_t* s
  * @post creates a program from a binary source file
  * @return id of the program created.
  */
-int device_create_program_from_binary(device_context_t* context, size_t source_size, const unsigned char* source_code);
+int device_create_program_from_binary(device_shared_objects_t* context, size_t source_size, const unsigned char* source_code);
 
 
 
@@ -477,9 +478,8 @@ void device_finish(device_context_t* context) {
     CL_CHECK(clFinish(context->raster_command_queue));
 }
 
-int device_create_program_from_binary(device_context_t* context, size_t size, const unsigned char* binary) 
+int device_create_program_from_binary(device_shared_objects_t* shared, size_t size, const unsigned char* binary) 
 {
-    device_shared_objects_t* shared = context->shared_objects;
     size_t program_id = shared->program_size;
 
     CL_ASSIGN_CHECK(shared->programs[program_id], clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &size, &binary, NULL, &error));
@@ -491,6 +491,66 @@ int device_create_program_from_binary(device_context_t* context, size_t size, co
 
     return program_id;
 }
+
+uint8_t device_config_is_full(device_context_t* context) 
+{
+    return context->primitive_config == TRIANGLE_PRIMITIVE_CONFIGS - 1;
+}
+
+inline uint32_t get_num_tris(GLenum mode, GLsizei count) {
+    switch (mode)
+    {
+        default:
+        case GL_TRIANGLES: return count / 3;
+        case GL_TRIANGLE_FAN: return count - 2;
+        case GL_TRIANGLE_STRIP: return count - 2;
+    }
+}
+
+inline uint32_t get_num_primitives(GLenum mode, uint32_t count) {
+    switch (mode)
+    {
+    case GL_POINTS: return count;
+    case GL_LINES: return count / 2;
+    case GL_LINE_LOOP: return count;
+    case GL_LINE_STRIP: return count - 1;
+    case GL_TRIANGLES: return count / 3;
+    case GL_TRIANGLE_STRIP: return count <= 2 ? 0 : count - 2;
+    case GL_TRIANGLE_FAN: return count <= 2 ? 0 : count - 2;
+    default: return 0; 
+    }
+}
+
+inline uint32_t get_num_primitives_assembled(GLenum mode, size_t offset, size_t size) {
+    switch (mode)
+    {
+    case GL_POINTS: return size - offset;
+    case GL_LINES: return (size - offset) / 2;
+    case GL_LINE_LOOP: return size - offset;
+    case GL_LINE_STRIP: return size - offset - 1;
+    case GL_TRIANGLES: return (size - offset) / 3;
+    case GL_TRIANGLE_STRIP: return size - offset - 2;
+    case GL_TRIANGLE_FAN: return size - offset - 2;
+    default: return 0;
+    }
+};
+
+inline int32_t get_primitive_offset(GLenum mode) {
+    switch (mode)
+    {
+    case GL_POINTS:
+    case GL_LINES:
+    case GL_TRIANGLES: 
+        return 0;
+    case GL_LINE_LOOP: 
+    case GL_LINE_STRIP:
+    case GL_TRIANGLE_FAN:
+        return -1;
+    case GL_TRIANGLE_STRIP:
+        return -2;
+    default: return 0; 
+    }
+} 
 
 size_t device_get_program_uniform_size(device_shared_objects_t* shared, size_t program_id) 
 {
@@ -514,6 +574,47 @@ size_t device_get_program_vertex_attrib_size(device_shared_objects_t* shared, si
     CL_CHECK(clGetKernelInfo(*kernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_attib_size, NULL));
 
     return vertex_attib_size;
+}
+
+void device_load_renderbuffer_to_colorbuffer(device_context_t* context, size_t renderbuffer_id, uint32_t texture_mode) 
+{
+    context->t_color_buffer = context->shared_objects->renderbuffers[renderbuffer_id];
+    context->c_color_buffer_mode = texture_mode;
+}
+
+void device_load_renderbuffer_to_depthbuffer(device_context_t* context, size_t renderbuffer_id, uint32_t texture_mode) 
+{
+    context->t_depth_buffer = context->shared_objects->renderbuffers[renderbuffer_id];
+    // context->c_depth_buffer_mode = texture_mode;
+}
+
+void device_load_renderbuffer_to_stencilbuffer(device_context_t* context, size_t renderbuffer_id, uint32_t texture_mode) 
+{
+    context->t_stencil_buffer = context->shared_objects->renderbuffers[renderbuffer_id];
+    // context->c_stencil_buffer_mode = texture_mode;
+}
+
+void device_load_texture_to_colorbuffer(device_context_t* context, size_t texture_id, uint32_t texture_mode)
+{
+    context->t_color_buffer = context->shared_objects->textures[texture_id];
+    context->c_color_buffer_mode = texture_mode;
+}
+
+void device_load_texture_to_depthbuffer(device_context_t* context, size_t texture_id, uint32_t texture_mode)
+{
+    context->t_depth_buffer = context->shared_objects->textures[texture_id];
+    //context->c_depth_buffer_mode = texture_mode;
+}
+
+void device_load_texture_to_stencilbuffer(device_context_t* context, size_t texture_id, uint32_t texture_mode)
+{
+    context->t_stencil_buffer = context->shared_objects->textures[texture_id];
+    //context->c_stencil_buffer_mode = texture_mode;
+}
+
+uint32_t device_has_triangles_enqueued(device_context_t* context)
+{
+    return context->assembled_triangles != 0;
 }
 
 static uint32_t size_from_name_type(const char* name_type) {
@@ -595,11 +696,13 @@ static size_t get_bytes_from_colorbuffer_mode(cl_uint color_buffer_mode)
 {
     switch (color_buffer_mode) {
         case TEX_R8:
+        case TEX_STENCIL_INDEX8:
             return 1;
         case TEX_RG8:
         case TEX_RGBA4:
         case TEX_RGB5_A1:
         case TEX_RGB565:
+        case TEX_DEPTH_COMPONENT16:
             return 2;
         case TEX_RGB8:
             return 3;
@@ -620,6 +723,11 @@ static cl_image_format get_image_format_from_colorbuffer_mode(cl_uint color_buff
                 .image_channel_data_type = CL_UNSIGNED_INT8,
             };
             break;
+        case TEX_STENCIL_INDEX8:
+            image_format = (cl_image_format) {
+                .image_channel_order = CL_A,
+                .image_channel_data_type = CL_UNSIGNED_INT8,
+            };
         case TEX_RG8:
             image_format = (cl_image_format) {
                 .image_channel_order = CL_RG,
@@ -647,6 +755,11 @@ static cl_image_format get_image_format_from_colorbuffer_mode(cl_uint color_buff
                 .image_channel_data_type = CL_UNORM_SHORT_555,
             };
             break;
+        case TEX_DEPTH_COMPONENT16:
+            image_format = (cl_image_format) {
+                .image_channel_order = CL_DEPTH, // this may be not supported for OpenCL 1.2 check cl_khr_depth_images extension
+                .image_channel_data_type = CL_UNSIGNED_INT16,
+            };
         default:
         case TEX_RGBA8:
             image_format = (cl_image_format) {
@@ -657,6 +770,36 @@ static cl_image_format get_image_format_from_colorbuffer_mode(cl_uint color_buff
     }
 
     return image_format;
+}
+
+void device_link_contexts(device_context_t* prev, device_context_t* next) 
+{
+    next->previous_wait_event = prev->fine_wait_event;
+} 
+
+uint32_t device_has_clear_pending(device_context_t* context)
+{
+    return context->c_deferred_clear != 0;
+}
+
+size_t device_create_renderbuffer(device_shared_objects_t* shared, size_t width, size_t height, cl_uint texture_mode)
+{
+    size_t renderbuffer_id = shared->renderbuffers_size;
+
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        cl_image_format image_format = get_image_format_from_colorbuffer_mode(texture_mode);
+        CL_ASSIGN_CHECK(shared->renderbuffers[renderbuffer_id], clCreateImage2D(context, CL_MEM_READ_WRITE, &image_format, width, height, 0, NULL, &error));
+    }
+    #else
+    {
+        size_t buffer_size = width * height * get_bytes_from_colorbuffer_mode(texture_mode);
+        CL_ASSIGN_CHECK(shared->renderbuffers[renderbuffer_id], clCreateBuffer(shared->context, CL_MEM_READ_WRITE, buffer_size, NULL, &error));
+    }
+    #endif
+
+    shared->renderbuffers_size += 1;
+    return renderbuffer_id;
 }
 
 int device_create_colorbuffer(device_context_t* context, size_t width, size_t height, cl_uint color_buffer_mode) 
@@ -1138,7 +1281,7 @@ void device_launch_range_triangle_assembly(device_context_t *context, size_t num
     context->vertex_command_queue_index = (context->vertex_command_queue_index + 1) % DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
 }
 
-static void device_launch_arrays_triangle_assembly(device_context_t *context, size_t num_vertices, size_t size)
+static void device_launch_arrays_triangle_assembly(device_context_t *context, size_t config_id, size_t num_vertices, size_t size)
 {
     cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
 

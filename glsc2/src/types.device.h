@@ -1,6 +1,9 @@
 #ifndef TYPES_DEVICE_H
 #define TYPES_DEVICE_H
 
+#define CL_TARGET_OPENCL_VERSION 120
+
+
 #ifdef __COMPILER_RELATIVE_PATH__
 #include <constants.device.h>
 #else
@@ -280,9 +283,9 @@ typedef struct
 {
     cl_uint front_misc;
     cl_uint back_misc;
-} stencil_data_t;
+} gl_stencil_data_t;
 
-void set_stencil_data_func(stencil_data_t *stencil_data, face_t face, cl_uint func, cl_uint mask, cl_uint ref)
+void set_stencil_data_func(gl_stencil_data_t *stencil_data, face_t face, cl_uint func, cl_uint mask, cl_uint ref)
 {
     cl_uint *face_misc = face == FRONT ? &stencil_data->front_misc : &stencil_data->back_misc;
     *face_misc &= ~(0x7u << 0);
@@ -294,7 +297,7 @@ void set_stencil_data_func(stencil_data_t *stencil_data, face_t face, cl_uint fu
     *face_misc &= ~(0xFFu << 24);
     *face_misc |= (ref & 0xFFu) << 24;
 }
-void set_stencil_data_op(stencil_data_t *stencil_data, face_t face, cl_uint sfail, cl_uint dpass, cl_uint dpfail)
+void set_stencil_data_op(gl_stencil_data_t *stencil_data, face_t face, cl_uint sfail, cl_uint dpass, cl_uint dpfail)
 {
     cl_uint *face_misc = face == FRONT ? &stencil_data->front_misc : &stencil_data->back_misc;
     *face_misc &= ~(0x7u << 4);
@@ -387,9 +390,9 @@ typedef struct
 typedef struct
 {
     sampler2D_t sampler2D;
-#ifndef DEVICE_IMAGE_ENABLED
+    #ifndef DEVICE_IMAGE_ENABLED
     cl_ushort width, height;
-#endif
+    #endif
 } gl_texture_data_t;
 
 #endif

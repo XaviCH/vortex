@@ -1,8 +1,6 @@
 #ifndef __types_h__
 #define __types_h__ 1
 
-#include <CL/opencl.h>
-#include <GLSC2/glsc2.h>
 #include <types.device.h>
 
 typedef struct {
@@ -26,7 +24,7 @@ typedef struct {
 
 typedef struct {
     GLuint binding;
-    void *pointer;
+    const void *pointer;
 } vertex_attribute_binding_t;
 
 typedef union {
@@ -88,7 +86,7 @@ typedef struct
 } pixel_store_t;
 
 typedef struct {
-    uint16_t s, t, min_filter, mag_filter;
+    GLint s, t, min_filter, mag_filter;
 } texture_wraps_t;
 
 typedef struct
