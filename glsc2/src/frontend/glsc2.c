@@ -149,7 +149,6 @@ static texture_t                _textures                [HOST_TEXTURES_SIZE];
 
 static uint8_t                  rop_config_updated;
 static uint32_t                 rop_config_count;
-static rop_config_t             rop_config;
 
 static uint8_t                  _uniform_data_updated;
 static size_t                   _current_program;
@@ -239,8 +238,8 @@ static GLboolean            is_valid_stencil_operation(GLenum operation);
 static GLboolean            is_valid_program(GLuint program);
 static GLboolean            is_valid_tex_parameter(GLenum pname, GLint param);
 static GLboolean            is_valid_face(GLenum face);
-static GLboolean is_valid_uniform_data(GLint location, size_t size, GLenum type);
-static GLboolean is_valid_arg_size_type(arg_data_t* arg_data, size_t size, GLenum type);
+static GLboolean            is_valid_uniform_data(GLint location, size_t size, GLenum type);
+static GLboolean            is_valid_arg_size_type(arg_data_t* arg_data, size_t size, GLenum type);
 static GLboolean            is_valid_draw_mode(GLenum mode);
 // getters
 static attachment_size_t    get_attachment_size(attachment_t* attachment);
@@ -249,14 +248,14 @@ static uint16_t             get_clear_depth();
 static cl_ushort            get_clear_enabled_data(GLbitfield mask);
 static uint8_t              get_clear_stencil();
 static cl_ulong             get_clear_write_values();
-static uint32_t             get_depth_data();
+static depth_data_t         get_depth_data();
 static GLboolean*           get_enabled_pointer(GLenum cap);
 static render_mode_t        get_render_mode(GLenum mode);
 static GLint*               get_tex_parameter_pointer(GLenum pname);
 static uint32_t             get_texture_mode_from_internalformat(GLenum internalformat);
-static cl_ushort            get_enabled_data(framebuffer_data_t framebuffer);
-static uint32_t             get_stencil_data();
-static rop_config_t         get_rop_config(GLenum mode, framebuffer_data_t framebuffer_data);
+static enabled_data_t       get_enabled_data();
+static gl_stencil_data_t    get_stencil_data();
+static rop_config_t         get_rop_config(GLenum mode);
 // setters
 static void set_uniform_data(GLint location, size_t size, const void* data);
 static void set_vertex_attribute(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
@@ -264,18 +263,25 @@ static GLboolean is_valid_renderbuffer_internalformat(GLenum internalformat);
 static void set_stencil_operation(stencil_operation_t *stencil_operation, GLenum sfail, GLenum dfail, GLenum dpass);
 static void set_stencil_function(stencil_function_t *stencil_function, GLenum func, GLint ref, GLuint mask);
 // gl input parsers
-static size_t sizeof_vertex_attribute_type(GLenum type);
-static GLboolean gl_tex_parameter_to_tex_wrap(GLint param, uint32_t* result);
-static uint32_t rgba_to_uint32(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
-static GLboolean gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size);
-static GLboolean gl_type_to_vertex_attribute_type(GLenum gl_type, unsigned int* va_type);
+static size_t       sizeof_vertex_attribute_type(GLenum type);
+static GLboolean    gl_tex_parameter_to_tex_wrap(GLint param, uint32_t* result);
+static uint32_t     gl_blend_equation_to_blend_equation(GLenum equation);
+static uint32_t     gl_blend_func_to_blend_func(GLenum func);
+static uint32_t     gl_blend_equation_to_blend_equation(GLenum equation);
+static uint32_t     gl_depth_func_to_depth_func(GLenum func);
+static uint32_t     gl_stencil_func_to_stencil_func(GLenum func);
+static uint32_t     gl_stencil_op_to_stencil_op(GLenum op);
+
+static uint32_t     rgba_to_uint32(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
+static GLboolean    gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size);
+static GLboolean    gl_type_to_vertex_attribute_type(GLenum gl_type, unsigned int* va_type);
 // 
 static void flush_device_context(device_context_t* context);
-static size_t update_current_context();
+static size_t update_current_context(size_t num_vertices, GLenum draw_mode);
 static void                 update_colorbuffer();
 static void                 update_depthbuffer();
 static void                 update_stencilbuffer();
-static void                 update_framebuffer();
+static void                 update_device_framebuffer();
 
 
 // TODO: Dependant texture throws this if (id >= MAX_COMBINED_TEXTURE_IMAGE_UNITS) RETURN_ERROR(GL_INVALID_OPERATION);
@@ -293,7 +299,7 @@ GL_APICALL void GL_APIENTRY glBindBuffer (GLenum target, GLuint buffer)
 {
     if (target != GL_ARRAY_BUFFER) RETURN_ERROR(GL_INVALID_ENUM);
 
-    if (buffer >= _buffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
+    if (buffer > _buffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
 
     _buffer_binding = buffer;
 }
@@ -302,7 +308,7 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer
 {
     if (target != GL_FRAMEBUFFER) RETURN_ERROR(GL_INVALID_ENUM);
 
-    if (framebuffer >= _framebuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
+    if (framebuffer > _framebuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
 
     if (_current_program > 0)
     {
@@ -317,7 +323,7 @@ GL_APICALL void GL_APIENTRY glBindRenderbuffer (GLenum target, GLuint renderbuff
 {
     if (target != GL_RENDERBUFFER) RETURN_ERROR(GL_INVALID_ENUM);
 
-    if (renderbuffer >= _renderbuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
+    if (renderbuffer > _renderbuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
 
     _renderbuffer_binding = renderbuffer;
 }
@@ -326,7 +332,7 @@ GL_APICALL void GL_APIENTRY glBindTexture (GLenum target, GLuint texture)
 {
     if (target != GL_TEXTURE_2D) RETURN_ERROR(GL_INVALID_ENUM);
 
-    if (texture >= _texture_sz) RETURN_ERROR(GL_INVALID_OPERATION);
+    if (texture > _texture_sz) RETURN_ERROR(GL_INVALID_OPERATION);
 
     texture_unit_updated = 1;
     texture_unit_bindings[active_texture_unit] = texture;
@@ -431,6 +437,26 @@ GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLs
     device_write_on_buffer(&device_shared_objects, buffer->id, offset, size, data);
 }
 
+
+static attachment_size_t get_any_attachment() 
+{
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+
+    if (framebuffer->color_attachment0.binding) 
+    {
+        return get_attachment_size(&framebuffer->color_attachment0);
+    }
+
+    if (framebuffer->depth_attachment.binding) 
+    {
+        return get_attachment_size(&framebuffer->depth_attachment);
+    }
+
+    if (framebuffer->stencil_attachment.binding) 
+    {
+        return get_attachment_size(&framebuffer->stencil_attachment);
+    }
+}
 
 GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target) 
 {
@@ -594,8 +620,9 @@ GL_APICALL GLuint GL_APIENTRY glCreateProgram (void)
     device_create_context(contexts[context_sz], &device_shared_objects);
     
     context_sz += 1;
+    _program_sz += 1;
     
-    return context_sz;
+    return _program_sz;
 }
 
 GL_APICALL void GL_APIENTRY glCullFace (GLenum mode) 
@@ -662,8 +689,6 @@ GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index)
     vertex_attribute_datas[index].misc &= ~VERTEX_ATTRIBUTE_ACTIVE_POINTER;
 }
 
-
-
 GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) 
 {
     if (_current_program == 0) RETURN_ERROR(GL_INVALID_OPERATION);
@@ -678,7 +703,9 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     device_context_t* device_context = contexts[_current_program-1];
 
-    size_t config_id = update_current_context();
+    size_t num_vertices = count * 3;
+
+    size_t config_id = update_current_context(num_vertices, mode);
     
     device_launch_arrays_triangle_assembly(device_context, config_id, count - first, count);
 }
@@ -699,7 +726,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
 
     device_context_t* device_context = contexts[_current_program-1];
 
-    size_t config_id = update_current_context();
+    size_t config_id = update_current_context(end-start, mode);
 
     device_launch_range_triangle_assembly(device_context, end - start, count, indices, config_id);
 }
@@ -729,7 +756,6 @@ GL_APICALL void GL_APIENTRY glFinish (void)
     {
         device_finish(contexts[_current_program-1]);
     }
-    else NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glFlush (void) 
@@ -738,7 +764,6 @@ GL_APICALL void GL_APIENTRY glFlush (void)
     {
         flush_device_context(contexts[_current_program-1]);
     }
-    else NOT_IMPLEMENTED;
 }
 
 GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) 
@@ -1126,6 +1151,10 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
     {
         device_get_program_vertex_attrib_arg_data(shared, program_ptr->program_id, i, &program_ptr->vertex_attrib_arg_datas[i]);
     }
+
+    device_context_t* device_context = contexts[program-1];
+
+    device_load_program(device_context, program_ptr->program_id);
 }
 
 GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, void *data) 
@@ -1138,7 +1167,9 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 
     if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    device_context_t *context = contexts[_current_program];
+    if (_current_program == 0) RETURN_ERROR(GL_INVALID_OPERATION); // TODO operation independant of the program
+
+    device_context_t *context = contexts[_current_program-1];
 
     flush_device_context(context);
 
@@ -1328,8 +1359,8 @@ GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenu
     
     if (levels != 1) NOT_IMPLEMENTED; // Mipmaps not supported yet
 
-    int texture_mode = get_texture_mode_from_internalformat(internalformat);
-    texture->id = device_create_2d_texture(contexts[_current_program], width, height, texture_mode);
+    uint32_t texture_mode = get_texture_mode_from_internalformat(internalformat);
+    texture->id = device_create_2d_texture(&device_shared_objects, width, height, texture_mode);
     texture->width = width;
     texture->height = height;
     texture->internalformat = internalformat;
@@ -1534,6 +1565,7 @@ GL_APICALL void GL_APIENTRY glUseProgram (GLuint program)
 
         flush_device_context(current_context);
         device_link_contexts(current_context, contexts[program-1]);
+
     }
 
     _current_program=program;
@@ -1649,8 +1681,6 @@ static GLboolean is_valid_blend_equation(GLenum mode)
     }
 }
 
-
-
 static GLboolean is_valid_blend_function(GLenum mode)
 {
     switch (mode)
@@ -1678,7 +1708,7 @@ static GLboolean is_valid_blend_function(GLenum mode)
 
 static GLboolean is_valid_program(GLuint program)
 {
-    return program < _program_sz && program != 0;
+    return program <= _program_sz && program != 0;
 }
 
 static GLboolean is_valid_renderbuffer_internalformat(GLenum internalformat) 
@@ -1783,12 +1813,14 @@ static cl_ushort get_clear_enabled_data(GLbitfield mask)
     return clear_enabled_data;
 };
 
-static uint32_t get_depth_data()
+static depth_data_t get_depth_data()
 {
-    uint32_t depth_data = 0;
+    depth_data_t depth_data;
 
-    depth_data |= (_depth_func  &  0xFFFFu) <<  0;
-    depth_data |= (_masks.depth &  0xFFFFu) << 16;
+    set_depth_data_func(
+        &depth_data, 
+        gl_depth_func_to_depth_func(_depth_func)
+    );
 
     return depth_data;
 }
@@ -1957,6 +1989,12 @@ static void update_colorbuffer()
     
     framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
     
+    if (framebuffer->color_attachment0.binding == 0) 
+    {
+        device_load_dummy_to_colorbuffer(context);
+        return;
+    }
+
     if (framebuffer->color_attachment0.target == GL_RENDERBUFFER) {
         renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->color_attachment0.binding-1]; 
         
@@ -1983,6 +2021,12 @@ static void update_depthbuffer()
     device_context_t *context = contexts[_current_program-1]; 
     
     framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+
+    if (framebuffer->depth_attachment.binding == 0) 
+    {
+        device_load_dummy_to_depthbuffer(context);
+        return;
+    }
 
     if (framebuffer->depth_attachment.target == GL_RENDERBUFFER) {
         renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->depth_attachment.binding-1]; 
@@ -2011,6 +2055,12 @@ static void update_stencilbuffer()
     
     framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
     
+    if (framebuffer->stencil_attachment.binding == 0) 
+    {
+        device_load_dummy_to_stencilbuffer(context);
+        return;
+    }
+
     if (framebuffer->stencil_attachment.target == GL_RENDERBUFFER) {
         renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->stencil_attachment.binding-1]; 
         
@@ -2032,17 +2082,21 @@ static void update_stencilbuffer()
     }
 }
 
-static void update_framebuffer() 
+static void update_device_framebuffer() 
 {
-    device_context_t *context = contexts[_current_program]; 
+    device_context_t *context = contexts[_current_program-1]; 
     
-    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding];
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
     
     update_colorbuffer();
 
     update_depthbuffer();
 
-    update_stencilbuffer();    
+    update_stencilbuffer();
+
+    attachment_size_t size = get_any_attachment();
+    
+    device_set_framebuffer_state(context, size.width, size.height, TEX_RGBA8); // TOOD: modify
 }
 
 
@@ -2140,11 +2194,13 @@ static GLboolean is_valid_draw_mode(GLenum mode)
     }
 }
 
-inline uint32_t get_deferred_clear() {
+static uint32_t get_deferred_clear()
+{
     return c_clear_enabled_data != 0;
 }
 
-static inline uint32_t get_blending_color() {
+static uint32_t get_blending_color() 
+{
     return rgba_to_uint32(
         _blend_data.color.red, 
         _blend_data.color.green, 
@@ -2152,78 +2208,115 @@ static inline uint32_t get_blending_color() {
         _blend_data.color.alpha
     );
 }
-inline uint32_t get_blending_data() {
-    uint32_t blend_data = 0;
 
-    blend_data |= (_blend_data.equation.modeRGB     & 0x3u) << 0;
-    blend_data |= (_blend_data.equation.modeAlpha   & 0x3u) << 2;
-    blend_data |= (_blend_data.func.srcRGB          & 0xFu) << 16;
-    blend_data |= (_blend_data.func.srcAlpha        & 0xFu) << 20;
-    blend_data |= (_blend_data.func.dstRGB          & 0xFu) << 24;
-    blend_data |= (_blend_data.func.dstAlpha        & 0xFu) << 28;
+static blending_data_t get_blending_data() 
+{
+    blending_data_t blending_data;
 
-    return blend_data;
+    set_blending_data_equation(
+        &blending_data, 
+        gl_blend_equation_to_blend_equation(_blend_data.equation.modeRGB), 
+        gl_blend_equation_to_blend_equation(_blend_data.equation.modeAlpha)
+    );
+
+    set_blending_data_function_src(
+        &blending_data, 
+        gl_blend_func_to_blend_func(_blend_data.func.srcRGB),
+        gl_blend_func_to_blend_func(_blend_data.func.srcAlpha)
+    );
+
+    set_blending_data_function_dst(
+        &blending_data, 
+        gl_blend_func_to_blend_func(_blend_data.func.dstRGB),
+        gl_blend_func_to_blend_func(_blend_data.func.dstAlpha)
+    );
+
+    return blending_data;
 }
 
-
-inline cl_ushort get_enabled_data(framebuffer_data_t framebuffer) 
+inline enabled_data_t get_enabled_data() 
 {
-    cl_ushort enabled_data;
+    enabled_data_t enabled_data;
 
-    cl_ushort enabled_color = 0;
-    cl_ushort enabled_depth = 0;
-    cl_ushort enabled_stencil = 0;
+    set_enabled_color_data(
+        &enabled_data,
+        _masks.color.r,
+        _masks.color.g,
+        _masks.color.b,
+        _masks.color.a
+    );
 
-    enabled_color = 
-        (_masks.color.r ? ENABLED_COLOR_CHANNEL_RED    : 0) |
-        (_masks.color.g ? ENABLED_COLOR_CHANNEL_GREEN  : 0) |
-        (_masks.color.b ? ENABLED_COLOR_CHANNEL_BLUE   : 0) |
-        (_masks.color.a ? ENABLED_COLOR_CHANNEL_ALPHA  : 0) ;
+    set_enabled_depth_data(
+        &enabled_data,
+        _masks.depth
+    );
     
-    if (framebuffer.depth.mem != _rasterization_mem.globals.depthbuffer) 
-        enabled_depth = _masks.depth ? ENABLED_DEPTH_CHANNEL : 0;
-    
-    if (framebuffer.stencil.mem != _rasterization_mem.globals.stencilbuffer) 
-        enabled_stencil = _masks.stencil.front & 0xFFu;
-
-    enabled_data = enabled_color | enabled_depth | enabled_stencil;
-
-    printf("ecolor=%x, edepth=%x, estencil=%x\n", enabled_color, enabled_depth, enabled_stencil);
+    set_enabled_stencil_data(
+        &enabled_data,
+        _masks.stencil.front
+    );
 
     return enabled_data;
 }
 
-static uint32_t get_stencil_data() 
+static gl_stencil_data_t get_stencil_data() 
 {
-    uint32_t stencil_data = 0;
+    gl_stencil_data_t stencil_data;
 
-    stencil_data |= (_stencil_data.front.function.func      &  0xFu) <<  0;
-    stencil_data |= (_stencil_data.front.operation.sfail    &  0xFu) <<  4;
-    stencil_data |= (_stencil_data.front.operation.dpass    &  0xFu) <<  8;
-    stencil_data |= (_stencil_data.front.operation.dpfail   &  0xFu) << 12;
-    stencil_data |= (_stencil_data.front.function.mask      & 0xFFu) << 16;
-    stencil_data |= (_stencil_data.front.function.ref       & 0xFFu) << 24;
+    
+    set_stencil_data_func(
+        &stencil_data,
+        FRONT,
+        gl_stencil_func_to_stencil_func(_stencil_data.front.function.func),
+        _stencil_data.front.function.mask,
+        _stencil_data.front.function.ref
+    );
+
+    set_stencil_data_func(
+        &stencil_data,
+        BACK,
+        gl_stencil_func_to_stencil_func(_stencil_data.back.function.func),
+        _stencil_data.back.function.mask,
+        _stencil_data.back.function.ref
+    );
+
+    set_stencil_data_op(
+        &stencil_data,
+        FRONT,
+        gl_stencil_op_to_stencil_op(_stencil_data.front.operation.sfail),
+        gl_stencil_op_to_stencil_op(_stencil_data.front.operation.dpass),
+        gl_stencil_op_to_stencil_op(_stencil_data.front.operation.dpfail)
+    );
+
+    set_stencil_data_op(
+        &stencil_data,
+        BACK,
+        gl_stencil_op_to_stencil_op(_stencil_data.back.operation.sfail),
+        gl_stencil_op_to_stencil_op(_stencil_data.back.operation.dpass),
+        gl_stencil_op_to_stencil_op(_stencil_data.back.operation.dpfail)
+    );
 
     return stencil_data;
 }
 
-static rop_config_t get_rop_config(GLenum mode, framebuffer_data_t framebuffer_data) 
+static rop_config_t get_rop_config(GLenum mode) 
 {
     rop_config_t rop_config;
     
-    rop_config = (rop_config_t) {
-        .render_mode = get_render_mode(mode),
-        .blending_data = get_blending_data(),
+    rop_config = (rop_config_t) 
+    {
+        .render_mode    = get_render_mode(mode),
+        .blending_data  = get_blending_data(),
         .blending_color = get_blending_color(),
-        .stencil_data = get_stencil_data(),
-        .depth_data = get_depth_data(),
-        .enabled_data = get_enabled_data(framebuffer_data),
+        .stencil_data   = get_stencil_data().front_misc, // TODO: add for both
+        .depth_data     = get_depth_data().misc,
+        .enabled_data   = get_enabled_data(),
     };
     
     return rop_config;
 }
 
-static size_t update_current_context()
+static size_t update_current_context(size_t vertices, GLenum draw_mode)
 {
     device_context_t* device_context = contexts[_current_program-1];
 
@@ -2240,13 +2333,37 @@ static size_t update_current_context()
 
     if (flush_required)
     {
-        flush_device_context(device_context);
+        if (device_has_triangles_enqueued(device_context)) 
+        {
+            device_launch_triangle_rasterization(device_context);
+        } 
+    }
+
+    if (_framebuffer_updated) 
+    {
+        update_device_framebuffer();
     }
 
     if (vertex_attibute_updated)
     {
         device_load_vertex_attributes(device_context, vertex_attributes, vertex_attribute_datas);
-        vertex_attibute_updated = 0;
+        for (size_t va=0; va < DEVICE_VERTEX_ATTRIBUTE_SIZE; ++va) 
+        {
+            vertex_attribute_binding_t *va_binding = &vertex_attribute_binding[va]; 
+            if (va_binding->binding != 0) 
+            {
+                buffer_t *buffer = &_buffers[va_binding->binding-1];
+                device_bind_buffer_to_vertex_attribute_pointer(device_context, va, buffer->id);
+            } 
+            else if (va_binding->pointer != NULL)
+            {
+                device_bind_host_pointer_to_vertex_attribute_pointer(device_context, va, sizeof(float[vertices]), (void*) va_binding->pointer);
+            } 
+            else
+            {
+                device_bind_dummy_to_vertex_attribute_pointer(device_context, va);
+            }
+        }
     }
 
     if (texture_unit_updated) {
@@ -2273,10 +2390,27 @@ static size_t update_current_context()
         }
 
         device_load_texture_datas(device_context, texture_datas);
+
+        for (size_t unit = 0; unit < DEVICE_TEXTURE_UNITS; ++unit)
+        {
+            size_t binding = texture_unit_bindings[unit];
+            if (binding == 0)
+            {
+                device_bind_dummy_texture_unit(device_context, unit);
+            }
+            else
+            {
+                texture_t *texture = &_textures[binding-1];
+                device_bind_texture_unit(device_context, unit, texture->id);
+            }
+
+        }
+
     }
 
     if (new_config_required)
     {
+        rop_config_t rop_config = get_rop_config(draw_mode);
         device_load_config(device_context, rop_config_count, &rop_config, _programs[_current_program].uniform_data);
     }
 
@@ -2284,6 +2418,7 @@ static size_t update_current_context()
     texture_unit_updated = 0;
     rop_config_updated = 0;
     _uniform_data_updated = 0;
+    _framebuffer_updated = 0;
 
     return rop_config_count;
 }
@@ -2377,4 +2512,108 @@ static GLboolean gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* v
     #undef CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE
 
     return GL_TRUE;
+}
+
+static uint32_t gl_blend_equation_to_blend_equation(GLenum equation)
+{
+    switch (equation)
+    {
+        default:
+        case GL_FUNC_ADD: 
+            return BLEND_FUNC_ADD;
+        case GL_FUNC_SUBTRACT:
+            return BLEND_FUNC_SUBTRACT;
+        case GL_FUNC_REVERSE_SUBTRACT:
+            return BLEND_FUNC_REVERSE_SUBTRACT;
+    }
+}
+
+static uint32_t gl_blend_func_to_blend_func(GLenum func)
+{
+    #define CASE(_NAME) \
+        case GL_##_NAME: return BLEND_##_NAME;
+
+    switch (func)
+    {
+        default:
+        CASE(ZERO);
+        CASE(ONE);
+        CASE(ONE_MINUS_SRC_COLOR);
+        CASE(SRC_ALPHA);
+        CASE(ONE_MINUS_SRC_ALPHA);
+        CASE(DST_ALPHA);
+        CASE(ONE_MINUS_DST_ALPHA);
+        CASE(DST_COLOR);
+        CASE(ONE_MINUS_DST_COLOR);
+        CASE(SRC_ALPHA_SATURATE);             
+        CASE(CONSTANT_COLOR);       
+        CASE(ONE_MINUS_CONSTANT_COLOR);       
+        CASE(CONSTANT_ALPHA);       
+        CASE(ONE_MINUS_CONSTANT_ALPHA);
+    }
+
+    #undef CASE
+}
+
+static uint32_t gl_stencil_func_to_stencil_func(GLenum func)
+{
+    #define CASE(_NAME) \
+        case GL_##_NAME: return STENCIL_FUNC_##_NAME;
+
+    switch (func)
+    {
+        default:
+        CASE(NEVER);
+        CASE(LESS);
+        CASE(EQUAL);
+        CASE(LEQUAL);
+        CASE(GREATER);
+        CASE(NOTEQUAL);
+        CASE(GEQUAL);
+        CASE(ALWAYS);
+    }
+
+    #undef CASE
+}
+
+static uint32_t gl_stencil_op_to_stencil_op(GLenum op)
+{
+    #define CASE(_NAME) \
+        case GL_##_NAME: return STENCIL_OP_##_NAME;
+
+    switch (op)
+    {
+        default:
+        CASE(KEEP);
+        CASE(ZERO);
+        CASE(REPLACE);
+        CASE(INCR);
+        CASE(DECR);
+        CASE(INVERT);
+        CASE(INCR_WRAP);
+        CASE(DECR_WRAP);
+    }
+
+    #undef CASE
+}
+
+static uint32_t gl_depth_func_to_depth_func(GLenum func)
+{
+    #define CASE(_NAME) \
+        case GL_##_NAME: return DEPTH_FUNC_##_NAME;
+
+    switch (func)
+    {
+        default:            
+        CASE(NEVER)
+        CASE(LESS)
+        CASE(EQUAL)
+        CASE(LEQUAL)
+        CASE(GREATER)
+        CASE(NOTEQUAL)
+        CASE(GEQUAL)
+        CASE(ALWAYS)
+    }
+
+    #undef CASE
 }

@@ -472,9 +472,16 @@ void device_create_context(device_context_t *context, device_shared_objects_t* s
     context->vertex_command_queue_index = 0;
     context->primitive_config = 0;
     context->previous_wait_event = NULL;
+    context->c_deferred_clear = 0;
+
+    for (size_t unit; unit < DEVICE_TEXTURE_UNITS; ++unit)
+    {
+        context->texture_units[unit] = shared->mem_texture;
+    }
 }
 
-void device_finish(device_context_t* context) {
+void device_finish(device_context_t* context) 
+{
     CL_CHECK(clFinish(context->raster_command_queue));
 }
 
@@ -497,7 +504,8 @@ uint8_t device_config_is_full(device_context_t* context)
     return context->primitive_config == TRIANGLE_PRIMITIVE_CONFIGS - 1;
 }
 
-inline uint32_t get_num_tris(GLenum mode, GLsizei count) {
+inline uint32_t get_num_tris(GLenum mode, GLsizei count) 
+{
     switch (mode)
     {
         default:
@@ -561,7 +569,7 @@ size_t device_get_program_uniform_size(device_shared_objects_t* shared, size_t p
     cl_uint uniform_size;
     CL_CHECK(clGetKernelInfo(*kernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &uniform_size, NULL));
 
-    return uniform_size;
+    return uniform_size - 1;
 }
 
 size_t device_get_program_vertex_attrib_size(device_shared_objects_t* shared, size_t program_id)
@@ -573,7 +581,22 @@ size_t device_get_program_vertex_attrib_size(device_shared_objects_t* shared, si
     cl_uint vertex_attib_size;
     CL_CHECK(clGetKernelInfo(*kernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_attib_size, NULL));
 
-    return vertex_attib_size;
+    return vertex_attib_size - 1;
+}
+
+static void device_load_dummy_to_colorbuffer(device_context_t *context) 
+{
+    context->t_color_buffer = context->shared_objects->mem_depthbuffer; // chage to colorbuffer
+}
+
+static void device_load_dummy_to_depthbuffer(device_context_t *context) 
+{
+    context->t_depth_buffer = context->shared_objects->mem_depthbuffer;
+}
+
+static void device_load_dummy_to_stencilbuffer(device_context_t *context) 
+{
+    context->t_stencil_buffer = context->shared_objects->mem_stencilbuffer;
 }
 
 void device_load_renderbuffer_to_colorbuffer(device_context_t* context, size_t renderbuffer_id, uint32_t texture_mode) 
@@ -689,7 +712,7 @@ void device_get_program_vertex_attrib_arg_data(device_shared_objects_t* shared, 
 
     arg_data->size = size_from_name_type(type_name);
     arg_data->type = type_from_name_type(type_name);
-    strcpy(arg_data->name, name);
+    strcpy(arg_data->name, &name[1]);
 }
 
 static size_t get_bytes_from_colorbuffer_mode(cl_uint color_buffer_mode) 
@@ -881,9 +904,8 @@ int device_create_ro_buffer(device_shared_objects_t* shared, size_t size)
     return buffer_id;
 }
 
-int device_create_2d_texture(device_context_t* context, size_t width, size_t height, cl_uint texture_mode) 
+int device_create_2d_texture(device_shared_objects_t* shared, size_t width, size_t height, cl_uint texture_mode) 
 {
-    device_shared_objects_t* shared = context->shared_objects;
     size_t texture_id = shared->textures_size;
 
     #ifdef DEVICE_IMAGE_ENABLED
@@ -962,6 +984,11 @@ void device_write_on_buffer(device_shared_objects_t* shared, size_t buffer_id, s
     ));
 }
 
+void device_bind_dummy_texture_unit(device_context_t* context, size_t unit_index)
+{
+    context->texture_units[unit_index] = context->shared_objects->mem_texture;
+}
+
 void device_bind_texture_unit(device_context_t* context, size_t unit_index, size_t texture_id) 
 {
     context->texture_units[unit_index] = context->shared_objects->textures[texture_id];
@@ -989,7 +1016,22 @@ void device_bind_buffer_to_vertex_attribute_pointer(device_context_t* context, s
     cl_mem mem_attribute = context->shared_objects->buffers[buffer_id];
 
     context->mem_vertex_attrib_pointers[attrib_index] = mem_attribute;
-    CL_CHECK(clSetKernelArg(context->vertex_shader_kernel, 3 + attrib_index, sizeof(mem_attribute), &mem_attribute));
+}
+
+void device_bind_host_pointer_to_vertex_attribute_pointer(device_context_t* context, size_t attrib_index, size_t size, void* pointer) 
+{
+    cl_mem mem_attribute;
+
+    CL_ASSIGN_CHECK(mem_attribute, clCreateBuffer(context->shared_objects->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, size, pointer, &error));
+
+    context->mem_vertex_attrib_pointers[attrib_index] = mem_attribute;
+}
+
+void device_bind_dummy_to_vertex_attribute_pointer(device_context_t* context, size_t attrib_index)
+{
+    cl_mem mem_attribute = context->shared_objects->mem_vertex_attrib_pointer;
+
+    context->mem_vertex_attrib_pointers[attrib_index] = mem_attribute;
 }
 
 void device_reset_context(device_context_t *context) 
@@ -1053,6 +1095,68 @@ void device_load_program(device_context_t *context, int program_id)
     CL_CHECK(clSetKernelArg(kernel, 25 + offset, sizeof(context->c_viewport_height),   &context->c_viewport_height));
     CL_CHECK(clSetKernelArg(kernel, 26 + offset, sizeof(context->c_viewport_width),    &context->c_viewport_width));
     CL_CHECK(clSetKernelArg(kernel, 27 + offset, sizeof(context->c_width_tiles),       &context->c_width_tiles));
+}
+
+void device_set_framebuffer_state(device_context_t *context, size_t framebuffer_width, size_t framebuffer_height, cl_uint color_buffer_mode) 
+{
+    context->c_viewport_height  = framebuffer_height;
+    context->c_viewport_width   = framebuffer_width;
+    context->c_height_tiles      = ((framebuffer_height-1) / CR_TILE_SIZE) + 1;
+    context->c_width_tiles      = ((framebuffer_width-1) / CR_TILE_SIZE) + 1;
+    context->c_height_bins       = ((framebuffer_height-1) / (CR_TILE_SIZE * CR_BIN_SIZE)) + 1;
+    context->c_width_bins       = ((framebuffer_width-1) / (CR_TILE_SIZE * CR_BIN_SIZE)) + 1;
+    context->c_color_buffer_mode = color_buffer_mode;
+    
+    
+    cl_uint c_viewport_height = framebuffer_height;
+    cl_uint c_viewport_width  = framebuffer_width;
+    cl_uint c_height_bins      = context->c_height_bins;
+    cl_uint c_width_bins      = context->c_width_bins;
+    cl_uint c_height_tiles    = context->c_height_tiles;
+    cl_uint c_width_tiles      = context->c_width_tiles;
+    cl_uint c_num_bins      = c_height_bins * c_width_bins;
+
+    cl_uint c_color_buffer_mode = context->c_color_buffer_mode;
+
+    cl_kernel kernel;
+
+    kernel = context->triangle_setup_arrays_kernel;
+    CL_CHECK(clSetKernelArg(kernel, 10, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_width),    &c_viewport_width));
+
+    kernel = context->triangle_setup_range_kernel;
+    CL_CHECK(clSetKernelArg(kernel, 11, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 12, sizeof(c_viewport_width),    &c_viewport_width));
+
+    kernel = context->bin_raster_kernel;
+    cl_uint extra = 0;
+    #ifdef DEVICE_IMAGE_ENABLED
+        extra = 1;
+    #endif
+    CL_CHECK(clSetKernelArg(kernel, 11 + extra, sizeof(c_height_bins),        &c_height_bins));
+    CL_CHECK(clSetKernelArg(kernel, 14 + extra, sizeof(c_num_bins),   &c_num_bins));
+    CL_CHECK(clSetKernelArg(kernel, 16 + extra, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 17 + extra, sizeof(c_viewport_width),    &c_viewport_width));
+    CL_CHECK(clSetKernelArg(kernel, 18 + extra, sizeof(c_width_bins),        &c_width_bins));
+
+    kernel = context->coarse_raster_kernel;
+    CL_CHECK(clSetKernelArg(kernel, 17 + extra, sizeof(c_height_tiles),      &c_height_tiles));
+    CL_CHECK(clSetKernelArg(kernel, 21 + extra, sizeof(c_num_bins),          &c_num_bins));
+    CL_CHECK(clSetKernelArg(kernel, 22 + extra, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 23 + extra, sizeof(c_viewport_width),    &c_viewport_width));
+    CL_CHECK(clSetKernelArg(kernel, 24 + extra, sizeof(c_width_bins),        &c_width_bins));
+    CL_CHECK(clSetKernelArg(kernel, 25 + extra, sizeof(c_width_tiles),       &c_width_tiles));
+
+    // if there is a fine raster kernel loaded, update its args too
+    if (context->fine_raster_kernel == NULL) return;
+
+    kernel = context->fine_raster_kernel;
+    cl_uint offset = get_kernel_fine_raster_offset();
+
+    CL_CHECK(clSetKernelArg(kernel, 21 + offset, sizeof(c_color_buffer_mode), &c_color_buffer_mode));
+    CL_CHECK(clSetKernelArg(kernel, 25 + offset, sizeof(c_viewport_height),   &c_viewport_height));
+    CL_CHECK(clSetKernelArg(kernel, 26 + offset, sizeof(c_viewport_width),    &c_viewport_width));
+    CL_CHECK(clSetKernelArg(kernel, 27 + offset, sizeof(c_width_tiles),       &c_width_tiles));
 }
 
 void device_load_framebuffer(device_context_t *context, size_t colorbuffer_id, size_t depthbuffer_id, size_t stencilbuffer_id, size_t framebuffer_width, size_t framebuffer_height, cl_uint color_buffer_mode) 
@@ -1292,10 +1396,11 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
 
         cl_kernel kernel = context->vertex_shader_kernel;
         cl_uint counter = 0;
+
         CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attribs));
         CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_datas));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_subbuffers[context->primitive_config-1]));
-        for (cl_uint ap = 0; ap < DEVICE_VERTEX_ATTRIBUTE_SIZE; ++ap)
+        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_subbuffers[config_id]));
+        for (cl_uint ap = 0; ap < context->vertex_attrib_pointers_size; ++ap)
         {
             CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_pointers[ap]));
         }
@@ -1308,25 +1413,25 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
             CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
         }
         #endif
-
         CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, NULL));
     }
 
     // triangle setup
     const cl_uint vertex_offset_arg = 5;
-    const cl_uint primitive_config_arg = vertex_offset_arg+6;
+    const cl_uint render_mode_arg = 7; 
+    const cl_uint primitive_config_arg = 12;
+    const cl_uint c_config_id = config_id;
 
     {
         size_t gwo = context->assembled_triangles;
         size_t gws = size/3; // for GL_TRIANGLES mode, TODO: add other modes
         cl_uint vertex_offset = context->cummulative_vertices;
         
-
-        CL_CHECK(clSetKernelArg(context->triangle_setup_range_kernel, vertex_offset_arg, sizeof(vertex_offset), &vertex_offset));
-        CL_CHECK(clSetKernelArg(context->triangle_setup_range_kernel, primitive_config_arg, sizeof(context->primitive_config), &context->primitive_config));
+        CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, vertex_offset_arg, sizeof(vertex_offset), &vertex_offset));
+        CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, render_mode_arg, sizeof(context->render_mode), &context->render_mode));
+        CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, primitive_config_arg, sizeof(c_config_id), &c_config_id));
         
-        CL_CHECK(clEnqueueNDRangeKernel(queue, context->triangle_setup_range_kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_event[context->vertex_command_queue_index]));
-
+        CL_CHECK(clEnqueueNDRangeKernel(queue, context->triangle_setup_arrays_kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_event[context->vertex_command_queue_index]));
     }
 
     // update data
@@ -1419,15 +1524,16 @@ static void device_launch_triangle_rasterization(device_context_t *context) {
         global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
         global_work_size[1] = local_work_size[1];
         CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->fine_raster_kernel, 2, NULL, global_work_size, local_work_size, wait_events, context->previous_wait_event == NULL ? NULL : &context->previous_wait_event, &context->fine_wait_event));
-        CL_CHECK(clFinish(context->raster_command_queue));
+        // CL_CHECK(clFinish(context->raster_command_queue));
     }
 
-    // reset atomics
+    // TODO: reset atomics
     {
 
     }
 
 }
+
 
 static void device_launch_clear_framebuffer(device_context_t *context) {
     printf("DEBUG: Forced framebuffer clear.\n");

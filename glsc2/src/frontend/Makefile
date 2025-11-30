@@ -11,6 +11,7 @@ KERNELS_POCL_C = $(wildcard kernels/*.pocl.c)
 KERNELS_CL_C = $(wildcard kernels/*.ocl.c)
 
 INCLUDES = -I$(SRC_PATH) -I$(INCLUDE_PATH)
+LIBS = -lOpenCL
 
 LIB_PATH = ../lib
 
@@ -27,7 +28,7 @@ HEADER_FILES = $(wildcard *.h)
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC
 
 libGLSC2.so: glsc2.o
-	$(CC) -o $@ $< -shared
+	$(CC) -o $@ $< -shared $(LIBS)
 
 glsc2.c.o: glsc2_tmp.c config.h debug.h types.h kernel.c $(KERNELS_C)
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC
