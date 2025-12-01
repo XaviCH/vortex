@@ -1,4 +1,3 @@
-triangle
+*.exe
+*.ppm
 *.o
-*.pocl
-*.log

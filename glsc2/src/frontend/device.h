@@ -651,9 +651,11 @@ static uint32_t size_from_name_type(const char* name_type) {
     const char* substr_size;
     RETURN_IF_SIZE_FROM("float");
     RETURN_IF_SIZE_FROM("int");
+    RETURN_IF_SIZE_FROM("uint");
     RETURN_IF_SIZE_FROM("short");
     RETURN_IF_SIZE_FROM("char");
     RETURN_IF_SIZE_FROM("bool");
+
     #undef RETURN_IF_SIZE_FROM
 
     // OpenGL - OpenCL special types
@@ -663,15 +665,19 @@ static uint32_t size_from_name_type(const char* name_type) {
     #else
     if (strncmp(name_type, "uchar", sizeof("uchar") -1) == 0) return 1;
     #endif
-    printf("%s\n", name_type);
+
+    printf("ERROR not found size for type_name=%s\n", name_type);
 }
 static uint32_t type_from_name_type(const char* name_type) {
     if (strncmp(name_type, "float",  sizeof("float") -1)  == 0) return GL_FLOAT;
     if (strncmp(name_type, "int",    sizeof("int")   -1)  == 0) return GL_INT;
+    if (strncmp(name_type, "uint",    sizeof("uint")   -1)  == 0) return GL_INT;
     if (strncmp(name_type, "short",  sizeof("short") -1)  == 0) return GL_SHORT;
     if (strncmp(name_type, "char",   sizeof("char")  -1)  == 0) return GL_BYTE;
     if (strncmp(name_type, "bool",   sizeof("bool")  -1)  == 0) return GL_BYTE;
     
+    printf("ERROR: not found type for type name=%s\n", name_type);
+
     // OpenGL - OpenCL special types
     // if (strcmp(name_type, "sampler2D_t") == 0) return SAMPLER2D_T;
     // if (strncmp(name_type, "uchar*", sizeof("uchar*")-1)  == 0) return IMAGE_T;
@@ -925,10 +931,9 @@ int device_create_2d_texture(device_shared_objects_t* shared, size_t width, size
     return texture_id;
 }
 
-void device_write_2d_texture(device_context_t* context, size_t texture_id, size_t width, size_t height, int texture_mode, const void* data) 
+void device_write_2d_texture(device_shared_objects_t* shared, size_t texture_id, size_t width, size_t height, int texture_mode, const void* data) 
 {
-    cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
-    device_shared_objects_t* shared = context->shared_objects;
+    cl_command_queue queue = shared->queue;
 
     #ifdef DEVICE_IMAGE_ENABLED
     {

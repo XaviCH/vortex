@@ -266,6 +266,8 @@ static uint32_t     gl_blend_equation_to_blend_equation(GLenum equation);
 static uint32_t     gl_depth_func_to_depth_func(GLenum func);
 static uint32_t     gl_stencil_func_to_stencil_func(GLenum func);
 static uint32_t     gl_stencil_op_to_stencil_op(GLenum op);
+static uint32_t     gl_tex_filter_to_tex_filter(GLint param);
+static uint32_t     gl_tex_wrap_to_tex_wrap(GLint param);
 
 static uint32_t     rgba_to_uint32(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 static GLboolean    gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size);
@@ -1426,11 +1428,11 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
 
     if (xoffset != 0 || yoffset != 0) NOT_IMPLEMENTED; // Subtextures not supported yet
     
-    if (texture->internalformat == GL_RGBA8 && format == GL_RGBA && type == GL_UNSIGNED_BYTE ) NOT_IMPLEMENTED; // Only RGBA8 supported yet
+    if (! (texture->internalformat == GL_RGBA8 && format == GL_RGBA && type == GL_UNSIGNED_BYTE) ) NOT_IMPLEMENTED; // Only RGBA8 supported yet
 
     int texture_mode = get_texture_mode_from_internalformat(texture->internalformat);
 
-    device_write_2d_texture(contexts[_current_program], texture->id, width, height, texture_mode, pixels);
+    device_write_2d_texture(&device_shared_objects, texture->id, width, height, texture_mode, pixels);
 }
 
 #define GENERIC_UNIFORM(_SIZE, _TYPE, _LOCATION, ...) \
@@ -2111,22 +2113,38 @@ static void update_device_framebuffer()
 }
 
 
-static GLboolean gl_tex_parameter_to_tex_wrap(GLint param, uint32_t* result)
+static uint32_t gl_tex_wrap_to_tex_wrap(GLint param)
 {
     switch (param)
     {
-    case GL_REPEAT: 
-        *result = TEXTURE_WRAP_REPEAT;
-        break;
-    case GL_CLAMP_TO_EDGE: 
-        *result = TEXTURE_WRAP_CLAMP_TO_EDGE;
-        break;
-    case GL_MIRRORED_REPEAT: 
-        *result = TEXTURE_WRAP_MIRRORED_REPEAT;
-        break;
-    default: return GL_FALSE;
+        default:
+        case GL_REPEAT: 
+            return TEXTURE_WRAP_REPEAT;
+        case GL_CLAMP_TO_EDGE: 
+            return TEXTURE_WRAP_CLAMP_TO_EDGE;
+        case GL_MIRRORED_REPEAT: 
+            return TEXTURE_WRAP_MIRRORED_REPEAT;
     }
-    return GL_TRUE;
+}
+
+static uint32_t gl_tex_filter_to_tex_filter(GLint param)
+{
+    switch (param)
+    {
+        default:
+        case GL_NEAREST:
+            return TEXTURE_FILTER_NEAREST;
+            case GL_LINEAR:
+            return TEXTURE_FILTER_LINEAR;
+        case GL_NEAREST_MIPMAP_NEAREST:
+            return TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST;
+        case GL_NEAREST_MIPMAP_LINEAR:
+            return TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR;
+        case GL_LINEAR_MIPMAP_NEAREST:
+            return TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST;
+        case GL_LINEAR_MIPMAP_LINEAR:
+            return TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR;
+    }
 }
 
 static GLboolean is_valid_tex_parameter(GLenum pname, GLint param)
@@ -2382,15 +2400,37 @@ static size_t update_current_context(size_t vertices, GLenum draw_mode)
 
         for (size_t i = 0; i < DEVICE_TEXTURE_UNITS; ++i)
         {
-            texture_t *texture = &_textures[texture_unit_bindings[i]];
+            if (texture_unit_bindings[i] == 0) continue;
+
+            texture_t *texture = &_textures[texture_unit_bindings[i]-1];
+
             gl_texture_data_t *texture_data = &texture_datas[i];
             sampler2D_t *sampler2D = &texture_data->sampler2D;
 
-            set_sampler2D_internalformat(sampler2D, texture->internalformat);
-            set_sampler2D_mag_filter(sampler2D, texture->wraps.mag_filter);
-            set_sampler2D_min_filter(sampler2D, texture->wraps.min_filter);
-            set_sampler2D_wrap_s(sampler2D, texture->wraps.s);
-            set_sampler2D_wrap_t(sampler2D, texture->wraps.t);
+            set_sampler2D_internalformat(
+                sampler2D, 
+                get_texture_mode_from_internalformat(texture->internalformat)
+            );
+
+            set_sampler2D_mag_filter(
+                sampler2D,
+                gl_tex_filter_to_tex_filter(texture->wraps.mag_filter)
+            );
+
+            set_sampler2D_min_filter(
+                sampler2D, 
+                gl_tex_filter_to_tex_filter(texture->wraps.min_filter)
+            );
+
+            set_sampler2D_wrap_s(
+                sampler2D, 
+                gl_tex_wrap_to_tex_wrap(texture->wraps.s)
+            );
+
+            set_sampler2D_wrap_t(
+                sampler2D, 
+                gl_tex_wrap_to_tex_wrap(texture->wraps.t)
+            );
 
             #ifndef DEVICE_IMAGE_ENABLED
             {
@@ -2479,7 +2519,7 @@ static GLboolean is_valid_uniform_data(GLint location, size_t size, GLenum type)
 
     arg_data_t *arg_data = &program->uniform_arg_datas[location];
 
-    if (is_valid_arg_size_type(arg_data, 1, GL_FLOAT) == GL_FALSE) return GL_FALSE;
+    if (is_valid_arg_size_type(arg_data, size, type) == GL_FALSE) return GL_FALSE;
 
     return GL_TRUE;
 }

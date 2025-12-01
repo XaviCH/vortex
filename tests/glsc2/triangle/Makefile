@@ -1,4 +1,4 @@
-PROJECT = triangle.exe
+PROJECT = main.exe
 
 SRCS = main.cc
 
