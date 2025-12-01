@@ -19,10 +19,15 @@
 #endif
 
 #ifdef C_OPENCL_HOST
-#define KERNEL_FILE_EXT ".ocl"
+#define KERNEL_FILE_EXT ".cl.o"
 #endif
 #ifdef C_OPENCL_VORTEX
-#define KERNEL_FILE_EXT ".pocl"
+#define KERNEL_FILE_EXT ".cl.o"
+#endif
+
+
+#ifndef GL_RGBA8
+#define GL_RGBA8 GL_RGBA
 #endif
 
 #ifdef C_OPENGL_HOST
@@ -216,7 +221,7 @@ static ppm_image_t *read_ppm(const char *filename)
 
 static void print_ppm(const char* filename, size_t width, size_t height, const uint8_t *data) {
   FILE *f = fopen(filename, "wb");
-  fprintf(f, "P6\n%i %i 255\n", width, height);
+  fprintf(f, "P6\n%d %d 255\n", width, height);
   for (int y=0; y<height; y++) {
       for (int x=0; x<width; x++) {
           fputc(data[0], f); 
@@ -242,7 +247,7 @@ static int read_file(const char* filename, file_t* file) {
 
   FILE* fp = fopen(filename, "r");
   if (NULL == fp) {
-    fprintf(stderr, "Failed to load the file.");
+    fprintf(stderr, "Failed to load the file %s.\n", filename);
     return -1;
   }
   fseek(fp , 0 , SEEK_END);

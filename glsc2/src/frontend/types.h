@@ -2,6 +2,7 @@
 #define __types_h__ 1
 
 #include <types.device.h>
+#include <GLSC2/glsc2.h>
 
 typedef struct {
     GLint x, y;

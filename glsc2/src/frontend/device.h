@@ -1283,7 +1283,7 @@ void device_load_vertex_attributes(device_context_t *context, const float attrib
 void device_load_config(device_context_t *context, size_t config_id, rop_config_t* rop_config, cl_uchar* uniform_data) 
 {
     context->render_mode = rop_config->render_mode;
-    
+
     cl_event write_wait_event[2];
 
     CL_CHECK(clEnqueueWriteBuffer(
@@ -1321,38 +1321,44 @@ void device_load_raster_parameters(device_context_t *context) {
    
 }
 
+void device_launch_vertex_shader(device_context_t *context, size_t num_vertices, size_t config_id)
+{
+    cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
+    cl_kernel kernel = context->vertex_shader_kernel;
+
+    size_t gw_offset = context->cummulative_vertices;
+    size_t gw_size = num_vertices;
+
+    cl_uint counter = 0;
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attribs));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_datas));
+    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_subbuffers[config_id]));
+    for (cl_uint ap = 0; ap < context->vertex_attrib_pointers_size; ++ap)
+    {
+        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_pointers[ap]));
+    }
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_vertex_buffer)); 
+    }
+    #else
+    {
+        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
+    }
+    #endif
+
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gw_offset, &gw_size, NULL, 0, NULL, NULL));
+
+    CL_CHECK(clFinish(queue));
+}
+
 /*
 */
 void device_launch_range_triangle_assembly(device_context_t *context, size_t num_vertices, size_t size, const unsigned short *data, size_t config) 
 {
+    device_launch_vertex_shader(context, num_vertices, config);
+
     cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
-
-    // vertex shader
-    {
-        size_t gwo = context->cummulative_vertices;
-        size_t gws = num_vertices;
-
-        cl_kernel kernel = context->vertex_shader_kernel;
-        cl_uint counter = 0;
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attribs));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_datas));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_subbuffers[config]));
-        for (cl_uint ap = 0; ap < context->vertex_attrib_pointers_size; ++ap)
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_pointers[ap]));
-        }
-        #ifdef DEVICE_IMAGE_ENABLED
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_vertex_buffer)); 
-        }
-        #else
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
-        }
-        #endif
-
-        CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, NULL));
-    }
 
     // triangle setup
     const cl_uint index_buffer_arg = 1;
@@ -1361,9 +1367,9 @@ void device_launch_range_triangle_assembly(device_context_t *context, size_t num
     const cl_uint primitive_config_arg = 13;
     const cl_uint primitive_config = config;
 
+    size_t gwo = context->assembled_triangles;
+    size_t gws = size/3; // for GL_TRIANGLES mode
     {
-        size_t gwo = context->assembled_triangles;
-        size_t gws = size/3; // for GL_TRIANGLES mode
         cl_uint vertex_offset = context->cummulative_vertices;
         
         cl_mem range_buffer;
@@ -1387,34 +1393,9 @@ void device_launch_range_triangle_assembly(device_context_t *context, size_t num
 
 static void device_launch_arrays_triangle_assembly(device_context_t *context, size_t config_id, size_t num_vertices, size_t size)
 {
+    device_launch_vertex_shader(context, num_vertices, config_id);
+
     cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
-
-    // vertex shader
-    {
-        size_t gwo = context->cummulative_vertices;
-        size_t gws = num_vertices;
-
-        cl_kernel kernel = context->vertex_shader_kernel;
-        cl_uint counter = 0;
-
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attribs));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_datas));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_subbuffers[config_id]));
-        for (cl_uint ap = 0; ap < context->vertex_attrib_pointers_size; ++ap)
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_pointers[ap]));
-        }
-        #ifdef DEVICE_IMAGE_ENABLED
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_vertex_buffer)); 
-        }
-        #else
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
-        }
-        #endif
-        CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, NULL));
-    }
 
     // triangle setup
     const cl_uint vertex_offset_arg = 5;
@@ -1422,9 +1403,10 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
     const cl_uint primitive_config_arg = 12;
     const cl_uint c_config_id = config_id;
 
+    size_t gwo = context->assembled_triangles;
+    size_t gws = size/3; // for GL_TRIANGLES mode, TODO: add other modes
+
     {
-        size_t gwo = context->assembled_triangles;
-        size_t gws = size/3; // for GL_TRIANGLES mode, TODO: add other modes
         cl_uint vertex_offset = context->cummulative_vertices;
         
         CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, vertex_offset_arg, sizeof(vertex_offset), &vertex_offset));

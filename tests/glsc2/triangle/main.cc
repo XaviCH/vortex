@@ -30,13 +30,15 @@ int main() {
 
   // Set Up Frame Context
   glGenFramebuffers(1, &framebuffer);
-  glGenRenderbuffers(1, &colorbuffer);
+  glGenTextures(1, &colorbuffer);
 
-  glBindRenderbuffer(GL_RENDERBUFFER, colorbuffer);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, WIDTH, HEIGHT);
-
+  glBindTexture(GL_TEXTURE_2D, colorbuffer);
+  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, WIDTH, HEIGHT);
+  // glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, WIDTH, HEIGHT);
+  
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorbuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorbuffer, 0);
+  // glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorbuffer);
 
   glViewport(0, 0, WIDTH, HEIGHT); 
 
@@ -54,7 +56,7 @@ int main() {
 
   glGenBuffers(1, &vbo);
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBufferData(GL_ARRAY_BUFFER,sizeof(color), &color, GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(color), &color, GL_STATIC_DRAW);
   glVertexAttribPointer(loc_color, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
   glEnableVertexAttribArray(loc_color); 
 

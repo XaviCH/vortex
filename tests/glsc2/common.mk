@@ -51,7 +51,7 @@ driver ?= opencl
 # Driver assigment
 ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
-	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/libGLSCv2.opencl.so
+	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/src/frontend/libGLSC2.so
 else
 ifeq ($(driver), gles)
 	CXXFLAGS += -DC_OPENGL_HOST
@@ -61,7 +61,7 @@ ifeq ($(driver), vortex)
 	CXXFLAGS += -DC_OPENCL_VORTEX
 	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/libGLSCv2.vortex.so $(VORTEX_EGL_PATH)/lib/egl.so
 else
-ERROR_MSG = ERROR: driver=$(driver) is not a valid driver, driver=[opencl|gles|vortex]
+	ERROR_MSG = ERROR: driver=$(driver) is not a valid driver, driver=[opencl|gles|vortex]
 -include error
 endif
 endif
@@ -86,21 +86,23 @@ endif
 endif
 endif
 
+GLSLC = $(VORTEX_GLSC_PATH)/src/compiler/glslc
+
 OBJS := $(addsuffix .o, $(notdir $(SRCS)))
 CSHADERS := $(addsuffix .o, $(notdir $(SHADERS)))
 
-all: $(PROJECT) $(CSHADERS)
+all: $(PROJECT) $(OBJS)
  
 kernel.pocl: kernel.cl
 	LD_LIBRARY_PATH=$(LLVM_POCL)/lib:$(POCL_CC_PATH)/lib:$(LLVM_VORTEX)/lib:$(LD_LIBRARY_PATH) LLVM_PREFIX=$(LLVM_VORTEX) POCL_DEBUG=all POCL_VORTEX_CFLAGS="$(K_CFLAGS)" POCL_VORTEX_LDFLAGS="$(K_LDFLAGS)" $(POCL_CC_PATH)/bin/poclcc -o kernel.pocl kernel.cl
 
-kernel.ocl: kernel.cl
-	$(VORTEX_GLSC_PATH)/clcompiler kernel.cl kernel.ocl -DC_OPENCL_HOST -cl-kernel-arg-info
-
 # build objects
 
 %.glsl.o: %.glsl
-	$(VORTEX_GLSC_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -I$(VORTEX_GLSC_PATH)/src/kernels/shaders -I$(VORTEX_GLSC_PATH)/src/kernels -cl-kernel-arg-info
+	$(VORTEX_GLSC_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -I$(VORTEX_GLSC_PATH)/src/kernels/shaders -I$(VORTEX_GLSC_PATH)/src/kernels -I$(VORTEX_GLSC_PATH)/src/ -cl-kernel-arg-info
+
+%.cl.o: %.cl
+	$(GLSLC) $< $@
 
 %.cc.o: %.cc
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -120,6 +122,9 @@ $(PROJECT): $(OBJS)
 
 run: $(PROJECT) $(CSHADERS)
 	./$(PROJECT) $(OPTS)
+
+display:
+	feh -Z -F --force-aliasing -Y image.ppm
 
 run-hostdriver: $(PROJECT)
 	./$(PROJECT) $(OPTS)
@@ -143,8 +148,6 @@ else
 	XCL_EMULATION_MODE=$(TARGET) XRT_INI_PATH=$(XRT_SYN_DIR)/xrt.ini EMCONFIG_PATH=$(FPGA_BIN_DIR) XRT_DEVICE_INDEX=$(XRT_DEVICE_INDEX) XRT_XCLBIN_PATH=$(FPGA_BIN_DIR)/vortex_afu.xclbin LD_LIBRARY_PATH=$(XILINX_XRT)/lib:$(POCL_RT_PATH)/lib:$(VORTEX_RT_PATH)/xrt:$(LD_LIBRARY_PATH) ./$(PROJECT) $(OPTS)	
 endif
 
-display:
-	feh -Z -F --force-aliasing -Y image.ppm
 
 clean:
 	rm -rf $(PROJECT) *.o .depend

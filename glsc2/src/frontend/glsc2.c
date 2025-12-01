@@ -1,6 +1,5 @@
 #include <math.h>
 #include <string.h>
-#include <GLSC2/glsc2.h>
 #include <stdio.h>
 
 // #include "debug.h"
@@ -127,9 +126,6 @@ rasterization_data_t _rasterization_data = {
 };
 
 
-rasterization_program_container_t _rasterization_programs;
-rasterization_mem_container_t _rasterization_mem;
-
 cl_ulong c_clear_write_values;
 cl_ushort c_clear_enabled_data = 0;
 active_deferred_clear_t _deferred_clear;
@@ -224,7 +220,6 @@ void __context_constructor__()
 } 
 
 
-
 /****** Interface for utils & inline functions ******\
  * Utility or inline function are implemented at the end of the file. 
 */
@@ -241,11 +236,12 @@ static GLboolean            is_valid_face(GLenum face);
 static GLboolean            is_valid_uniform_data(GLint location, size_t size, GLenum type);
 static GLboolean            is_valid_arg_size_type(arg_data_t* arg_data, size_t size, GLenum type);
 static GLboolean            is_valid_draw_mode(GLenum mode);
+static GLboolean            is_valid_renderbuffer_internalformat(GLenum internalformat);
 // getters
 static attachment_size_t    get_attachment_size(attachment_t* attachment);
 static uint32_t             get_clear_color();
 static uint16_t             get_clear_depth();
-static cl_ushort            get_clear_enabled_data(GLbitfield mask);
+static enabled_data_t            get_clear_enabled_data(GLbitfield mask);
 static uint8_t              get_clear_stencil();
 static cl_ulong             get_clear_write_values();
 static depth_data_t         get_depth_data();
@@ -259,7 +255,6 @@ static rop_config_t         get_rop_config(GLenum mode);
 // setters
 static void set_uniform_data(GLint location, size_t size, const void* data);
 static void set_vertex_attribute(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
-static GLboolean is_valid_renderbuffer_internalformat(GLenum internalformat);
 static void set_stencil_operation(stencil_operation_t *stencil_operation, GLenum sfail, GLenum dfail, GLenum dpass);
 static void set_stencil_function(stencil_function_t *stencil_function, GLenum func, GLint ref, GLuint mask);
 // gl input parsers
@@ -366,11 +361,13 @@ GL_APICALL void GL_APIENTRY glBlendEquationSeparate (GLenum modeRGB, GLenum mode
         .modeRGB    = modeRGB,
         .modeAlpha  = modeAlpha,
     };
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glBlendFunc (GLenum sfactor, GLenum dfactor) 
 {
     glBlendFuncSeparate(sfactor, dfactor, sfactor, dfactor);
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) 
@@ -390,6 +387,7 @@ GL_APICALL void GL_APIENTRY glBlendFuncSeparate (GLenum sfactorRGB, GLenum dfact
         .dstRGB     = dfactorRGB, 
         .dstAlpha   = dfactorAlpha,
     };
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glBufferData (GLenum target, GLsizeiptr size, const void *data, GLenum usage) 
@@ -571,7 +569,7 @@ GL_APICALL void GL_APIENTRY glClear (GLbitfield mask)
     device_clear_framebuffer(
         context,
         get_clear_write_values(),
-        get_clear_enabled_data(mask),
+        get_clear_enabled_data(mask).misc,
         1
     );
 }
@@ -604,6 +602,7 @@ GL_APICALL void GL_APIENTRY glColorMask (GLboolean red, GLboolean green, GLboole
         .b = blue,
         .a = alpha,
     };
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glCompressedTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data)
@@ -618,7 +617,7 @@ GL_APICALL GLuint GL_APIENTRY glCreateProgram (void)
     contexts[context_sz] = (device_context_t*) malloc(sizeof(device_context_t));
     
     device_create_context(contexts[context_sz], &device_shared_objects);
-    
+
     context_sz += 1;
     _program_sz += 1;
     
@@ -637,6 +636,8 @@ GL_APICALL void GL_APIENTRY glCullFace (GLenum mode)
     }
 
     _rasterization_data.cull_face = mode;
+
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func) 
@@ -656,11 +657,13 @@ GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func)
     }
 
     _depth_func = func;
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glDepthMask (GLboolean flag) 
 {
     _masks.depth = flag;
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f) 
@@ -670,6 +673,7 @@ GL_APICALL void GL_APIENTRY glDepthRangef (GLfloat n, GLfloat f)
         .n=n,
         .f=f
     };
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glDisable (GLenum cap) 
@@ -679,6 +683,7 @@ GL_APICALL void GL_APIENTRY glDisable (GLenum cap)
     if (enabled_ptr == NULL) RETURN_ERROR(GL_INVALID_ENUM);
 
     *enabled_ptr = GL_FALSE;
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index) 
@@ -1565,10 +1570,10 @@ GL_APICALL void GL_APIENTRY glUseProgram (GLuint program)
 
         flush_device_context(current_context);
         device_link_contexts(current_context, contexts[program-1]);
-
     }
 
     _current_program=program;
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glVertexAttrib1f (GLuint index, GLfloat x) 
@@ -1786,31 +1791,35 @@ static cl_ulong get_clear_write_values()
     return clear_write_values;
 };
 
-static cl_ushort get_clear_enabled_data(GLbitfield mask) 
+static enabled_data_t get_clear_enabled_data(GLbitfield mask) 
 {
-    cl_ushort clear_enabled_data;
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
 
-    cl_ushort enabled_color = 0;
-    cl_ushort enabled_depth = 0;
-    cl_ushort enabled_stencil = 0;
+    enabled_data_t enabled_data;
 
-    if ((mask & GL_COLOR_BUFFER_BIT) != 0) {
-        enabled_color = 
-            _masks.color.r ? CLEAR_ENABLED_COLOR_CHANNEL_RED    : 0 |
-            _masks.color.g ? CLEAR_ENABLED_COLOR_CHANNEL_GREEN  : 0 |
-            _masks.color.b ? CLEAR_ENABLED_COLOR_CHANNEL_BLUE   : 0 |
-            _masks.color.a ? CLEAR_ENABLED_COLOR_CHANNEL_ALPHA  : 0 ;
-    }
+    GLboolean color_mask    = mask & GL_COLOR_BUFFER_BIT;
+    GLboolean depth_mask    = mask & GL_DEPTH_BUFFER_BIT;
+    GLboolean stencil_mask  = mask & GL_STENCIL_BUFFER_BIT;
+
+    set_enabled_color_data(
+        &enabled_data,
+        color_mask ? _masks.color.r : 0,
+        color_mask ? _masks.color.g : 0,
+        color_mask ? _masks.color.b : 0,
+        color_mask ? _masks.color.a : 0
+    );
+
+    set_enabled_depth_data(
+        &enabled_data,
+        depth_mask ? _masks.depth : 0
+    );
     
-    if ((mask & GL_DEPTH_BUFFER_BIT) != 0)
-        enabled_depth = _masks.depth ? CLEAR_ENABLED_DEPTH_CHANNEL : 0;
+    set_enabled_stencil_data(
+        &enabled_data,
+        stencil_mask ? _masks.stencil.front : 0
+    );
 
-    if ((mask & GL_STENCIL_BUFFER_BIT) != 0)
-        enabled_stencil = _masks.stencil.front & 0xFFu;
-
-    clear_enabled_data = enabled_color | enabled_depth | enabled_stencil;
-
-    return clear_enabled_data;
+    return enabled_data;
 };
 
 static depth_data_t get_depth_data()
@@ -1867,6 +1876,7 @@ static render_mode_t get_render_mode(GLenum mode)
             case GL_FRONT:
             case GL_FRONT_AND_BACK:
                 render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_FRONT;
+                printf("cull front\n");
             default:
         }
 
@@ -1875,6 +1885,7 @@ static render_mode_t get_render_mode(GLenum mode)
             case GL_BACK:
             case GL_FRONT_AND_BACK:
                 render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
+                printf("cull back\n");
             default:
         }
     }

@@ -1,8 +1,10 @@
-PROJECT = triangle
+PROJECT = triangle.exe
 
 SRCS = main.cc
 
-SHADERS ?= kernel.glsl
+SHADERS = kernel.cl
+
+OBJS ?=
 
 LD_PROJECT_FLAGS ?= 
 
