@@ -11,8 +11,10 @@ CL_FLAGS += -Werror -D__COMPILER_RELATIVE_PATH__ -I$(SRC_PATH)
 
 .PHONY: all clean clean-all
 
+CLC = $(GLSC_PATH)/src/compiler/clc 
+
 %.o: %.cl $(UTILS_CL)
-	$(GLSC_PATH)/clcompiler $< $@ -DC_OPENCL_HOST $(CL_FLAGS) $(OPT_FLAGS)
+	$(CLC) $< $@ -DC_OPENCL_HOST $(CL_FLAGS) $(OPT_FLAGS)
 
 %.o.c: %.o
 	xxd -i $< > $@

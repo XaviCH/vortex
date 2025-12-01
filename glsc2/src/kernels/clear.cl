@@ -25,10 +25,10 @@ uint clear_color(uint color, const ulong c_clear_write_values, const ushort c_cl
     uint clear_color = get_clear_color(c_clear_write_values);
 
     uint clear_mask = 
-        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_RED) != 0 ? 0xFFu <<  0 : 0) |
-        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_RED) != 0 ? 0xFFu <<  8 : 0) |
-        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_RED) != 0 ? 0xFFu << 16 : 0) |
-        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_RED) != 0 ? 0xFFu << 24 : 0) ;
+        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_RED)   != 0 ? 0xFFu <<  0 : 0) |
+        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_GREEN) != 0 ? 0xFFu <<  8 : 0) |
+        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_BLUE)  != 0 ? 0xFFu << 16 : 0) |
+        ((c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_ALPHA) != 0 ? 0xFFu << 24 : 0) ;
     
     return (color & ~clear_mask) | (clear_color & clear_mask);
 }

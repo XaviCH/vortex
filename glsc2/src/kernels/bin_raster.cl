@@ -28,7 +28,7 @@ typedef struct {
     to test each bin. 
  */
 kernel
-__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, CONF_BIN_SUB_GROUPS, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_BIN_SUB_GROUPS, 1)))
 void bin_raster(
     global int* a_bin_counter,
     global int* a_num_bin_segs,
@@ -58,7 +58,7 @@ void bin_raster(
 
     #ifdef CONF_DEBUG_KERNEL
     , global warp_bin_raster_debug_t* g_w_debug // sz == 32
-    //, global local_bin_raster_debug_t* g_l_debug // sz == CONF_BIN_SUB_GROUPS
+    //, global local_bin_raster_debug_t* g_l_debug // sz == DEVICE_BIN_SUB_GROUPS
     //, global global_bin_raster_debug_t* g_g_debug // 
     #endif
 ) {
@@ -69,9 +69,9 @@ void bin_raster(
     local volatile int  s_out_total   [CR_MAXBINS_SQR];
     local volatile int  s_over_index  [CR_MAXBINS_SQR];
     // TODO: s_out_mask relies on 32 sub group size, change for a more OpenCL friendly code.
-    local volatile int  s_out_mask    [CONF_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
-    local volatile int  s_out_count   [CONF_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
-    local volatile int  s_tri_buf     [CONF_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4];  // triangle ring buffer
+    local volatile int  s_out_mask    [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
+    local volatile int  s_out_count   [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];        // +1 to avoid bank collisions
+    local volatile int  s_tri_buf     [DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4];  // triangle ring buffer
 
     local volatile uint s_batch_pos;
     local volatile uint s_buf_count;
@@ -79,9 +79,9 @@ void bin_raster(
     local volatile uint s_alloc_base;
 
     #ifdef CONF_BIN_SUB_GROUP_ENABLED
-    local volatile uint l_temp [CONF_BIN_SUB_GROUPS];
+    local volatile uint l_temp [DEVICE_BIN_SUB_GROUPS];
     #else 
-    local volatile uint l_temp [DEVICE_SUB_GROUP_THREADS*CONF_BIN_SUB_GROUPS];
+    local volatile uint l_temp [DEVICE_SUB_GROUP_THREADS*DEVICE_BIN_SUB_GROUPS];
     #endif
 
     if (*a_num_subtris > c_max_subtris) 
@@ -396,7 +396,7 @@ void bin_raster(
             barrier(CLK_LOCAL_MEM_FENCE);
             if (local_id < c_num_bins)
             {
-                uint total  = s_out_count[CONF_BIN_SUB_GROUPS - 1][local_id];
+                uint total  = s_out_count[DEVICE_BIN_SUB_GROUPS - 1][local_id];
                 uint oldOfs = s_out_ofs[local_id];
                 if (over_index == -1)
                     s_out_ofs[local_id] = oldOfs + total;
@@ -411,7 +411,7 @@ void bin_raster(
             }
 
             // these triangles are now done
-            int count = min(buf_count, CONF_BIN_SUB_GROUPS * 32);
+            int count = min(buf_count, DEVICE_BIN_SUB_GROUPS * 32);
             buf_count -= count;
             buf_index += count;
             buf_index &= FW_ARRAY_SIZE(s_tri_buf)-1;

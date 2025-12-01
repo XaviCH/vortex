@@ -14,11 +14,11 @@
 #ifdef __COMPILER_RELATIVE_PATH__
     #include <backend/shaders/glsl/built_in.cl>
     #include <backend/shaders/glsl/macros.h>
-    #include <constants.h>
+    #include <constants.device.h>
 #else
     #include "glsc2/src/backend/shaders/glsl/built_in.cl"
     #include "glsc2/src/backend/shaders/glsl/macros.h"
-    #include "glsc2/src/constants.h"
+    #include "glsc2/src/constants.device.h"
 #endif
 
 //---------------------------
@@ -272,7 +272,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
 #endif
 
 #ifdef UNIFORM_SAMPLER2D
-    #define KERNEL_PARAM_UNIFORM_SAMPLER2D COMMA_CHAIN(sampler2D_t, UNIFORM_SAMPLER2D)
+    #define KERNEL_PARAM_UNIFORM_SAMPLER2D COMMA_CHAIN(constant uint*, UNIFORM_SAMPLER2D)
     #define DEFINE_UNIFORM_SAMPLER2D STRUCT_CHAIN(uint, UNIFORM_SAMPLER2D)
     #define SET_UNIFORM_SAMPLER2D SET_UNIFORM_CHAIN(UNIFORM_SAMPLER2D)
 #else

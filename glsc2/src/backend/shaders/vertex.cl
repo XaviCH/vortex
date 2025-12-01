@@ -4,11 +4,11 @@
 #ifdef __COMPILER_RELATIVE_PATH__
     #include <backend/shaders/wrapper.cl>
     #include <backend/types.cl>
-    #include <constants.h>
+    #include <constants.device.h>
 #else
     #include "glsc2/src/backend/shaders/wrapper.cl"
     #include "glsc2/src/backend/types.cl"
-    #include "glsc2/src/constants.h"
+    #include "glsc2/src/constants.device.h"
 #endif
 
 
