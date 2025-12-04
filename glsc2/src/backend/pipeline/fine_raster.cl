@@ -522,8 +522,8 @@ void fine_raster_single_sample(
     const int    c_max_tile_segs,
     const int    c_viewport_height,
     const int    c_viewport_width,
-    const int    c_width_tiles
-
+    const int    c_width_tiles,
+    const gl_framebuffer_data_t c_framebuffer_data
 )
 {
                                                                             // for 20 warps:
@@ -608,9 +608,9 @@ void fine_raster_single_sample(
         {
             // Copy and clear if required framebuffers
             // TODO: Scissor test and dithering.
-            bool colorbuffer_needs_load = !colorbuffer_full_clear;
-            bool depthbuffer_needs_load = /*depth_test_enabled &&*/ !depthbuffer_clear;
-            bool stencilbuffer_needs_load = /*stencil_test_enabled &&*/ !stencilbuffer_full_clear;
+            bool colorbuffer_needs_load = !colorbuffer_full_clear && is_framebuffer_data_colorbuffer_enabled(c_framebuffer_data);
+            bool depthbuffer_needs_load = /*depth_test_enabled &&*/ !depthbuffer_clear && is_framebuffer_data_depthbuffer_enabled(c_framebuffer_data);;
+            bool stencilbuffer_needs_load = /*stencil_test_enabled &&*/ !stencilbuffer_full_clear && is_framebuffer_data_stencilbuffer_enabled(c_framebuffer_data);;
 
             #pragma unroll
             for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
@@ -872,7 +872,6 @@ void fine_raster_single_sample(
 
         // Write tile back to the framebuffer.
         {
-            
             #pragma unroll
             for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
                 
@@ -881,23 +880,32 @@ void fine_raster_single_sample(
 
                 if (surf_x >= c_viewport_width || surf_y >= c_viewport_height) continue;
 
-                #ifdef DEVICE_IMAGE_ENABLED
-                    write_imageui(t_color_buffer, (int2){surf_x, surf_y}, uint_to_uint4(w_tile_color[pixel], c_color_buffer_mode));
-                #else
-                    write_tex_to_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode, (uint)w_tile_color[pixel]); //); // (uint)w_tile_stencil[pixel]*255); //
-                #endif
+                if (is_framebuffer_data_colorbuffer_enabled(c_framebuffer_data)) 
+                {
+                    #ifdef DEVICE_IMAGE_ENABLED
+                        write_imageui(t_color_buffer, (int2){surf_x, surf_y}, uint_to_uint4(w_tile_color[pixel], c_color_buffer_mode));
+                    #else
+                        write_tex_to_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode, (uint)w_tile_color[pixel]); //); // (uint)w_tile_stencil[pixel]*255); //
+                    #endif
+                }
 
-                #ifdef DEVICE_IMAGE_ENABLED
-                    write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[pixel]);
-                #else
-                    g_depth_buffer[surf_x + surf_y*c_viewport_width] = w_tile_depth[pixel];
-                #endif
+                if (is_framebuffer_data_depthbuffer_enabled(c_framebuffer_data)) 
+                {
+                    #ifdef DEVICE_IMAGE_ENABLED
+                        write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[pixel]);
+                    #else
+                        g_depth_buffer[surf_x + surf_y*c_viewport_width] = w_tile_depth[pixel];
+                    #endif
+                }
 
-                #ifdef DEVICE_IMAGE_ENABLED
-                    write_imageui(t_stencil_buffer, (int2){surf_x, surf_y}, w_tile_stencil[pixel]);
-                #else
-                    g_stencil_buffer[surf_x + surf_y*c_viewport_width] = w_tile_stencil[pixel];
-                #endif
+                if (is_framebuffer_data_stencilbuffer_enabled(c_framebuffer_data)) 
+                {
+                    #ifdef DEVICE_IMAGE_ENABLED
+                        write_imageui(t_stencil_buffer, (int2){surf_x, surf_y}, w_tile_stencil[pixel]);
+                    #else
+                        g_stencil_buffer[surf_x + surf_y*c_viewport_width] = w_tile_stencil[pixel];
+                    #endif
+                }
 
             }
             

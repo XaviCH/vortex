@@ -225,7 +225,8 @@ typedef struct {
 } rasterization_mem_container_t;
 
 typedef struct {
-    cl_mem mem;
+    GLenum target;
+    GLenum id;
     GLenum internalformat;
 } buffer_data_t; 
 
@@ -233,5 +234,26 @@ typedef struct {
     buffer_data_t color, depth, stencil;
     GLsizei width, height;
 } framebuffer_data_t; 
+
+typedef struct {
+    GLint colorbuffer_binding, depthbuffer_binding, stencilbuffer_binding;
+    GLenum colorbuffer_target, depthbuffer_target, stencilbuffer_target;
+
+    GLboolean mask_red, mask_green, mask_blue, mask_alpha;
+    GLboolean mask_depth;
+    GLuint mask_stencil_front, mask_stencil_back;
+
+    GLfloat clear_color_red, clear_color_green, clear_color_blue, clear_color_alpha;
+    GLfloat clear_depth;
+    GLuint clear_stencil;
+} clear_state_t;
+
+typedef struct {
+    size_t num_triangles;
+    size_t program_binding;
+    size_t context_id;
+    size_t config_count;
+    GLenum draw_mode;
+} draw_state_t;
 
 #endif

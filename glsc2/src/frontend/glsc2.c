@@ -47,9 +47,7 @@ GLenum gl_error = GL_NO_ERROR;
         return;                                 \
     })    
 
-#define MIN(_A,_B) (((_A)<(_B))? (_A):(_B))
-#define MAX(_A,_B) (((_A)>(_B))? (_A):(_B))
-#define IS_POWER_OF_2(a) !(a & 0x1u) 
+
 
 /************ CONTEXT ************\
  * TODO: Create context using a context manager instead of the library 
@@ -79,7 +77,7 @@ mask_container_t _masks = {
 pixel_store_t _pixel_store = { .unpack_aligment = 4 };
 
 clear_data_t _clear_data = {
-    .color = { 0 , 0, 0, 0 },
+    .color = { 0, 0, 0, 0 },
     .stencil = 0,
     .depth = 1,
 };
@@ -93,22 +91,22 @@ scissor_data_t _scissor_data = {
 
 stencil_data_t _stencil_data = {
     .front = {
-        .function = { .func = STENCIL_FUNC_ALWAYS, .ref = 0, .mask = 1, },
-        .operation = { .sfail = STENCIL_OP_KEEP, .dpfail = STENCIL_OP_KEEP, .dpass = STENCIL_OP_KEEP }
+        .function = { .func = GL_ALWAYS, .ref = 0, .mask = 1, },
+        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dpass = GL_KEEP }
     },
     .back = {
-        .function = { .func = STENCIL_FUNC_ALWAYS, .ref = 0, .mask = 1, },
-        .operation = { .sfail = STENCIL_OP_KEEP, .dpfail = STENCIL_OP_KEEP, .dpass = STENCIL_OP_KEEP }
+        .function = { .func = GL_ALWAYS, .ref = 0, .mask = 1, },
+        .operation = { .sfail = GL_KEEP, .dpfail = GL_KEEP, .dpass = GL_KEEP }
     },
 };
 
 blend_data_t _blend_data = {
     .equation = {
-        .modeRGB = BLEND_FUNC_ADD, .modeAlpha = BLEND_FUNC_ADD,
+        .modeRGB = GL_FUNC_ADD, .modeAlpha = GL_FUNC_ADD,
     },
     .func = {
-        .srcRGB = BLEND_ZERO, .srcAlpha = BLEND_ZERO,
-        .dstRGB = BLEND_ONE, .dstAlpha = BLEND_ONE,
+        .srcRGB = GL_ZERO, .srcAlpha = GL_ZERO,
+        .dstRGB = GL_ONE, .dstAlpha = GL_ONE,
     },
     .color = {
         .red = 0, .green = 0, .blue = 0, .alpha = 0
@@ -166,13 +164,23 @@ static renderbuffer_t           _renderbuffers  [HOST_RENDERBUFFERS_SIZE];
 
 static GLenum _hint;
 
-static GLenum      _depth_func = DEPTH_FUNC_LESS;
+static GLenum      _depth_func = GL_LESS;
 static depth_range_t _depth_range = { .n=0.0, .f=1.0};
+
+// Enqeueu State
+static clear_state_t _clear_state;
+static draw_state_t  _draw_state;
 
 // Device State
 static device_shared_objects_t      device_shared_objects;
 static size_t                       context_sz;
 static device_context_t*            contexts[HOST_PROGRAMS_SIZE];
+
+static void flush_clear_state();
+static void flush_draw_state();
+static void reset_clear_state();
+static void reset_draw_state();
+static size_t sizeof_gl_type(GLenum type);
 
 __attribute__((constructor))
 void __context_constructor__() 
@@ -215,6 +223,9 @@ void __context_constructor__()
     _hint = GL_DONT_CARE;
     gl_error = GL_NO_ERROR;
 
+    reset_clear_state();
+    reset_draw_state();
+
     device_create_shared_objects(&device_shared_objects);
     context_sz = 0;
 } 
@@ -223,6 +234,8 @@ void __context_constructor__()
 /****** Interface for utils & inline functions ******\
  * Utility or inline function are implemented at the end of the file. 
 */
+
+
 
 typedef struct { uint32_t width, height; } attachment_size_t;
 
@@ -239,10 +252,10 @@ static GLboolean            is_valid_draw_mode(GLenum mode);
 static GLboolean            is_valid_renderbuffer_internalformat(GLenum internalformat);
 // getters
 static attachment_size_t    get_attachment_size(attachment_t* attachment);
-static uint32_t             get_clear_color();
-static uint16_t             get_clear_depth();
+static uint32_t             get_clear_color(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
+static uint16_t             get_clear_depth(GLfloat depth);
+static uint8_t              get_clear_stencil(GLuint stencil);
 static enabled_data_t            get_clear_enabled_data(GLbitfield mask);
-static uint8_t              get_clear_stencil();
 static cl_ulong             get_clear_write_values();
 static depth_data_t         get_depth_data();
 static GLboolean*           get_enabled_pointer(GLenum cap);
@@ -309,7 +322,8 @@ GL_APICALL void GL_APIENTRY glBindFramebuffer (GLenum target, GLuint framebuffer
 
     if (_current_program > 0)
     {
-        flush_device_context(contexts[_current_program-1]);
+        flush_draw_state();
+        flush_clear_state();
     }
 
     _framebuffer_updated = 1;
@@ -462,7 +476,7 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target)
 {
     if (target != GL_FRAMEBUFFER) RETURN_ERROR_WITH_VALUE(GL_INVALID_ENUM, 0);
 
-    if (_buffer_binding == 0) NOT_IMPLEMENTED;
+    if (_framebuffer_binding == 0) NOT_IMPLEMENTED;
 
     framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
     
@@ -556,24 +570,375 @@ void clear_framebuffer() {
 } 
 */
 
+static framebuffer_data_t get_framebuffer_data()
+{
+    framebuffer_data_t framebuffer_data;
+
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding];
+
+    if (framebuffer->color_attachment0.binding != 0) 
+    {
+        if (framebuffer->color_attachment0.target == GL_TEXTURE_2D)
+        {
+            texture_t *texture = &_textures[framebuffer->color_attachment0.binding];
+            
+            framebuffer_data.color.id = texture->id;
+            framebuffer_data.color.internalformat = texture->internalformat;
+            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.width = texture->width;
+            framebuffer_data.height = texture->height;
+        }
+        else if (framebuffer->color_attachment0.target == GL_RENDERBUFFER)
+        {
+            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->color_attachment0.binding];
+            
+            framebuffer_data.color.id = renderbuffer->id;
+            framebuffer_data.color.internalformat = renderbuffer->internalformat;
+            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.width = renderbuffer->width;
+            framebuffer_data.height = renderbuffer->height;
+        }
+        else NOT_IMPLEMENTED;
+    }
+    else
+    {
+        framebuffer_data.color.target = GL_ZERO;
+    }
+
+    if (framebuffer->depth_attachment.binding != 0) 
+    {
+        if (framebuffer->depth_attachment.target == GL_TEXTURE_2D)
+        {
+            texture_t *texture = &_textures[framebuffer->depth_attachment.binding];
+            
+            framebuffer_data.color.id = texture->id;
+            framebuffer_data.color.internalformat = texture->internalformat;
+            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.width = texture->width;
+            framebuffer_data.height = texture->height;
+        }
+        else if (framebuffer->depth_attachment.target == GL_RENDERBUFFER)
+        {
+            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->depth_attachment.binding];
+            
+            framebuffer_data.color.id = renderbuffer->id;
+            framebuffer_data.color.internalformat = renderbuffer->internalformat;
+            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.width = renderbuffer->width;
+            framebuffer_data.height = renderbuffer->height;
+        }
+        else NOT_IMPLEMENTED;
+    }
+    else
+    {
+        framebuffer_data.color.target = GL_ZERO;
+    }
+
+    if (framebuffer->stencil_attachment.binding != 0) 
+    {
+        if (framebuffer->stencil_attachment.target == GL_TEXTURE_2D)
+        {
+            texture_t *texture = &_textures[framebuffer->stencil_attachment.binding];
+            
+            framebuffer_data.color.id = texture->id;
+            framebuffer_data.color.internalformat = texture->internalformat;
+            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.width = texture->width;
+            framebuffer_data.height = texture->height;
+        }
+        else if (framebuffer->stencil_attachment.target == GL_RENDERBUFFER)
+        {
+            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->stencil_attachment.binding];
+            
+            framebuffer_data.color.id = renderbuffer->id;
+            framebuffer_data.color.internalformat = renderbuffer->internalformat;
+            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.width = renderbuffer->width;
+            framebuffer_data.height = renderbuffer->height;
+        }
+        else NOT_IMPLEMENTED;
+    }
+    else
+    {
+        framebuffer_data.color.target = GL_ZERO;
+    }
+
+    return framebuffer_data;
+}
+
+static uint64_t get_clear_write_values_from_clear_state() 
+{
+    cl_ulong clear_write_values;
+
+    cl_ulong clear_color = get_clear_color(
+        _clear_state.clear_color_red,
+        _clear_state.clear_color_green,
+        _clear_state.clear_color_blue,
+        _clear_state.clear_color_alpha
+    );
+
+    cl_ulong clear_depth = get_clear_depth(
+        _clear_state.clear_depth
+    );
+
+    cl_ulong clear_stencil = get_clear_stencil(
+        _clear_state.clear_stencil
+    );
+
+    clear_write_values = 
+        clear_color      <<  0 |
+        clear_depth      << 32 |
+        clear_stencil    << 48 ;
+
+    return clear_write_values;
+}
+
+static enabled_data_t get_clear_enabled_data_from_clear_state() 
+{
+    enabled_data_t enabled_data;
+
+    set_enabled_color_data(
+        &enabled_data,
+        _clear_state.mask_red,
+        _clear_state.mask_green,
+        _clear_state.mask_blue,
+        _clear_state.mask_alpha
+    );
+
+    set_enabled_depth_data(
+        &enabled_data,
+        _clear_state.mask_depth
+    );
+    
+    set_enabled_stencil_data(
+        &enabled_data,
+        _clear_state.mask_stencil_front
+    );
+
+    return enabled_data;
+}
+
+static void reset_clear_state() 
+{
+    _clear_state.colorbuffer_binding = 0;
+    _clear_state.depthbuffer_binding = 0;
+    _clear_state.stencilbuffer_binding = 0;
+}
+
+static void reset_draw_state() 
+{
+    _draw_state.num_triangles = 0;
+}
+
+static void flush_draw_state() 
+{
+    if (_draw_state.num_triangles == 0) return; // Nothing enqueued
+
+    device_context_t *device_context = contexts[_draw_state.context_id];
+
+    uint32_t deferred_clear = 
+        _clear_state.colorbuffer_binding ||
+        _clear_state.depthbuffer_binding ||
+        _clear_state.stencilbuffer_binding;
+
+    uint16_t enabled_data = deferred_clear ? get_clear_enabled_data_from_clear_state().misc : 0;
+
+    device_clear_framebuffer(
+        device_context, 
+        get_clear_write_values_from_clear_state(), 
+        enabled_data,
+        deferred_clear
+    );
+
+    device_launch_triangle_rasterization(device_context);
+
+    reset_clear_state();
+    reset_draw_state();
+}
+
+static void flush_clear_state()
+{
+    if (
+        !_clear_state.colorbuffer_binding &&
+        !_clear_state.depthbuffer_binding &&
+        !_clear_state.stencilbuffer_binding
+    )  
+    {
+        return;
+    }
+
+    uint32_t color_mode, depth_mode, stencil_mode;
+    uint32_t x, y, width, height;
+
+    if (_clear_state.colorbuffer_binding)
+    {
+        GLenum internalformat;
+        switch (_clear_state.colorbuffer_target)
+        {
+            default:
+            case GL_RENDERBUFFER:
+                renderbuffer_t *renderbuffer = &_renderbuffers[_clear_state.colorbuffer_binding-1];
+
+                device_shared_set_renderbuffer_to_colorbuffer(
+                    &device_shared_objects, 
+                    renderbuffer->id
+                );
+                internalformat = renderbuffer->internalformat; 
+                width = renderbuffer->width;
+                height = renderbuffer->height;
+                break;
+            case GL_TEXTURE_2D:
+                texture_t *texture = &_textures[_clear_state.colorbuffer_binding-1];
+
+                device_shared_set_texture_to_colorbuffer(
+                    &device_shared_objects, 
+                    texture->id
+                );
+                internalformat = texture->internalformat; 
+                width = texture->width;
+                height = texture->height;
+                break;
+        }
+
+        color_mode = get_texture_mode_from_internalformat(internalformat);
+    }
+    else 
+    {
+        device_shared_set_dummy_to_colorbuffer(&device_shared_objects);
+    }
+
+    if (_clear_state.depthbuffer_binding)
+    {
+        GLenum internalformat;
+        switch (_clear_state.depthbuffer_target)
+        {
+            default:
+            case GL_RENDERBUFFER:
+                renderbuffer_t *renderbuffer = &_renderbuffers[_clear_state.depthbuffer_binding-1];
+
+                device_shared_set_renderbuffer_to_depthbuffer(
+                    &device_shared_objects, 
+                    renderbuffer->id
+                );
+                internalformat = renderbuffer->internalformat; 
+                width = renderbuffer->width;
+                height = renderbuffer->height;
+                break;
+            case GL_TEXTURE_2D:
+                texture_t *texture = &_textures[_clear_state.depthbuffer_binding-1];
+
+                device_shared_set_texture_to_depthbuffer(
+                    &device_shared_objects, 
+                    texture->id
+                );
+                internalformat = texture->internalformat; 
+                width = texture->width;
+                height = texture->height;
+                break;
+        }
+
+        depth_mode = get_texture_mode_from_internalformat(internalformat);
+    }
+    else 
+    {
+        device_shared_set_dummy_to_depthbuffer(&device_shared_objects);
+    }
+
+    if (_clear_state.stencilbuffer_binding)
+    {
+        GLenum internalformat;
+        switch (_clear_state.stencilbuffer_target)
+        {
+            default:
+            case GL_RENDERBUFFER:
+                renderbuffer_t *renderbuffer = &_renderbuffers[_clear_state.stencilbuffer_binding-1];
+
+                device_shared_set_renderbuffer_to_stencilbuffer(
+                    &device_shared_objects, 
+                    renderbuffer->id
+                );
+                internalformat = renderbuffer->internalformat; 
+                width = renderbuffer->width;
+                height = renderbuffer->height;
+                break;
+            case GL_TEXTURE_2D:
+                texture_t *texture = &_textures[_clear_state.stencilbuffer_binding-1];
+
+                device_shared_set_texture_to_stencilbuffer(
+                    &device_shared_objects, 
+                    texture->id
+                );
+                internalformat = texture->internalformat; 
+                width = texture->width;
+                height = texture->height;
+                break;
+        }
+
+        stencil_mode = get_texture_mode_from_internalformat(internalformat);
+    }
+    else 
+    {
+        device_shared_set_dummy_to_stencilbuffer(&device_shared_objects);
+    }
+    
+    uint64_t       write_values = get_clear_write_values_from_clear_state();
+    enabled_data_t enabled_data = get_clear_enabled_data_from_clear_state();
+
+    device_shared_launch_clear_framebuffer(
+        &device_shared_objects,
+        color_mode, 
+        depth_mode, 
+        stencil_mode,
+        0, 0, width, height, 
+        write_values,
+        enabled_data
+    );
+
+    // reset state
+    reset_clear_state();
+}
+
 GL_APICALL void GL_APIENTRY glClear (GLbitfield mask) 
 {
     GLbitfield valid_mask = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
 
     if (mask & valid_mask == 0) RETURN_ERROR(GL_INVALID_VALUE);
     
-    if (_current_program == 0) NOT_IMPLEMENTED;
+    if (_framebuffer_binding > _framebuffer_sz) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    device_context_t *context = contexts[_current_program-1];
+    if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION); // TODO: Not implemented
 
-    flush_device_context(context);
+    flush_draw_state();
 
-    device_clear_framebuffer(
-        context,
-        get_clear_write_values(),
-        get_clear_enabled_data(mask).misc,
-        1
-    );
+    // TODO: check if clear state can be merge, if not call flush
+
+    flush_clear_state();
+
+    // Write new clear state
+
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+
+    _clear_state.colorbuffer_binding =  framebuffer->color_attachment0.binding;
+    _clear_state.colorbuffer_target =  framebuffer->color_attachment0.target;
+    _clear_state.depthbuffer_binding =  framebuffer->depth_attachment.binding;
+    _clear_state.depthbuffer_target =  framebuffer->depth_attachment.target;
+    _clear_state.stencilbuffer_binding =  framebuffer->stencil_attachment.binding;
+    _clear_state.stencilbuffer_target =  framebuffer->stencil_attachment.target;
+
+    _clear_state.mask_red   = _masks.color.r && (mask & GL_COLOR_BUFFER_BIT);
+    _clear_state.mask_green = _masks.color.g && (mask & GL_COLOR_BUFFER_BIT);
+    _clear_state.mask_blue  = _masks.color.b && (mask & GL_COLOR_BUFFER_BIT);
+    _clear_state.mask_alpha = _masks.color.a && (mask & GL_COLOR_BUFFER_BIT);
+    _clear_state.mask_depth = _masks.depth && (mask & GL_DEPTH_BUFFER_BIT);
+    _clear_state.mask_stencil_front = _masks.stencil.front  & ((mask & GL_STENCIL_BUFFER_BIT) ? -1 : 0);
+    _clear_state.mask_stencil_back = _masks.stencil.back    & ((mask & GL_STENCIL_BUFFER_BIT) ? -1 : 0);
+
+    _clear_state.clear_color_red   = _clear_data.color.red;
+    _clear_state.clear_color_green = _clear_data.color.green;
+    _clear_state.clear_color_blue  = _clear_data.color.blue;
+    _clear_state.clear_color_alpha = _clear_data.color.alpha;
+    _clear_state.clear_depth = _clear_data.depth;
+    _clear_state.clear_stencil = _clear_data.stencil;
 }
 
 GL_APICALL void GL_APIENTRY glClearColor (GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) 
@@ -696,6 +1061,12 @@ GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index)
     vertex_attribute_datas[index].misc &= ~VERTEX_ATTRIBUTE_ACTIVE_POINTER;
 }
 
+static void update_draw_state(size_t num_triangles, size_t context_id) 
+{
+    _draw_state.num_triangles += num_triangles;
+    _draw_state.context_id = context_id;
+}
+
 GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count) 
 {
     if (_current_program == 0) RETURN_ERROR(GL_INVALID_OPERATION);
@@ -710,11 +1081,27 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     device_context_t* device_context = contexts[_current_program-1];
 
-    size_t num_vertices = count * 3;
+    size_t num_vertices = count;
+
+    size_t num_triangles;
+
+    switch (mode)
+    {
+        default:
+        case GL_TRIANGLES:
+            num_triangles = num_vertices / 3;
+            break;
+        case GL_TRIANGLE_FAN:
+        case GL_TRIANGLE_STRIP:
+            num_triangles = num_vertices - 2;
+            break;
+    }
 
     size_t config_id = update_current_context(num_vertices, mode);
     
-    device_launch_arrays_triangle_assembly(device_context, config_id, count - first, count);
+    device_launch_arrays_triangle_assembly(device_context, config_id, num_vertices, count);
+
+    update_draw_state(num_triangles, _current_program - 1);
 }
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices)
@@ -732,10 +1119,29 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     if (count == 0) return;
 
     device_context_t* device_context = contexts[_current_program-1];
+    // printf("glDrawRangeElements: current_program=%lu\n", _current_program);
 
-    size_t config_id = update_current_context(end-start, mode);
+    size_t num_vertices = end - start;
 
-    device_launch_range_triangle_assembly(device_context, end - start, count, indices, config_id);
+    size_t num_triangles;
+
+    switch (mode)
+    {
+        default:
+        case GL_TRIANGLES:
+            num_triangles = count / 3;
+            break;
+        case GL_TRIANGLE_FAN:
+        case GL_TRIANGLE_STRIP:
+            num_triangles = count - 2;
+            break;
+    }
+
+    size_t config_id = update_current_context(num_vertices, mode);
+
+    device_launch_range_triangle_assembly(device_context, num_vertices, count, indices, config_id);
+
+    update_draw_state(num_triangles, _current_program - 1);
 }
 
 GL_APICALL void GL_APIENTRY glEnable (GLenum cap) 
@@ -769,7 +1175,8 @@ GL_APICALL void GL_APIENTRY glFlush (void)
 {
     if (_current_program > 0) 
     {
-        flush_device_context(contexts[_current_program-1]);
+        flush_draw_state();
+        flush_clear_state();
     }
 }
 
@@ -781,18 +1188,20 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum att
 
     if (renderbuffertarget != GL_RENDERBUFFER) RETURN_ERROR(GL_INVALID_ENUM);
 
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+
     attachment_t *attachment_ptr;
 
     switch (attachment)
     {
-    case GL_COLOR_ATTACHMENT0: 
-        attachment_ptr = &_framebuffers[_framebuffer_binding].color_attachment0;
+    case GL_COLOR_ATTACHMENT0:
+        attachment_ptr = &framebuffer->color_attachment0;
         break;
     case GL_DEPTH_ATTACHMENT: 
-        attachment_ptr = &_framebuffers[_framebuffer_binding].depth_attachment;
+        attachment_ptr = &framebuffer->depth_attachment;
         break;
     case GL_STENCIL_ATTACHMENT: 
-        attachment_ptr = &_framebuffers[_framebuffer_binding].stencil_attachment;
+        attachment_ptr = &framebuffer->stencil_attachment;
         break;
     default:
         NOT_IMPLEMENTED;
@@ -905,7 +1314,6 @@ GL_APICALL void GL_APIENTRY glGenRenderbuffers (GLsizei n, GLuint *renderbuffers
         renderbuffer->height = 0;
 
         renderbuffers[i] = _renderbuffer_sz + 1;
-        
         _renderbuffer_sz += 1;
     }
 }
@@ -1113,6 +1521,8 @@ GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param)
 {
     switch (pname)
     {
+        default:
+            RETURN_ERROR(GL_INVALID_ENUM);
         case GL_UNPACK_ALIGNMENT:
             switch (param)
             {
@@ -1124,8 +1534,6 @@ GL_APICALL void GL_APIENTRY glPixelStorei (GLenum pname, GLint param)
                 case 8:
                     _pixel_store.unpack_aligment = param;
             }
-        default:
-            RETURN_ERROR(GL_INVALID_ENUM);
     }
 }
 
@@ -1149,7 +1557,13 @@ GL_APICALL void GL_APIENTRY glProgramBinary (GLuint program, GLenum binaryFormat
 
     for(size_t i=0; i<program_ptr->uniform_sz; ++i) 
     {
-        device_get_program_uniform_arg_data(shared, program_ptr->program_id, i, &program_ptr->uniform_arg_datas[i]);
+        arg_data_t *arg_data = &program_ptr->uniform_arg_datas[i];
+        device_get_program_uniform_arg_data(shared, program_ptr->program_id, i, arg_data);
+        if (i == 0) arg_data->offset = 0;
+        else {
+            size_t arg_size = program_ptr->uniform_arg_datas[i-1].size * sizeof_gl_type(program_ptr->uniform_arg_datas[i-1].type);
+            arg_data->offset = program_ptr->uniform_arg_datas[i-1].offset + arg_size;
+        }
     }
 
     program_ptr->vertex_attrib_sz = device_get_program_vertex_attrib_size(shared, program_ptr->program_id);
@@ -1174,13 +1588,40 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 
     if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    if (_current_program == 0) RETURN_ERROR(GL_INVALID_OPERATION); // TODO operation independant of the program
+    printf("draw_state\n");
+    flush_draw_state();
+    printf("clear_state\n");
+    flush_clear_state();
 
-    device_context_t *context = contexts[_current_program-1];
+    device_context_t *context = (_current_program != 0) ? 
+            contexts[_current_program-1] : NULL;
 
-    flush_device_context(context);
+    switch (framebuffer->color_attachment0.target)
+    {
+        default:
+        case GL_RENDERBUFFER:
+            device_shared_set_renderbuffer_to_colorbuffer(
+                &device_shared_objects, 
+                _renderbuffers[framebuffer->color_attachment0.binding-1].id
+            );
+            break;
+        case GL_TEXTURE_2D:
+            device_shared_set_texture_to_colorbuffer(
+                &device_shared_objects, 
+                _textures[framebuffer->color_attachment0.binding-1].id
+            );
+            break;
+    }
 
-    device_launch_read_pixels(context, 0, 0, width, height, data);
+    device_shared_launch_read_pixels(
+        &device_shared_objects,
+        context,
+        0,
+        0,
+        width,
+        height,
+        data
+    );
 
     // TODO: multiple formats and types support
     /*
@@ -1557,7 +1998,8 @@ GL_APICALL void GL_APIENTRY glUseProgram (GLuint program)
 
     if (program == 0) 
     {
-        flush_device_context(contexts[_current_program-1]);
+        flush_draw_state();
+        //flush_device_context(contexts[_current_program-1]);
 
         _current_program = 0;
 
@@ -1570,11 +2012,18 @@ GL_APICALL void GL_APIENTRY glUseProgram (GLuint program)
     {
         device_context_t *current_context = contexts[_current_program-1]; 
 
-        flush_device_context(current_context);
+        flush_draw_state();
+
+        // flush_device_context(current_context);
         device_link_contexts(current_context, contexts[program-1]);
     }
 
     _current_program=program;
+
+    _framebuffer_updated = 1;
+    vertex_attibute_updated = 1;
+    texture_unit_updated = 1;
+    _uniform_data_updated = 1;
     rop_config_updated = 1;
 }
 
@@ -1757,33 +2206,33 @@ static attachment_size_t get_attachment_size(attachment_t* attachment)
     return size;
 }
 
-static uint32_t get_clear_color() 
+static uint32_t get_clear_color(GLfloat r, GLfloat g, GLfloat b, GLfloat a) 
 {
-    return rgba_to_uint32(
-        _clear_data.color.red, 
-        _clear_data.color.green, 
-        _clear_data.color.blue, 
-        _clear_data.color.alpha
-    );
+    return rgba_to_uint32(r, g, b, a);
 }
 
-static uint16_t get_clear_depth() 
+static uint16_t get_clear_depth(GLfloat depth) 
 {
-    return _clear_data.depth*0xFFFFu;
+    return depth*0xFFFFu;
 }
 
-static uint8_t get_clear_stencil() 
+static uint8_t get_clear_stencil(GLuint stencil) 
 {
-    return _clear_data.stencil;
+    return stencil;
 }
 
 static cl_ulong get_clear_write_values()
 {
     cl_ulong clear_write_values;
 
-    cl_ulong clear_color = get_clear_color();
-    cl_ulong clear_depth = get_clear_depth();
-    cl_ulong clear_stencil = get_clear_stencil();
+    cl_ulong clear_color = get_clear_color(
+        _clear_data.color.red, 
+        _clear_data.color.green, 
+        _clear_data.color.blue, 
+        _clear_data.color.alpha
+    );
+    cl_ulong clear_depth = get_clear_depth(_clear_data.depth);
+    cl_ulong clear_stencil = get_clear_stencil(_clear_data.stencil);
 
     clear_write_values = 
         clear_color      <<  0 |
@@ -1909,22 +2358,21 @@ static render_mode_t get_render_mode(GLenum mode)
 static uint32_t get_texture_mode_from_internalformat(GLenum internalformat)
 {
     switch (internalformat) {
-    case GL_RGBA8:
-        return TEX_RGBA8;
-    case GL_RGB8:
-        return TEX_RGB8;
-    case GL_RG8:
-        return TEX_RG8;
-    case GL_RGBA4:
-        return TEX_RGBA4;
-    case GL_RGB5_A1:
-        return TEX_RGB5_A1;
-    case GL_RGB565:
-        return TEX_RGB565;
-    case GL_R8:
-        return TEX_R8;
-    default:
-        RETURN_ERROR_WITH_VALUE(GL_INVALID_ENUM, -1);
+        default:
+        case GL_RGBA8:
+            return TEX_RGBA8;
+        case GL_RGB8:
+            return TEX_RGB8;
+        case GL_RG8:
+            return TEX_RG8;
+        case GL_RGBA4:
+            return TEX_RGBA4;
+        case GL_RGB5_A1:
+            return TEX_RGB5_A1;
+        case GL_RGB565:
+            return TEX_RGB565;
+        case GL_R8:
+            return TEX_R8;
     }
 }
 
@@ -1937,6 +2385,24 @@ static void set_vertex_attribute(GLuint index, GLfloat x, GLfloat y, GLfloat z, 
     vertex_attributes[index][1] = y;
     vertex_attributes[index][2] = z;
     vertex_attributes[index][3] = w;
+}
+
+static size_t sizeof_gl_type(GLenum type)
+{
+    switch (type)
+    {
+        default:
+        case GL_BYTE:
+        case GL_UNSIGNED_BYTE:
+            return 1;
+        case GL_SHORT:
+        case GL_UNSIGNED_SHORT:
+            return 2;
+        case GL_INT:
+        case GL_UNSIGNED_INT:
+        case GL_FLOAT:
+            return 4;
+    }
 }
 
 static size_t sizeof_vertex_attribute_type(GLenum type)
@@ -2345,28 +2811,30 @@ static rop_config_t get_rop_config(GLenum mode)
     return rop_config;
 }
 
+static uint8_t is_pending_clear()
+{
+    return 
+        _clear_state.colorbuffer_binding   != 0 ||
+        _clear_state.depthbuffer_binding   != 0 ||
+        _clear_state.stencilbuffer_binding != 0 ;
+}
+
 static size_t update_current_context(size_t vertices, GLenum draw_mode)
 {
     device_context_t* device_context = contexts[_current_program-1];
 
+    // check if draw state needs to be flushed
     uint32_t new_config_required = rop_config_updated || _uniform_data_updated;
+    uint32_t is_device_config_is_full = rop_config_count == TRIANGLE_PRIMITIVE_CONFIGS; 
 
-    rop_config_count = (rop_config_count + new_config_required) % TRIANGLE_PRIMITIVE_CONFIGS;
-    
     uint32_t flush_required = 
         texture_unit_updated    ||
         (
             new_config_required && 
-            device_config_is_full(device_context)
+            is_device_config_is_full
         );
 
-    if (flush_required)
-    {
-        if (device_has_triangles_enqueued(device_context)) 
-        {
-            device_launch_triangle_rasterization(device_context);
-        } 
-    }
+    if (flush_required) flush_draw_state();
 
     if (_framebuffer_updated) 
     {
@@ -2386,7 +2854,8 @@ static size_t update_current_context(size_t vertices, GLenum draw_mode)
             } 
             else if (va_binding->pointer != NULL)
             {
-                device_bind_host_pointer_to_vertex_attribute_pointer(device_context, va, sizeof(float[vertices]), (void*) va_binding->pointer);
+                vertex_attribute_data_t *va_data = &vertex_attribute_datas[va];
+                device_bind_host_pointer_to_vertex_attribute_pointer(device_context, va, va_data->stride*vertices, (void*) va_binding->pointer);
             } 
             else
             {
@@ -2458,11 +2927,20 @@ static size_t update_current_context(size_t vertices, GLenum draw_mode)
         }
 
     }
+    
+    // rop_config_count = (rop_config_count + new_config_required) % TRIANGLE_PRIMITIVE_CONFIGS;
 
     if (new_config_required)
     {
         rop_config_t rop_config = get_rop_config(draw_mode);
-        device_load_config(device_context, rop_config_count, &rop_config, _programs[_current_program].uniform_data);
+        if (rop_config_count == TRIANGLE_PRIMITIVE_CONFIGS) 
+        {
+            rop_config_count = 1;
+        }
+        else {
+            rop_config_count = rop_config_count + 1;
+        }
+        device_load_config(device_context, rop_config_count - 1, &rop_config, _programs[_current_program-1].uniform_data);
     }
 
     vertex_attibute_updated = 0;
@@ -2471,7 +2949,7 @@ static size_t update_current_context(size_t vertices, GLenum draw_mode)
     _uniform_data_updated = 0;
     _framebuffer_updated = 0;
 
-    return rop_config_count;
+    return rop_config_count - 1;
 }
 
 static void set_stencil_function(stencil_function_t *stencil_function, GLenum func, GLint ref, GLuint mask)
@@ -2500,8 +2978,9 @@ static GLboolean is_valid_face(GLenum face)
 static void set_uniform_data(GLint location, size_t size, const void* data)
 {
     program_t *program = &_programs[_current_program-1];
-
+    // printf("location=%d offset=%d, size=%ld\n",location, program->uniform_arg_datas[location].offset, size);
     memcpy(program->uniform_data + program->uniform_arg_datas[location].offset, data, size);
+    _uniform_data_updated = 1;
 }
 
 static GLboolean is_valid_arg_size_type(arg_data_t* arg_data, size_t size, GLenum type)

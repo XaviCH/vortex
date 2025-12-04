@@ -395,4 +395,55 @@ typedef struct
     #endif
 } gl_texture_data_t;
 
+
+typedef struct
+{
+    cl_uchar misc;
+} gl_framebuffer_data_t;
+
+void set_framebuffer_data_colorbuffer_enabled(gl_framebuffer_data_t *framebuffer_data)
+{
+    framebuffer_data->misc |= (0x1u << 0);
+}
+
+void set_framebuffer_data_depthbuffer_enabled(gl_framebuffer_data_t *framebuffer_data)
+{
+    framebuffer_data->misc |= (0x1u << 1);
+}
+
+void set_framebuffer_data_stencilbuffer_enabled(gl_framebuffer_data_t *framebuffer_data)
+{
+    framebuffer_data->misc |= (0x1u << 2);
+}
+
+void set_framebuffer_data_colorbuffer_disabled(gl_framebuffer_data_t *framebuffer_data)
+{
+    framebuffer_data->misc &= ~(0x1u << 0);
+}
+
+void set_framebuffer_data_depthbuffer_disabled(gl_framebuffer_data_t *framebuffer_data)
+{
+    framebuffer_data->misc &= ~(0x1u << 1);
+}
+
+void set_framebuffer_data_stencilbuffer_disabled(gl_framebuffer_data_t *framebuffer_data)
+{
+    framebuffer_data->misc &= ~(0x1u << 2);
+}
+
+cl_uchar is_framebuffer_data_colorbuffer_enabled(gl_framebuffer_data_t framebuffer_data)
+{
+    return framebuffer_data.misc & (0x1u << 0);
+}
+
+cl_uchar is_framebuffer_data_depthbuffer_enabled(gl_framebuffer_data_t framebuffer_data)
+{
+    return framebuffer_data.misc & (0x1u << 1);
+}
+
+cl_uchar is_framebuffer_data_stencilbuffer_enabled(gl_framebuffer_data_t framebuffer_data)
+{
+    return framebuffer_data.misc & (0x1u << 2);
+}
+
 #endif

@@ -325,4 +325,8 @@
 #define TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR 5
 
 
+#define MIN(_A,_B) (((_A)<(_B))? (_A):(_B))
+#define MAX(_A,_B) (((_A)>(_B))? (_A):(_B))
+#define IS_POWER_OF_2(a) !(a & 0x1u) 
+
 #endif
