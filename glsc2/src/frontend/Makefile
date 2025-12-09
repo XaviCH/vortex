@@ -25,6 +25,7 @@ kernels: $(KERNELS_CL)
 HEADER_FILES = $(wildcard *.h)
 
 %.o: %.c $(HEADER_FILES)
+	$(MAKE) -C $(SRC_PATH)/backend/pipeline
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC
 
 libGLSC2.so: glsc2.o

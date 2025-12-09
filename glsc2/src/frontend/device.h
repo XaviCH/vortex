@@ -211,6 +211,7 @@ int device_create_program_from_binary(device_shared_objects_t* context, size_t s
  */
 void device_finish(device_context_t* context);
 
+static size_t get_vertex_command_index(device_context_t *context);
 
 
 void device_create_shared_objects(device_shared_objects_t* shared) 
@@ -406,6 +407,7 @@ void device_create_context(device_context_t *context, device_shared_objects_t* s
     context->vertex_command_queue_index = 0;
     context->primitive_config = 0;
     context->previous_wait_event = NULL;
+    context->fine_wait_event = NULL;
     context->c_deferred_clear = 0;
     for (int i = 0; i < DEVICE_VERTEX_COMMAND_QUEUE_SIZE; ++i) {
         context->assembly_wait_event[i] = NULL;
@@ -1272,9 +1274,9 @@ void device_clear_framebuffer(device_context_t *context, cl_ulong clear_write_va
 
 void device_load_vertex_attributes(device_context_t *context, const float attribs[DEVICE_VERTEX_ATTRIBUTE_SIZE][4], const vertex_attribute_data_t* attrib_datas) 
 {
-    // printf("device_load_vertex_attributes\n");
+    // printf("device_load_vertex_attributes: context=%p\n", context);
 
-    cl_command_queue queue = context->vertex_command_queues[context->vertex_command_queue_index];
+    cl_command_queue queue = context->vertex_command_queues[get_vertex_command_index(context)];
     cl_event write_wait_event[2];
 
     CL_CHECK(clEnqueueWriteBuffer(
@@ -1317,16 +1319,18 @@ void device_load_config(device_context_t *context, size_t config_id, rop_config_
         config_id,
         context->vertex_command_queue_index
     );
-    float* floats = (float*) uniform_data;
+    */
+    /*
+    uint32_t* uints = (uint32_t*) uniform_data;
     printf("uniform_data=[");
     for(int i=0; i<64; ++i) {
-        printf(" %f", floats[i]);
+        printf(" %d", uints[i]);
     }
     printf(" ]\n");
     printf("rop_config: depth_data=%x\n", rop_config->depth_data);
     */
+   
     context->render_mode = rop_config->render_mode;
-
     cl_event write_wait_event[2];
 
     cl_command_queue queue = context->vertex_command_queues[get_vertex_command_index(context)];
@@ -1399,7 +1403,6 @@ void device_launch_vertex_shader(device_context_t *context, size_t num_vertices,
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gw_offset, &gw_size, NULL, 0, NULL, NULL));
 
     /*
-    CL_CHECK(clFinish(queue));
     size_t num_varying = 1;
     size_t vertices_sizeof = sizeof(float[num_vertices][num_varying+1][4]);
     float *vertices = (float*) malloc(vertices_sizeof);
@@ -1422,9 +1425,9 @@ void device_launch_vertex_shader(device_context_t *context, size_t num_vertices,
 
 /*
 */
-void device_launch_range_triangle_assembly(device_context_t *context, size_t num_vertices, size_t size, const unsigned short *data, size_t config) 
+void device_launch_range_triangle_assembly(device_context_t *context, size_t num_vertices, size_t num_triangles, const size_t size, const unsigned short *data, size_t config) 
 {
-    printf("device_launch_range_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%d\n", context, num_vertices, size, config, context->vertex_command_queue_index);
+    //printf("device_launch_range_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%d\n", context, num_vertices, size, config, context->vertex_command_queue_index);
 
     device_launch_vertex_shader(context, num_vertices, config);
     
@@ -1440,7 +1443,7 @@ void device_launch_range_triangle_assembly(device_context_t *context, size_t num
     const cl_uint primitive_config = config;
 
     size_t gwo = context->assembled_triangles;
-    size_t gws = size/3; // for GL_TRIANGLES mode
+    size_t gws = num_triangles;
     {
         cl_uint vertex_offset = context->cummulative_vertices;
         
@@ -1463,26 +1466,45 @@ void device_launch_range_triangle_assembly(device_context_t *context, size_t num
 
     // update data
     context->cummulative_vertices += num_vertices;
-    context->assembled_triangles += size/3;
+    context->assembled_triangles += num_triangles;
     context->vertex_command_queue_index += 1;
 
+    
+    // DEBUG outputs of range kernel
     /*
-    cl_uchar primitives[12];
-    clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, 0, sizeof(primitives), primitives, 0, NULL, NULL);
+    size_t sizeof_primitives = sizeof(cl_uchar[size]);
+    size_t sizeof_header = sizeof(triangle_header_t[size]);
+    cl_uchar *primitives = malloc(sizeof_primitives);
+    clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, 0, sizeof_primitives, primitives, 0, NULL, NULL);
     printf("subtri=[%d", primitives[0]);
-    for(int i= 1; i<12; ++i) {
+    for(int i= 1; i<size; ++i) {
         printf(",%d", primitives[i]);
     }
     printf("]\n");
+
+    triangle_header_t *triangle_header = malloc(sizeof_header);
+    clEnqueueReadBuffer(queue, context->g_tri_header, CL_TRUE, 0, sizeof_header, triangle_header, 0, NULL, NULL);
+    for(int i=0; i<size; ++i) {
+        triangle_header_t *header = &triangle_header[i];
+        printf("header[%d]{v0x=%d,v0y=%d,v1x=%d,v1y=%d,v2x=%d,v2y=%d}\n",i, 
+            header->v0x >> (CR_SUBPIXEL_LOG2 - 1), 
+            header->v0y >> (CR_SUBPIXEL_LOG2 - 1),
+            header->v1x >> (CR_SUBPIXEL_LOG2 - 1),
+            header->v1y >> (CR_SUBPIXEL_LOG2 - 1),
+            header->v2x >> (CR_SUBPIXEL_LOG2 - 1), 
+            header->v2y >> (CR_SUBPIXEL_LOG2 - 1)
+        );
+    }
     */
+    
 }
 
-static void device_launch_arrays_triangle_assembly(device_context_t *context, size_t config_id, size_t num_vertices, size_t size)
+static void device_launch_arrays_triangle_assembly(device_context_t *context, size_t config_id, size_t num_vertices, size_t num_triangles)
 {
     device_launch_vertex_shader(context, num_vertices, config_id);
-
+    
+    //printf("device_launch_arrays_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%ld\n", context, num_vertices, size, config_id, queue_index);
     size_t queue_index = get_vertex_command_index(context);
-     printf("device_launch_arrays_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%ld\n", context, num_vertices, size, config_id, queue_index);
 
     cl_command_queue queue = context->vertex_command_queues[queue_index];
 
@@ -1493,7 +1515,7 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
     const cl_uint c_config_id = config_id;
 
     size_t gwo = context->assembled_triangles;
-    size_t gws = size/3; // for GL_TRIANGLES mode, TODO: add other modes
+    size_t gws = num_triangles; // for GL_TRIANGLES mode, TODO: add other modes
 
     {
         cl_uint vertex_offset = context->cummulative_vertices;
@@ -1507,16 +1529,45 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
         }
         CL_CHECK(clEnqueueNDRangeKernel(queue, context->triangle_setup_arrays_kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_event[queue_index]));
     }
+    /*
+    size_t szof_offset_primitives = sizeof(cl_uchar[context->assembled_triangles]); 
+    size_t sizeof_primitives = sizeof(cl_uchar[num_triangles]);
+    
+    cl_uchar *primitives = malloc(sizeof_primitives);
+    clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, szof_offset_primitives, sizeof_primitives, primitives, 0, NULL, NULL);
+    printf("subtri=[%d", primitives[0]);
+    for(int i= 1; i<num_triangles; ++i) {
+        printf(",%d", primitives[i]);
+    }
+    printf("]\n");
+    free(primitives);
 
+    size_t szof_offset_header = sizeof(triangle_header_t[context->assembled_triangles]);
+    size_t sizeof_header = sizeof(triangle_header_t[num_triangles]);
+    triangle_header_t *triangle_header = malloc(sizeof_header);
+    clEnqueueReadBuffer(queue, context->g_tri_header, CL_TRUE, szof_offset_header, sizeof_header, triangle_header, 0, NULL, NULL);
+    for(int i=0; i<num_triangles; ++i) {
+        triangle_header_t *header = &triangle_header[i];
+        printf("header[%d]{v0x=%d,v0y=%d,v1x=%d,v1y=%d,v2x=%d,v2y=%d}\n",context->assembled_triangles+i, 
+            header->v0x, 
+            header->v0y,
+            header->v1x,
+            header->v1y,
+            header->v2x, 
+            header->v2y
+        );
+    }
+    free(triangle_header);
+    */
     // update data
     context->cummulative_vertices += num_vertices;
-    context->assembled_triangles += size/3;
+    context->assembled_triangles += num_triangles;
     context->vertex_command_queue_index += 1;
 }
 
 static void device_launch_triangle_rasterization(device_context_t *context) 
 {
-    printf("device_launch_triangle_rasterization: triangles=%d, vertices=%d\n", context->assembled_triangles, context->cummulative_vertices);
+    // printf("device_launch_triangle_rasterization: triangles=%d, vertices=%d\n", context->assembled_triangles, context->cummulative_vertices);
 
     size_t global_work_size[2], local_work_size[2];
     
@@ -1536,6 +1587,50 @@ static void device_launch_triangle_rasterization(device_context_t *context)
         global_work_size[1] = local_work_size[1];
         // printf("context->vertex_command_queue_index=%d\n", context->vertex_command_queue_index);
         CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->bin_raster_kernel, 2, NULL, global_work_size, local_work_size, await_events, context->assembly_wait_event, NULL));
+
+        /*
+        printf("num_tris=%d\n",c_num_tris);
+        size_t bins_size = context->c_width_bins * context->c_height_bins;
+        size_t sizeof_bins = sizeof(cl_int[bins_size * CR_BIN_STREAMS_SIZE]);
+        printf("bins_size=%ld\n", bins_size);
+        // printf("sizeof_bins=%ld\n", sizeof_bins/sizeof(cl_int));
+        cl_int *bin_first_seg = (cl_int*)malloc(sizeof_bins);
+        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->g_bin_first_seg, CL_TRUE, 0, sizeof_bins, bin_first_seg, 0, NULL, NULL));
+        cl_int first_active_bins = 0;
+        cl_int other_bins = 0;
+        for(int i=0; i<sizeof_bins/sizeof(cl_int); ++i) if (bin_first_seg[i] != -1) first_active_bins += 1;
+        printf("first_active_bins=%d\n", first_active_bins);
+        cl_uint a_num_bin_segs;
+        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_bin_segs, CL_TRUE, 0, sizeof(a_num_bin_segs), &a_num_bin_segs, 0, NULL, NULL));
+        printf("a_num_bin_segs=%d\n", a_num_bin_segs);
+        for(int j=0; j<bins_size; ++j) {
+            printf("bin_first_seg[%d]=[", j);
+            for(int i=0; i<CR_BIN_STREAMS_SIZE; ++i) {
+                printf(" %d", bin_first_seg[j*CR_BIN_STREAMS_SIZE+i]);
+            }
+            printf(" ]\n");
+        }
+
+        cl_int num_segs = 4;
+        size_t sizeof_segs_count = sizeof(cl_int[num_segs]);
+        size_t sizeof_segs_data = sizeof(cl_int[num_segs][CR_BIN_SEG_SIZE]);
+        cl_int *bin_seg_count = (cl_int*)malloc(sizeof_segs_count);
+        cl_int *bin_seg_data = (cl_int*)malloc(sizeof_segs_data);
+        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->g_bin_seg_count, CL_TRUE, 0, sizeof_segs_count, bin_seg_count, 0, NULL, NULL));
+        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->g_bin_seg_data, CL_TRUE, 0, sizeof_segs_data, bin_seg_data, 0, NULL, NULL));
+
+        for(int i=0; i<num_segs; ++i) {
+            printf("bin_seg_count[%d]=%d\n", i, bin_seg_count[i]);
+            printf("bin_seg_data[%d]=[", i);
+            for(int j=0; j<bin_seg_count[i]; ++j) {
+                printf(" %d", bin_seg_data[i*CR_BIN_SEG_SIZE+j] >> 3);
+            }
+            printf(" ]\n");
+        }
+
+        printf("End of bin raster\n");
+        //CL_CHECK(clFinish(context->raster_command_queue));
+        */
     }
 
     {
@@ -1544,6 +1639,13 @@ static void device_launch_triangle_rasterization(device_context_t *context)
         global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
         global_work_size[1] = local_work_size[1];
         CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->coarse_raster_kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+        /*
+        CL_CHECK(clFinish(context->raster_command_queue));
+        printf("End of coarse raster\n");
+        cl_int a_num_active_tiles;
+        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_active_tiles, CL_TRUE, 0, sizeof(a_num_active_tiles), &a_num_active_tiles, 0, NULL, NULL));
+        printf("a_num_active_tiles=%d\n", a_num_active_tiles);
+        */
     }
 
     {
@@ -1622,7 +1724,10 @@ static void device_launch_triangle_rasterization(device_context_t *context)
         global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
         global_work_size[1] = local_work_size[1];
         CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->fine_raster_kernel, 2, NULL, global_work_size, local_work_size, wait_events, context->previous_wait_event == NULL ? NULL : &context->previous_wait_event, &context->fine_wait_event));
-        // CL_CHECK(clFinish(context->raster_command_queue));
+        /*
+        CL_CHECK(clFinish(context->raster_command_queue));
+        printf("End of fine raster\n");
+        */
     }
 
     // CL_CHECK(clFinish(context->raster_command_queue));
@@ -1800,8 +1905,8 @@ void device_shared_launch_read_pixels(
     cl_uint event_size = 0;
     cl_event *event = NULL;
     if (await_context != NULL) {
-        event = &await_context->fine_wait_event;
-        if (event != NULL) {
+        if (await_context->fine_wait_event != NULL) {
+            event = &await_context->fine_wait_event;
             event_size = 1;
         }
     }
@@ -1829,6 +1934,7 @@ void device_shared_launch_read_pixels(
         size_t pixel_size = 4; // assuming RGBA8 for shared objects
         size_t buffer_size = width * height * pixel_size;
         size_t buffer_offset = (y * width + x) * pixel_size;
+
         CL_CHECK(clEnqueueReadBuffer(
             queue,
             shared->t_colorbuffer,

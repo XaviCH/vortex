@@ -1099,7 +1099,7 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     size_t config_id = update_current_context(num_vertices, mode);
     
-    device_launch_arrays_triangle_assembly(device_context, config_id, num_vertices, count);
+    device_launch_arrays_triangle_assembly(device_context, config_id, num_vertices, num_triangles);
 
     update_draw_state(num_triangles, _current_program - 1);
 }
@@ -1139,7 +1139,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
 
     size_t config_id = update_current_context(num_vertices, mode);
 
-    device_launch_range_triangle_assembly(device_context, num_vertices, count, indices, config_id);
+    device_launch_range_triangle_assembly(device_context, num_vertices, num_triangles, count, indices, config_id);
 
     update_draw_state(num_triangles, _current_program - 1);
 }
@@ -1588,9 +1588,7 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 
     if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    printf("draw_state\n");
     flush_draw_state();
-    printf("clear_state\n");
     flush_clear_state();
 
     device_context_t *context = (_current_program != 0) ? 
@@ -1876,10 +1874,10 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
     device_write_2d_texture(&device_shared_objects, texture->id, width, height, texture_mode, pixels);
 }
 
-#define GENERIC_UNIFORM(_SIZE, _TYPE, _LOCATION, ...) \
+#define GENERIC_UNIFORM(_SIZE, _GL_TYPE, _LOCATION, _TYPE, ...) \
 { \
-    if (is_valid_uniform_data(_LOCATION, _SIZE, _TYPE) == GL_FALSE) RETURN_ERROR(GL_INVALID_OPERATION); \
-    GLfloat array[] = {__VA_ARGS__}; \
+    if (is_valid_uniform_data(_LOCATION, _SIZE, _GL_TYPE) == GL_FALSE) RETURN_ERROR(GL_INVALID_OPERATION); \
+    _TYPE array[] = {__VA_ARGS__}; \
     set_uniform_data(location, sizeof(array), array); \
 }
 
@@ -1891,7 +1889,7 @@ GL_APICALL void GL_APIENTRY glTexSubImage2D (GLenum target, GLint level, GLint x
 
 GL_APICALL void GL_APIENTRY glUniform1f (GLint location, GLfloat v0)
 {
-    GENERIC_UNIFORM(1, GL_FLOAT, location, v0);
+    GENERIC_UNIFORM(1, GL_FLOAT, location, GLfloat, v0);
 }
 
 GL_APICALL void GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const GLfloat *value) 
@@ -1901,7 +1899,7 @@ GL_APICALL void GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform1i (GLint location, GLint v0)
 {
-    GENERIC_UNIFORM(1, GL_INT, location, v0);
+    GENERIC_UNIFORM(1, GL_INT, location, GLint, v0);
 }
 
 GL_APICALL void GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const GLint *value) 
@@ -1911,7 +1909,7 @@ GL_APICALL void GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform2f (GLint location, GLfloat v0, GLfloat v1)
 {
-    GENERIC_UNIFORM(2, GL_FLOAT, location, v0, v1);
+    GENERIC_UNIFORM(2, GL_FLOAT, location, GLfloat, v0, v1);
 }
 
 GL_APICALL void GL_APIENTRY glUniform2fv (GLint location, GLsizei count, const GLfloat *value)
@@ -1921,7 +1919,7 @@ GL_APICALL void GL_APIENTRY glUniform2fv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform2i (GLint location, GLint v0, GLint v1)
 {
-    GENERIC_UNIFORM(2, GL_INT, location, v0, v1);
+    GENERIC_UNIFORM(2, GL_INT, location, GLint, v0, v1);
 }
 
 GL_APICALL void GL_APIENTRY glUniform2iv (GLint location, GLsizei count, const GLint *value)
@@ -1931,7 +1929,7 @@ GL_APICALL void GL_APIENTRY glUniform2iv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform3f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2)
 {
-    GENERIC_UNIFORM(3, GL_FLOAT, location, v0, v1, v2);
+    GENERIC_UNIFORM(3, GL_FLOAT, location, GLfloat, v0, v1, v2);
 }
 
 GL_APICALL void GL_APIENTRY glUniform3fv (GLint location, GLsizei count, const GLfloat *value)
@@ -1941,7 +1939,7 @@ GL_APICALL void GL_APIENTRY glUniform3fv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform3i (GLint location, GLint v0, GLint v1, GLint v2)
 {
-    GENERIC_UNIFORM(3, GL_INT, location, v0, v1, v2);
+    GENERIC_UNIFORM(3, GL_INT, location, GLint, v0, v1, v2);
 }
 
 GL_APICALL void GL_APIENTRY glUniform3iv (GLint location, GLsizei count, const GLint *value)
@@ -1951,7 +1949,7 @@ GL_APICALL void GL_APIENTRY glUniform3iv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform4f (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)
 {
-    GENERIC_UNIFORM(4, GL_FLOAT, location, v0, v1, v2, v3);
+    GENERIC_UNIFORM(4, GL_FLOAT, location, GLfloat, v0, v1, v2, v3);
 }
 
 GL_APICALL void GL_APIENTRY glUniform4fv (GLint location, GLsizei count, const GLfloat *value) 
@@ -1961,7 +1959,7 @@ GL_APICALL void GL_APIENTRY glUniform4fv (GLint location, GLsizei count, const G
 
 GL_APICALL void GL_APIENTRY glUniform4i (GLint location, GLint v0, GLint v1, GLint v2, GLint v3)
 {
-    GENERIC_UNIFORM(4, GL_INT, location, v0, v1, v2, v3);
+    GENERIC_UNIFORM(4, GL_INT, location, GLint, v0, v1, v2, v3);
 }
 
 GL_APICALL void GL_APIENTRY glUniform4iv (GLint location, GLsizei count, const GLint *value)
@@ -2978,7 +2976,7 @@ static GLboolean is_valid_face(GLenum face)
 static void set_uniform_data(GLint location, size_t size, const void* data)
 {
     program_t *program = &_programs[_current_program-1];
-    // printf("location=%d offset=%d, size=%ld\n",location, program->uniform_arg_datas[location].offset, size);
+    // printf("location=%d offset=%d, size=%ld, data*=%d\n",location, program->uniform_arg_datas[location].offset, size, *((uint32_t*)data));
     memcpy(program->uniform_data + program->uniform_arg_datas[location].offset, data, size);
     _uniform_data_updated = 1;
 }

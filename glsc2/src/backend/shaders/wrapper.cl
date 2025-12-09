@@ -201,6 +201,10 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     *dst = *(global const float*)&gl_uniforms[*offset];
     *offset += sizeof(float);
 }
+inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_uniforms, int* dst, uint* offset) {
+    *dst = *(global const int*)&gl_uniforms[*offset];
+    *offset += sizeof(int);
+}
 inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_uniforms, uint* dst, uint* offset) {
     *dst = *(global const uint*)&gl_uniforms[*offset];
     *offset += sizeof(uint);
@@ -239,6 +243,16 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     #define KERNEL_PARAM_UNIFORM_FLOAT
     #define DEFINE_UNIFORM_FLOAT
     #define SET_UNIFORM_FLOAT
+#endif
+
+#ifdef UNIFORM_INT
+    #define KERNEL_PARAM_UNIFORM_INT COMMA_CHAIN(constant int*, UNIFORM_INT)
+    #define DEFINE_UNIFORM_INT STRUCT_CHAIN(int, UNIFORM_INT)
+    #define SET_UNIFORM_INT SET_UNIFORM_CHAIN(UNIFORM_INT)
+#else
+    #define KERNEL_PARAM_UNIFORM_INT
+    #define DEFINE_UNIFORM_INT
+    #define SET_UNIFORM_INT
 #endif
 
 #ifdef UNIFORM_INT2
@@ -298,6 +312,12 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     #define VS_KERNEL_PARAM_UNIFORM_FLOAT
 #endif
 
+#ifdef VS_UNIFORM_INT
+    #define VS_KERNEL_PARAM_UNIFORM_INT COMMA_CHAIN(constant int*, VS_UNIFORM_INT)
+#else
+    #define VS_KERNEL_PARAM_UNIFORM_INT
+#endif
+
 #ifdef VS_UNIFORM_INT2
     #define VS_KERNEL_PARAM_UNIFORM_INT2 COMMA_CHAIN(constant int2*, VS_UNIFORM_INT2)
 #else
@@ -330,6 +350,12 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     #define FS_KERNEL_PARAM_UNIFORM_FLOAT COMMA_CHAIN(constant float*, FS_UNIFORM_FLOAT)
 #else
     #define FS_KERNEL_PARAM_UNIFORM_FLOAT
+#endif
+
+#ifdef FS_UNIFORM_INT
+    #define FS_KERNEL_PARAM_UNIFORM_INT COMMA_CHAIN(constant int*, FS_UNIFORM_INT)
+#else
+    #define FS_KERNEL_PARAM_UNIFORM_INT
 #endif
 
 #ifdef FS_UNIFORM_INT2
@@ -367,6 +393,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     DEFINE_UNIFORM_VEC4 \
     DEFINE_UNIFORM_INT2 \
     DEFINE_UNIFORM_SAMPLER2D \
+    DEFINE_UNIFORM_INT \
     DEFINE_UNIFORM_FLOAT
 
 #define KERNEL_PARAM_UNIFORMS \
@@ -374,6 +401,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     KERNEL_PARAM_UNIFORM_VEC4 \
     KERNEL_PARAM_UNIFORM_INT2 \
     KERNEL_PARAM_UNIFORM_SAMPLER2D \
+    KERNEL_PARAM_UNIFORM_INT \
     KERNEL_PARAM_UNIFORM_FLOAT
 
 #define VS_KERNEL_PARAM_UNIFORMS \
@@ -381,6 +409,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     VS_KERNEL_PARAM_UNIFORM_VEC4 \
     VS_KERNEL_PARAM_UNIFORM_INT2 \
     VS_KERNEL_PARAM_UNIFORM_SAMPLER2D \
+    VS_KERNEL_PARAM_UNIFORM_INT \
     VS_KERNEL_PARAM_UNIFORM_FLOAT 
 
 #define FS_KERNEL_PARAM_UNIFORMS \
@@ -388,6 +417,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
     FS_KERNEL_PARAM_UNIFORM_VEC4 \
     FS_KERNEL_PARAM_UNIFORM_INT2 \
     FS_KERNEL_PARAM_UNIFORM_SAMPLER2D \
+    FS_KERNEL_PARAM_UNIFORM_INT \
     FS_KERNEL_PARAM_UNIFORM_FLOAT 
 
 #define SET_UNIFORMS \
@@ -397,6 +427,7 @@ inline void __attribute__((overloadable)) gl_get_uniform(global const void* gl_u
         SET_UNIFORM_VEC4 \
         SET_UNIFORM_INT2 \
         SET_UNIFORM_SAMPLER2D \
+        SET_UNIFORM_INT \
         SET_UNIFORM_FLOAT \
     }
 

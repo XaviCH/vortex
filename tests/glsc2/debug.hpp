@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <CL/opencl.h>
-/*
+
 #define CL_CHECK(_expr)                                                \
    do {                                                                \
      cl_int _err = _expr;                                              \
@@ -20,4 +20,4 @@
      }                                                                 \
      _ret;                                                             \
    })
-   */
+   
