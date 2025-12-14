@@ -1421,6 +1421,7 @@ void device_launch_vertex_shader(device_context_t *context, size_t num_vertices,
         printf("\n");
     }
     */
+    
 }
 
 /*
@@ -1541,7 +1542,8 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
     }
     printf("]\n");
     free(primitives);
-
+    */
+    /*
     size_t szof_offset_header = sizeof(triangle_header_t[context->assembled_triangles]);
     size_t sizeof_header = sizeof(triangle_header_t[num_triangles]);
     triangle_header_t *triangle_header = malloc(sizeof_header);
@@ -1559,6 +1561,7 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
     }
     free(triangle_header);
     */
+
     // update data
     context->cummulative_vertices += num_vertices;
     context->assembled_triangles += num_triangles;
@@ -1610,7 +1613,6 @@ static void device_launch_triangle_rasterization(device_context_t *context)
             }
             printf(" ]\n");
         }
-
         cl_int num_segs = 4;
         size_t sizeof_segs_count = sizeof(cl_int[num_segs]);
         size_t sizeof_segs_data = sizeof(cl_int[num_segs][CR_BIN_SEG_SIZE]);
@@ -1629,8 +1631,9 @@ static void device_launch_triangle_rasterization(device_context_t *context)
         }
 
         printf("End of bin raster\n");
-        //CL_CHECK(clFinish(context->raster_command_queue));
         */
+        //CL_CHECK(clFinish(context->raster_command_queue));
+        
     }
 
     {
@@ -1642,9 +1645,10 @@ static void device_launch_triangle_rasterization(device_context_t *context)
         /*
         CL_CHECK(clFinish(context->raster_command_queue));
         printf("End of coarse raster\n");
-        cl_int a_num_active_tiles;
+        cl_int a_num_active_tiles, a_num_tile_segs;
         CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_active_tiles, CL_TRUE, 0, sizeof(a_num_active_tiles), &a_num_active_tiles, 0, NULL, NULL));
-        printf("a_num_active_tiles=%d\n", a_num_active_tiles);
+        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_tile_segs, CL_TRUE, 0, sizeof(a_num_tile_segs), &a_num_tile_segs, 0, NULL, NULL));
+        printf("a_num_active_tiles=%d, a_num_tile_segs=%d\n", a_num_active_tiles, a_num_tile_segs);
         */
     }
 
@@ -1724,10 +1728,16 @@ static void device_launch_triangle_rasterization(device_context_t *context)
         global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
         global_work_size[1] = local_work_size[1];
         CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->fine_raster_kernel, 2, NULL, global_work_size, local_work_size, wait_events, context->previous_wait_event == NULL ? NULL : &context->previous_wait_event, &context->fine_wait_event));
+        // printf("context=%p",context);
+        // printf("raster await_ptr=%p\n",context->fine_wait_event);
         /*
         CL_CHECK(clFinish(context->raster_command_queue));
         printf("End of fine raster\n");
         */
+        // cl_int a_fine_counter;
+        // CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_fine_counter, CL_TRUE, 0, sizeof(a_fine_counter), &a_fine_counter, 0, NULL, NULL));
+        // printf("a_fine_counter=%d\n", a_fine_counter);
+        
     }
 
     // CL_CHECK(clFinish(context->raster_command_queue));
@@ -1907,6 +1917,9 @@ void device_shared_launch_read_pixels(
     if (await_context != NULL) {
         if (await_context->fine_wait_event != NULL) {
             event = &await_context->fine_wait_event;
+            event_size = 1;
+        } else if (await_context->previous_wait_event != NULL) {
+            event = &await_context->previous_wait_event;
             event_size = 1;
         }
     }
