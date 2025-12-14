@@ -35,21 +35,21 @@ int main() {
 
   // Set Up Frame Context
   glGenFramebuffers(1, &framebuffer);
-  glGenRenderbuffers(1, &colorbuffer);
+  glGenTextures(1, &colorbuffer);
   glGenRenderbuffers(1, &depthbuffer);
   glGenRenderbuffers(1, &stencilbuffer);
 
-  glBindRenderbuffer(GL_RENDERBUFFER, colorbuffer);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA4, WIDTH, HEIGHT);
-
+  glBindTexture(GL_TEXTURE_2D, colorbuffer);
+  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, WIDTH, HEIGHT);
+  
   glBindRenderbuffer(GL_RENDERBUFFER, depthbuffer);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, WIDTH, HEIGHT);
-
+  
   glBindRenderbuffer(GL_RENDERBUFFER, stencilbuffer);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, WIDTH, HEIGHT);
-
+  
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorbuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorbuffer, 0);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthbuffer);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, stencilbuffer);
 
@@ -77,17 +77,17 @@ int main() {
   glDrawArrays(GL_TRIANGLES, 0, 3);
 
   glVertexAttribPointer(loc_position, 3, GL_FLOAT, GL_FALSE, 0, &quad_position);
-  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-  
   glVertexAttrib4f(loc_color, 1, 0, 0, 1);
   glStencilFunc(GL_GREATER, 1, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
   glDrawArrays(GL_TRIANGLES, 0, 6);
-
+  
+  
   glVertexAttrib4f(loc_color, 0, 1, 0, 1);
   glStencilFunc(GL_LESS, 0, 0xFF);
   glDrawArrays(GL_TRIANGLES, 0, 6);
   
-  glFinish();
+  // glFinish();
   
   #ifdef C_OPENGL_HOST
   glReadPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, result);

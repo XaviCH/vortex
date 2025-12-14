@@ -1,22 +1,15 @@
+#define ATTRIBUTE_VEC3 position, in_color
 
-kernel void main_vs (
-  global const float4 *position,
-  const float4 in_color,
-  global float4 *out_color,
-  global float4 *gl_Position
-) {
-  int gid = get_global_id(0);
+#define VARYING_VEC3 out_color
 
-  gl_Position[gid] = position[gid];
-  out_color[gid] = in_color;
-}
+#include <wrapper.cl>
 
-kernel void main_fs (
-  global const float4 *out_color,
-  global float4 *gl_FragColor
-)
-{
-  int gid = get_global_id(0);
-  
-  gl_FragColor[gid] = out_color[gid];
-}
+VS_MAIN({
+    gl_Position = (vec4)(position, 1);
+    out_color = in_color;
+})
+
+FS_MAIN({
+    gl_FragColor = (vec4)(out_color,1);
+})
+

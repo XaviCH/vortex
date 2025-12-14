@@ -61,7 +61,7 @@ void write_colorbuffer_channels(
     #endif
 }
 
-void write_depthbuffer(
+void write_depthbuffer_(
     rw_texture2d_t depthbuffer,
     const ulong clear_write_values, 
     const ushort clear_enabled_data
@@ -85,7 +85,7 @@ void write_depthbuffer(
     #endif
 }
 
-void write_stencilbuffer(
+void write_stencilbuffer_(
     rw_texture2d_t stencilbuffer,
     const ulong clear_write_values, 
     const ushort clear_enabled_data
@@ -148,14 +148,14 @@ kernel void force_clear(
         #endif
     );
 
-    write_depthbuffer(
+    write_depthbuffer_(
         depthbuffer, clear_write_values, clear_enabled_data
         #ifndef DEVICE_IMAGE_ENABLED
         , buffer_width
         #endif
     );
 
-    write_stencilbuffer(
+    write_stencilbuffer_(
         stencilbuffer, clear_write_values, clear_enabled_data
         #ifndef DEVICE_IMAGE_ENABLED
         , buffer_width

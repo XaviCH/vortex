@@ -402,6 +402,7 @@ inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool val
     sub_group_mask_t mask;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+        sub_group_barrier(CLK_LOCAL_MEM_FENCE);
         mask = ballot_sub_group_mask(value);
     #else
     {

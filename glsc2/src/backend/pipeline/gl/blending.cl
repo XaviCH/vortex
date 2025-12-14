@@ -128,8 +128,8 @@ inline float4 uint_to_float4(const uint color) {
   #undef EXTRACT_BYTE
 }
 
-inline uint float4_to_uint(const float4* color) {
-  float4 tmp = clamp(*color, 0.f, 1.f);
+static inline uint float4_to_uint(const float4 color) {
+  float4 tmp = clamp(color, 0.f, 1.f);
 
   return 
     (uint)(tmp.x * 255.f) <<  0 |
@@ -184,6 +184,6 @@ inline uint blend(
       break;
   }
 
-  return float4_to_uint(&outColor);
+  return float4_to_uint(outColor);
 
 }

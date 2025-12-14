@@ -343,7 +343,7 @@ inline sub_group_mask_t determine_ROP_lane_mask(uint c_render_mode_flags) //, lo
             reverse_lanes = false;
     }
     */
-    bool reverse_lanes = false;
+    bool reverse_lanes = true;
     return reverse_lanes ? get_lane_sub_group_mask_lt() : not_sub_group_mask(get_lane_sub_group_mask_le());
 }
 
@@ -397,7 +397,7 @@ inline int find_fragment(ulong coverage, int frag_idx)
 //------------------------------------------------------------------------
 
 inline void execute_ROP_single_sample(
-    fragment_shader_output_t* restrict fs_out, ushort depth, 
+    const fragment_shader_output_t fs_out, ushort depth, 
     local volatile uint* restrict ptr_color, 
     local volatile ushort* restrict ptr_depth, 
     local volatile uchar* restrict ptr_stencil,
@@ -407,7 +407,7 @@ inline void execute_ROP_single_sample(
     blend_shader_input_t blend_shader_input;
     blend_shader_output_t blend_shader_output;
 
-    uint color = float4_to_uint(&fs_out->gl_FragColor);
+    uint color = float4_to_uint(fs_out.gl_FragColor);
 
     // per-fragment enabled operations
     bool stencil_test_enabled = is_render_mode_flag_enable_stencil(rop_config.render_mode);
@@ -467,6 +467,176 @@ inline void execute_ROP_single_sample(
 #define FS_KERNEL_PARAMS
 #endif // FS_KERNEL_PARAMS
 
+static inline bool is_surface_out_viewport(uint2 surf, uint2 viewport) 
+{
+    return surf.x >= viewport.x || surf.y >= viewport.y;
+}
+
+static inline uint2 get_2d_surface_from_tile(uint2 tile, uint pixel)
+{
+    return (tile << CR_TILE_LOG2) + (uint2){
+        (pixel & (CR_TILE_SIZE - 1)),
+        (pixel >> CR_TILE_LOG2)
+    };
+}
+
+static inline void local_1dim_load_and_clean_framebuffer_to_local_mem(
+    colorbuffer_t colorbuffer, depthbuffer_t depthbuffer, stencilbuffer_t stencilbuffer,
+    local uint* restrict l1_color, local ushort* restrict l1_depth, local uchar* restrict l1_stencil,
+    gl_framebuffer_data_t framebuffer_data,
+    const ulong  clear_write_values, const enabled_data_t clear_enabled_data,
+    const uint   colorbuffer_mode,
+    uint2 tile, uint2 viewport
+) {
+    bool load_colorbuffer, load_depthbuffer, load_stencilbuffer;
+
+    load_colorbuffer =
+        is_framebuffer_data_colorbuffer_enabled(framebuffer_data) &&
+        !is_enabled_data_all_color_channels(clear_enabled_data);
+    
+    load_depthbuffer =
+        is_framebuffer_data_depthbuffer_enabled(framebuffer_data) && 
+        get_enabled_depth_data(clear_enabled_data) == 0;
+
+    load_stencilbuffer =
+        is_framebuffer_data_stencilbuffer_enabled(framebuffer_data) &&
+        !is_enabled_data_all_stencil_bits(clear_enabled_data);
+
+    
+    #pragma unroll
+    for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
+        
+        uint2 surf = get_2d_surface_from_tile(tile, pixel);
+
+        if (is_surface_out_viewport(surf, viewport)) continue;
+        
+        {
+            uint color;
+
+            if (load_colorbuffer) 
+            {
+                color = read_colorbuffer(colorbuffer, surf, viewport, colorbuffer_mode);
+            }
+
+            l1_color[pixel] = clear_color(color, clear_write_values, clear_enabled_data); 
+        }
+
+        {
+            ushort depth;
+
+            if (load_depthbuffer) 
+            {
+                depth = read_depthbuffer(depthbuffer, surf, viewport);
+            }
+
+            l1_depth[pixel] = clear_depth(depth, clear_write_values, clear_enabled_data);
+        }
+
+        {
+            uchar stencil;
+
+            if (load_stencilbuffer) 
+            {
+                stencil = read_stencilbuffer(stencilbuffer, surf, viewport);
+            }
+
+            l1_stencil[pixel] = clear_stencil(stencil, clear_write_values, clear_enabled_data);
+        }
+    }
+}
+
+// Write tile back to the framebuffer.
+static inline void local_1dim_store_local_mem_to_framebuffer(
+    colorbuffer_t colorbuffer, depthbuffer_t depthbuffer, stencilbuffer_t stencilbuffer,
+    local uint* restrict l1_color, local ushort* restrict l1_depth, local uchar* restrict l1_stencil,
+    const gl_framebuffer_data_t framebuffer_data,
+    const uint colorbuffer_mode,
+    const uint2 tile, const uint2 viewport
+)
+{
+    bool store_colorbuffer, store_depthbuffer, store_stencilbuffer;
+
+    store_colorbuffer = is_framebuffer_data_colorbuffer_enabled(framebuffer_data);
+    
+    store_depthbuffer = is_framebuffer_data_depthbuffer_enabled(framebuffer_data);
+
+    store_stencilbuffer = is_framebuffer_data_stencilbuffer_enabled(framebuffer_data);
+
+    #pragma unroll
+    for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
+        
+        uint2 surf = get_2d_surface_from_tile(tile, pixel);
+
+        if (is_surface_out_viewport(surf, viewport)) continue;
+
+        if (store_colorbuffer) 
+        {
+            write_colorbuffer(colorbuffer, surf, viewport, colorbuffer_mode, l1_color[pixel]);
+        }
+
+        if (store_depthbuffer) 
+        {
+            write_depthbuffer(depthbuffer, surf, viewport, l1_depth[pixel]);
+        }
+
+        if (store_stencilbuffer) 
+        {
+            write_stencilbuffer(stencilbuffer, surf, viewport, l1_stencil[pixel]);
+        }
+
+    }
+}
+
+typedef union {
+    uint                integer [DEVICE_SUB_GROUP_THREADS];
+    sub_group_mask_t    mask    [DEVICE_SUB_GROUP_THREADS];
+    sub_group_mask_t    tile    [CR_TILE_SQR];
+} sg_tmp_mem_t;
+
+static inline void local_1dim_execute_rop(
+    local volatile uint*                restrict l1_color, 
+    local volatile ushort*              restrict l1_depth, 
+    local volatile uchar*               restrict l1_stencil,
+    local volatile sg_tmp_mem_t*        restrict l1_temp,
+    const rop_config_t rop_config,
+    const uint pixel_in_tile,
+    const fragment_shader_output_t fs_output,
+    const ushort pre_depth,
+    bool active_rop_lane
+) {
+    sub_group_mask_t thread_bit = get_thread_bit_sub_group_mask();
+    sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
+
+    do
+    {
+        if (active_rop_lane) 
+            clear_sub_group_mask(&l1_temp->tile[pixel_in_tile]);
+
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+        if (active_rop_lane) 
+            atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], thread_bit);
+
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+        
+        if (active_rop_lane) {
+            
+            if (!any_sub_group_mask(and_sub_group_mask(l1_temp->tile[pixel_in_tile], lt_mask))) {
+                
+                execute_ROP_single_sample(
+                    fs_output, pre_depth,
+                    &l1_color[pixel_in_tile], &l1_depth[pixel_in_tile], &l1_stencil[pixel_in_tile],
+                    rop_config 
+                );
+                active_rop_lane = false;
+            }
+            
+        }
+            
+    } while(any_sub_group_mask(local_1dim_ballot(active_rop_lane, &l1_temp->mask)));
+}
+
+
 /**
  * Single-sample rasterization kernel.
  *
@@ -499,16 +669,13 @@ void fine_raster_single_sample(
     global const int* restrict g_tile_seg_next,
     global const triangle_header_t* restrict g_tri_header,
 
+    colorbuffer_t t_colorbuffer,
+    depthbuffer_t t_depthbuffer,
+    stencilbuffer_t t_stencilbuffer,
     #ifdef DEVICE_IMAGE_ENABLED
-    read_write image2d_t t_color_buffer,
-    read_write image2d_t t_depth_buffer,
-    read_write image2d_t t_stencil_buffer,
     read_only image1d_buffer_t t_tri_data,
     read_only image1d_buffer_t t_tri_header,
     #else
-    global void* restrict g_color_buffer,
-    global ushort* restrict g_depth_buffer,
-    global uchar* restrict g_stencil_buffer,
     global const triangle_data_t* restrict g_tri_data,
     #endif
     ro_vertex_buffer_t vertex_buffer,
@@ -538,11 +705,6 @@ void fine_raster_single_sample(
     local volatile uchar    l_triangle_conf    [DEVICE_FINE_SUB_GROUPS][64];          // 0.25KB  per-triangle configuration
 
     // The required local mem for specific sub-group communications.
-    typedef union {
-        uint                integer [DEVICE_SUB_GROUP_THREADS];
-        sub_group_mask_t    mask    [DEVICE_SUB_GROUP_THREADS];
-        sub_group_mask_t    tile    [CR_TILE_SQR];
-    } sg_tmp_mem_t;
 
     local volatile sg_tmp_mem_t     l_temp              [DEVICE_FINE_SUB_GROUPS]; // tmp memory
                                                                             // = 47.25KB total
@@ -574,7 +736,7 @@ void fine_raster_single_sample(
         (c_clear_enabled_data & CLEAR_ENABLED_STENCIL_CHANNEL_MASK) != 0;
 
     bool colorbuffer_full_clear = 
-        (c_clear_enabled_data & CLEAR_ENABLED_COLOR_CHANNEL_MASK) == CLEAR_ENABLED_COLOR_CHANNEL_MASK;
+        (c_clear_enabled_data & ENABLED_COLOR_CHANNEL_MASK) == ENABLED_COLOR_CHANNEL_MASK;
     bool stencilbuffer_full_clear = 
         (c_clear_enabled_data & CLEAR_ENABLED_STENCIL_CHANNEL_MASK) == CLEAR_ENABLED_STENCIL_CHANNEL_MASK;
 
@@ -605,64 +767,21 @@ void fine_raster_single_sample(
         w_triangle_frag[63] = 0; // "previous triangle"
 
         // load tile
-        {
-            // Copy and clear if required framebuffers
-            // TODO: Scissor test and dithering.
-            bool colorbuffer_needs_load = !colorbuffer_full_clear && is_framebuffer_data_colorbuffer_enabled(c_framebuffer_data);
-            bool depthbuffer_needs_load = /*depth_test_enabled &&*/ !depthbuffer_clear && is_framebuffer_data_depthbuffer_enabled(c_framebuffer_data);;
-            bool stencilbuffer_needs_load = /*stencil_test_enabled &&*/ !stencilbuffer_full_clear && is_framebuffer_data_stencilbuffer_enabled(c_framebuffer_data);;
-
-            #pragma unroll
-            for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
-                uint color;
-                ushort depth;
-                uchar stencil;
-                
-                int surf_x = (tile_x << CR_TILE_LOG2) + (pixel & (CR_TILE_SIZE - 1));
-                int surf_y = (tile_y << CR_TILE_LOG2) + (pixel >> CR_TILE_LOG2);
-
-                if (surf_x >= c_viewport_width || surf_y >= c_viewport_height) continue;
-                
-                if (colorbuffer_needs_load) {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        color = uint4_to_int(read_imageui(t_color_buffer,(int2){surf_x,surf_y}));
-                    #else
-                        color = read_tex_from_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode);
-                    #endif
-                }
-                color = clear_color(color, c_clear_write_values, c_clear_enabled_data);
-
-                if (depthbuffer_needs_load) {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        depth = read_imageui(t_depth_buffer,(int2){surf_x,surf_y}).x;
-                    #else
-                        depth = g_depth_buffer[surf_x + surf_y*c_viewport_width];
-                    #endif
-                } else {
-                    depth = clear_depth(c_clear_write_values, c_clear_enabled_data);
-                }
-
-                if (stencilbuffer_needs_load) {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        stencil = read_imageui(t_stencil_buffer,(int2){surf_x,surf_y}).x;
-                    #else
-                        stencil = g_stencil_buffer[surf_x + surf_y*c_viewport_width];
-                    #endif
-                }
-                stencil = clear_stencil(stencil, c_clear_write_values, c_clear_enabled_data);
-
-                w_tile_color[pixel] = color; 
-                w_tile_depth[pixel] = depth;
-                w_tile_stencil[pixel] = stencil;
-            }
-        }
+        local_1dim_load_and_clean_framebuffer_to_local_mem(
+            t_colorbuffer, t_depthbuffer, t_stencilbuffer,
+            (local uint*) w_tile_color, (local ushort*) w_tile_depth, (local uchar*) w_tile_stencil,
+            c_framebuffer_data,
+            c_clear_write_values, (enabled_data_t) {c_clear_enabled_data},
+            c_color_buffer_mode,
+            (uint2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
+        );
+        
 
         // bound tile z
         ushort tile_z_max, tile_z_min;
         bool tile_z_upd_max, tile_z_upd_min;
         init_tile_z_max(&tile_z_max, &tile_z_upd_max, w_tile_depth);
         init_tile_z_min(&tile_z_min, &tile_z_upd_min, w_tile_depth);
-        
         // process fragments in tile
         for(;;)
         {
@@ -758,7 +877,7 @@ void fine_raster_single_sample(
             sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, &sg_temp->mask);
 
             bool active_rop_lane = rop_lane_idx < frag_write - frag_read; 
-            int pixel_in_tile;
+            int pixel_in_tile = 0;
             ushort depth;
             uchar conf_idx;
             fragment_shader_output_t fragment_shader_output;
@@ -835,81 +954,53 @@ void fine_raster_single_sample(
 
             // TODO: Optimize, ordering on primitive is not always required.
             // loop while multiple threads access to same pixel and run ROP
-            sub_group_mask_t thread_bit = get_thread_bit_sub_group_mask();
-            sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
+            
+            /*
+            clear_sub_group_mask(&sg_temp->tile[pixel_in_tile]);
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            if (active_rop_lane) 
+                atomic_or_sub_group_mask(&sg_temp->tile[pixel_in_tile], thread_bit);
+            
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            bool enqueued_fragments;
+            do {
 
-            do
-            {
-                if (active_rop_lane) 
-                    clear_sub_group_mask(&sg_temp->tile[pixel_in_tile]);
+                bool is_my_turn = !any_sub_group_mask(and_sub_group_mask(sg_temp->tile[pixel_in_tile], lt_mask));
+                if (is_my_turn) {
+                    execute_ROP_single_sample(
+                        &fragment_shader_output, depth,
+                        &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
+                        rop_config 
+                    );
 
-                local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-
-                if (active_rop_lane) 
-                    atomic_or_sub_group_mask(&sg_temp->tile[pixel_in_tile], thread_bit);
-
-                local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-
-                if (active_rop_lane) {
-                    // check if this lane is processing an earlier fragment
-                    if (!any_sub_group_mask(and_sub_group_mask(sg_temp->tile[pixel_in_tile], lt_mask))) {
-
-                        execute_ROP_single_sample(
-                            &fragment_shader_output, depth,
-                            &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
-                            rop_config 
-                        );
-                        active_rop_lane = false;
-                    }
+                    sg_temp->tile[pixel_in_tile] = and_sub_group_mask(sg_temp->tile[pixel_in_tile], not_sub_group_mask(thread_bit));
+                    active_rop_lane = false;
                 }
-                    
-            } while(any_sub_group_mask(local_1dim_ballot(active_rop_lane, &sg_temp->mask)));
+                local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
 
+                enqueued_fragments = any_sub_group_mask(local_1dim_ballot(active_rop_lane, &sg_temp->mask));
+            } while(enqueued_fragments);
+            */
+            
+            local_1dim_execute_rop(
+                w_tile_color, w_tile_depth, w_tile_stencil, sg_temp,
+                rop_config, pixel_in_tile, fragment_shader_output, depth,
+                active_rop_lane
+            );
+
+            // if (active_rop_lane) w_tile_color[pixel_in_tile] = 0xFFFF00FFu; DEBUG
             // update counters
             frag_read = min((int)(frag_read + get_local_size(0)), frag_write);
             tri_read += popcount_sub_group_mask(boundary_mask);
         }
 
-        // Write tile back to the framebuffer.
-        {
-            #pragma unroll
-            for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
-                
-                int surf_x = (tile_x << CR_TILE_LOG2) + (pixel & (CR_TILE_SIZE - 1));
-                int surf_y = (tile_y << CR_TILE_LOG2) + (pixel >> CR_TILE_LOG2);
-
-                if (surf_x >= c_viewport_width || surf_y >= c_viewport_height) continue;
-
-                if (is_framebuffer_data_colorbuffer_enabled(c_framebuffer_data)) 
-                {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        write_imageui(t_color_buffer, (int2){surf_x, surf_y}, uint_to_uint4(w_tile_color[pixel], c_color_buffer_mode));
-                    #else
-                        write_tex_to_buffer(g_color_buffer, surf_x + surf_y*c_viewport_width, c_color_buffer_mode, (uint)w_tile_color[pixel]); //); // (uint)w_tile_stencil[pixel]*255); //
-                    #endif
-                }
-
-                if (is_framebuffer_data_depthbuffer_enabled(c_framebuffer_data)) 
-                {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        write_imageui(t_depth_buffer, (int2){surf_x, surf_y}, w_tile_depth[pixel]);
-                    #else
-                        g_depth_buffer[surf_x + surf_y*c_viewport_width] = w_tile_depth[pixel];
-                    #endif
-                }
-
-                if (is_framebuffer_data_stencilbuffer_enabled(c_framebuffer_data)) 
-                {
-                    #ifdef DEVICE_IMAGE_ENABLED
-                        write_imageui(t_stencil_buffer, (int2){surf_x, surf_y}, w_tile_stencil[pixel]);
-                    #else
-                        g_stencil_buffer[surf_x + surf_y*c_viewport_width] = w_tile_stencil[pixel];
-                    #endif
-                }
-
-            }
-            
-        }
+        local_1dim_store_local_mem_to_framebuffer(
+            t_colorbuffer, t_depthbuffer, t_stencilbuffer,
+            (local uint*) w_tile_color, (local ushort*) w_tile_depth, (local uchar*) w_tile_stencil,
+            c_framebuffer_data,
+            c_color_buffer_mode,
+            (uint2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
+        );
     }
 
 }

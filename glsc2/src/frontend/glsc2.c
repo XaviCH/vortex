@@ -286,7 +286,6 @@ static uint32_t     rgba_to_uint32(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 static GLboolean    gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size);
 static GLboolean    gl_type_to_vertex_attribute_type(GLenum gl_type, unsigned int* va_type);
 // 
-static void flush_device_context(device_context_t* context);
 static size_t update_current_context(size_t num_vertices, GLenum draw_mode);
 static void                 update_colorbuffer();
 static void                 update_depthbuffer();
@@ -574,13 +573,13 @@ static framebuffer_data_t get_framebuffer_data()
 {
     framebuffer_data_t framebuffer_data;
 
-    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding];
+    framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
 
     if (framebuffer->color_attachment0.binding != 0) 
     {
         if (framebuffer->color_attachment0.target == GL_TEXTURE_2D)
         {
-            texture_t *texture = &_textures[framebuffer->color_attachment0.binding];
+            texture_t *texture = &_textures[framebuffer->color_attachment0.binding-1];
             
             framebuffer_data.color.id = texture->id;
             framebuffer_data.color.internalformat = texture->internalformat;
@@ -590,11 +589,11 @@ static framebuffer_data_t get_framebuffer_data()
         }
         else if (framebuffer->color_attachment0.target == GL_RENDERBUFFER)
         {
-            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->color_attachment0.binding];
+            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->color_attachment0.binding-1];
             
             framebuffer_data.color.id = renderbuffer->id;
             framebuffer_data.color.internalformat = renderbuffer->internalformat;
-            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.color.target = GL_RENDERBUFFER;
             framebuffer_data.width = renderbuffer->width;
             framebuffer_data.height = renderbuffer->height;
         }
@@ -609,7 +608,7 @@ static framebuffer_data_t get_framebuffer_data()
     {
         if (framebuffer->depth_attachment.target == GL_TEXTURE_2D)
         {
-            texture_t *texture = &_textures[framebuffer->depth_attachment.binding];
+            texture_t *texture = &_textures[framebuffer->depth_attachment.binding-1];
             
             framebuffer_data.color.id = texture->id;
             framebuffer_data.color.internalformat = texture->internalformat;
@@ -619,11 +618,11 @@ static framebuffer_data_t get_framebuffer_data()
         }
         else if (framebuffer->depth_attachment.target == GL_RENDERBUFFER)
         {
-            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->depth_attachment.binding];
+            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->depth_attachment.binding-1];
             
             framebuffer_data.color.id = renderbuffer->id;
             framebuffer_data.color.internalformat = renderbuffer->internalformat;
-            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.color.target = GL_RENDERBUFFER;
             framebuffer_data.width = renderbuffer->width;
             framebuffer_data.height = renderbuffer->height;
         }
@@ -638,7 +637,7 @@ static framebuffer_data_t get_framebuffer_data()
     {
         if (framebuffer->stencil_attachment.target == GL_TEXTURE_2D)
         {
-            texture_t *texture = &_textures[framebuffer->stencil_attachment.binding];
+            texture_t *texture = &_textures[framebuffer->stencil_attachment.binding-1];
             
             framebuffer_data.color.id = texture->id;
             framebuffer_data.color.internalformat = texture->internalformat;
@@ -648,11 +647,11 @@ static framebuffer_data_t get_framebuffer_data()
         }
         else if (framebuffer->stencil_attachment.target == GL_RENDERBUFFER)
         {
-            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->stencil_attachment.binding];
+            renderbuffer_t *renderbuffer = &_renderbuffers[framebuffer->stencil_attachment.binding-1];
             
             framebuffer_data.color.id = renderbuffer->id;
             framebuffer_data.color.internalformat = renderbuffer->internalformat;
-            framebuffer_data.color.target = GL_TEXTURE_2D;
+            framebuffer_data.color.target = GL_RENDERBUFFER;
             framebuffer_data.width = renderbuffer->width;
             framebuffer_data.height = renderbuffer->height;
         }
@@ -730,7 +729,7 @@ static void reset_draw_state()
     _draw_state.num_triangles = 0;
 }
 
-static void flush_draw_state() 
+static void flush_draw_state()
 {
     if (_draw_state.num_triangles == 0) return; // Nothing enqueued
 
@@ -749,8 +748,10 @@ static void flush_draw_state()
         enabled_data,
         deferred_clear
     );
-
+    static uint32_t flushed_times = 0;
     device_launch_triangle_rasterization(device_context);
+    
+    printf("flushed_times=%d, draw_triangles=%ld\n", ++flushed_times, _draw_state.num_triangles);
 
     reset_clear_state();
     reset_draw_state();
@@ -1724,6 +1725,8 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
             set_stencil_function(&_stencil_data.back.function, func, ref, mask);
         default:
     }
+
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glStencilMask (GLuint mask) 
@@ -1750,6 +1753,8 @@ GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask)
             _masks.stencil.back = mask;
         default:
     }
+
+    rop_config_updated = 1;
 }
 
 
@@ -1785,6 +1790,8 @@ GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLen
             set_stencil_operation(&_stencil_data.back.operation, sfail, dpfail, dppass);
         default:
     }
+
+    rop_config_updated = 1;
 }
 
 GL_APICALL void GL_APIENTRY glTexStorage2D (GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height) 
@@ -2106,20 +2113,6 @@ GL_APICALL void GL_APIENTRY glViewport (GLint x, GLint y, GLsizei width, GLsizei
     _viewport.y=y;
     _viewport.width=width;
     _viewport.height=height;
-}
-
-// impl utility functions
-
-static void flush_device_context(device_context_t* context)
-{
-    if (device_has_triangles_enqueued(context)) 
-    {
-        device_launch_triangle_rasterization(context);
-    } 
-    else if (device_has_clear_pending(context))
-    {
-        device_launch_clear_framebuffer(context);
-    }
 }
 
 static GLboolean is_valid_blend_equation(GLenum mode)

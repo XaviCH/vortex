@@ -349,13 +349,25 @@ cl_uint get_enabled_alpha_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 11) & 0x1u;
 }
+
+cl_bool get_enabled_depth_data(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc >> 12) & 0x1u;
+}
+
 cl_uchar get_enabled_stencil_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 0) & 0xFFu;
 }
-cl_bool get_enabled_depth_data(enabled_data_t enabled_data)
+
+cl_bool is_enabled_data_all_color_channels(enabled_data_t enabled_data)
 {
-    return (enabled_data.misc >> 12) & 0x1u;
+    return (enabled_data.misc & ENABLED_COLOR_CHANNEL_MASK) == ENABLED_COLOR_CHANNEL_MASK;
+}
+
+cl_bool is_enabled_data_all_stencil_bits(enabled_data_t enabled_data)
+{
+    return (enabled_data.misc & ENABLED_STENCIL_CHANNEL_MASK) == ENABLED_STENCIL_CHANNEL_MASK;
 }
 
 void set_enabled_color_data(enabled_data_t *enabled_data, cl_bool red, cl_bool green, cl_bool blue, cl_bool alpha)

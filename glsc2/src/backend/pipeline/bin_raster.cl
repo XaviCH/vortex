@@ -179,6 +179,8 @@ void bin_raster(
             for (int i=get_local_id(0); i < c_num_bins; i += get_local_size(0))
                 clear_sub_group_mask(&s_out_mask[get_local_id(1)][i]);
             
+            barrier(CLK_LOCAL_MEM_FENCE);
+            
             // setup bounding box and edge functions, and rasterize
             int lox, loy, hix, hiy;
             if (local_id < buf_count) {
@@ -201,7 +203,7 @@ void bin_raster(
 
                 {
                     // TODO: maybe for 1 bin can be optimized with intrinsicts and avoid atomics.
-                    if (hix == lox || hiy == loy) { // only one bin afected
+                    if (hix == lox && hiy == loy) { // only one bin afected
                         int bin_idx = lox + c_width_bins * loy;
                         atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx], bit);
                     } else if ((hix <= lox+1 && hiy <= loy+1)) { // 2x2 bin afected
@@ -213,7 +215,6 @@ void bin_raster(
                     } else {
                         int d12x = d02x - d01x, d12y = d02y - d01y;
                         v0x -= lox << bin_log, v0y -= loy << bin_log;
-
                         int t01 = v0x * d01y - v0y * d01x;
                         int t02 = v0y * d02x - v0x * d02y;
                         int t12 = d01x * d12y - d01y * d12x - t01 - t02;
@@ -257,8 +258,10 @@ void bin_raster(
                 int total = 0, ofs;
                 bool overflow = 0;
 
-                if (local_id < c_num_bins) {
-                    for (int sub_group = 0; sub_group < get_num_sub_groups(); ++sub_group) {
+                if (local_id < c_num_bins)
+                {
+                    for (int sub_group = 0; sub_group < get_num_sub_groups(); ++sub_group) 
+                    {
                         total += popcount_sub_group_mask(s_out_mask[sub_group][local_id]);
                         s_out_count[sub_group][local_id] = total;
                     }
@@ -270,14 +273,17 @@ void bin_raster(
                 }
 
                 // exc cumm scan of all overflows in the work group 
-                uint over_total;
-                uint exc_scan_over_index;
+                uint over_total=0;
+                uint exc_scan_over_index=0;
                 
                 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
                 {
+                    sub_group_barrier(CLK_LOCAL_MEM_FENCE);
                     exc_scan_over_index = popcount_sub_group_mask(and_sub_group_mask(ballot_sub_group_mask(overflow),get_lane_sub_group_mask_lt()));
                     if (get_sub_group_local_id() == get_sub_group_size()-1)
+                    {
                         over_total = atomic_add(&s_over_total, exc_scan_over_index + overflow);
+                    }
                     
                     over_total = sub_group_broadcast(over_total, get_sub_group_size()-1);
                 }

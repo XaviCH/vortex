@@ -56,7 +56,7 @@ void triangle_setup_arrays(
 
     ro_vertex_buffer_t t_vertex_buffer, 
 
-    const int c_num_tris,
+    const int c_vertex_offset,
     const int c_max_subtris,
     const render_mode_t c_render_mode,
     const int c_samples_log2,
@@ -75,7 +75,8 @@ void triangle_setup_arrays(
 
     // Pick a task.
 
-    int task_idx = get_global_id(0);
+    // int task_idx = get_global_id(0);
+    int task_idx = get_global_linear_id();
     
     /*
     if (task_idx >= c_num_tris)
@@ -85,13 +86,15 @@ void triangle_setup_arrays(
 
     int3 vidx;
     if (is_render_mode_flag_triangle_fan(c_render_mode)) {
-        vidx = (int3){get_global_offset(0), task_idx + 1, task_idx + 2};
+        vidx = (int3){0, task_idx + 1, task_idx + 2};
     } else if (is_render_mode_flag_triangle_strip(c_render_mode)) {
         uint offset = 2 * (task_idx%2);
         vidx = (int3){task_idx + offset, task_idx + 1, task_idx + 2 - offset};
     } else {
         vidx = (int3){task_idx*3 + 0, task_idx*3 + 1, task_idx*3 + 2};
     }
+
+    vidx += c_vertex_offset;
 
     // Read vertices.
 
