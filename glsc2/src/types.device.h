@@ -77,7 +77,7 @@ inline cl_bool is_render_mode_flag_enable_cull_front(const render_mode_t render_
     return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_CULL_FRONT) != 0;
 }
 
-inline cl_bool is_render_mode_flag_enable_cull_back(const render_mode_t render_mode)
+static inline cl_bool is_render_mode_flag_enable_cull_back(const render_mode_t render_mode)
 {
     return (render_mode.flags & RENDER_MODE_FLAG_ENABLE_CULL_BACK) != 0;
 }

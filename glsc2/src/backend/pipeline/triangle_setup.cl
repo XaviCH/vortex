@@ -211,8 +211,8 @@ void triangle_setup_range(
 /**
     Calculate window positions of points and limit box
  */
-inline void snapTriangle(
-    float4 v0, float4 v1, float4 v2, 
+static inline void snap_triangle(
+    float4 v0, float4 v1, float4 v2,
     int2* p0, int2* p1, int2* p2, float3* rcpW, int2* lo, int2* hi,
     int c_viewport_width, int c_viewport_height 
     )
@@ -220,9 +220,9 @@ inline void snapTriangle(
     float viewScaleX = (float)(c_viewport_width  << (CR_SUBPIXEL_LOG2 - 1));
     float viewScaleY = (float)(c_viewport_height << (CR_SUBPIXEL_LOG2 - 1));
     *rcpW = (float3)(1.0f / v0.w, 1.0f / v1.w, 1.0f / v2.w);
-    *p0 = (int2)(round(v0.x * rcpW->x * viewScaleX), round(v0.y * rcpW->x * viewScaleY));
-    *p1 = (int2)(round(v1.x * rcpW->y * viewScaleX), round(v1.y * rcpW->y * viewScaleY));
-    *p2 = (int2)(round(v2.x * rcpW->z * viewScaleX), round(v2.y * rcpW->z * viewScaleY));
+    *p0 = (int2)(convert_int_sat(round(v0.x * rcpW->x * viewScaleX)), convert_int_sat(round(v0.y * rcpW->x * viewScaleY)));
+    *p1 = (int2)(convert_int_sat(round(v1.x * rcpW->y * viewScaleX)), convert_int_sat(round(v1.y * rcpW->y * viewScaleY)));
+    *p2 = (int2)(convert_int_sat(round(v2.x * rcpW->z * viewScaleX)), convert_int_sat(round(v2.y * rcpW->z * viewScaleY)));
     *lo = (int2)(min(p0->x, min(p1->x, p2->x)), min(p0->y, min(p1->y, p2->y)));
     *hi = (int2)(max(p0->x, max(p1->x, p2->x)), max(p0->y, max(p1->y, p2->y)));
 }
@@ -243,7 +243,7 @@ inline int prepareTriangle(
     *area = d1->x * d2->y - d1->y * d2->x;
 
     if (*area <= 0)
-        return 1; // Backfacing.
+        return 2; // Backfacing.
 
     // AABB falls between samples => cull.
 
@@ -253,7 +253,7 @@ inline int prepareTriangle(
     int2 high = (hi + bias) & -sampleSize;
 
     if (low.x > high.x || low.y > high.y)
-        return 2; // Between pixels.
+        return 3; // Between pixels.
 
     // AABB covers 1 or 2 samples => cull if they are not covered.
 
@@ -271,7 +271,7 @@ inline int prepareTriangle(
         if (e0 < 0 || e1 < 0 || e2 < 0)
         {
             if (diff == 0)
-                return 3; // Between pixels.
+                return 4; // Between pixels.
 
             t0 = p0 + bias - high;
             t1 = p1 + bias - high;
@@ -282,7 +282,7 @@ inline int prepareTriangle(
             e2 = t2.x * t0.y - t2.y * t0.x;
 
             if (e0 < 0 || e1 < 0 || e2 < 0)
-                return 4; // Between pixels.
+                return 5; // Between pixels.
         }
     }
 
@@ -401,12 +401,17 @@ inline void setupTriangle(
     Depending on the mode, flip the triangle.
     Swap v0 and v2.
  */
-inline face_t flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, const render_mode_t c_render_mode) {
-    float2 d1 = (float2)(v1->x - v0->x, v1->y - v0->y);
-    float2 d2 = (float2)(v2->x - v0->x, v2->y - v0->y);
+static inline face_t flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, const render_mode_t c_render_mode) 
+{
+    float2 v0w = v0->xy / v0->w;
+    float2 v1w = v1->xy / v1->w;
+    float2 v2w = v2->xy / v2->w;
+    float2 d1 = v1w - v0w;
+    float2 d2 = v2w - v0w;
+
     float area = d1.x * d2.y - d1.y * d2.x;
 
-    bool need_to_flip = 
+    bool need_to_flip =
         (area < 0 && !is_render_mode_flag_enable_cull_back(c_render_mode)) ||
         (area > 0 && is_render_mode_flag_enable_cull_front(c_render_mode)) ;
 
@@ -418,11 +423,9 @@ inline face_t flipTriangle(int3* vidx, float4* v0, float4* v1, float4* v2, const
         float4 tv = *v0;
         *v0 = *v2;
         *v2 = tv;
-        
-        return BACK;
     }
 
-    return FRONT;
+    return area >= 0 ? FRONT : BACK;
 }
 
 inline void triangle_setup(
@@ -489,7 +492,7 @@ inline void triangle_setup(
         // Note: aabbLimit comes from the fact that cover8x8
         // does not support guardband with maximal viewport.
         
-        snapTriangle(v0, v1, v2, &p0, &p1, &p2, &rcpW, &lo, &hi, 
+        snap_triangle(v0, v1, v2, &p0, &p1, &p2, &rcpW, &lo, &hi, 
             c_viewport_width, c_viewport_height);
         int loxy = min(lo.x, lo.y);
         int hixy = max(hi.x, hi.y);
@@ -541,7 +544,7 @@ inline void triangle_setup(
         v2.z = ov0.z + od1.z * bary[i * 2 + 0] + od2.z * bary[i * 2 + 1];
         v2.w = ov0.w + od1.w * bary[i * 2 + 0] + od2.w * bary[i * 2 + 1];
 
-        snapTriangle(v0, v1, v2, &p0, &p1, &p2, &rcpW, &lo, &hi, c_viewport_width, c_viewport_height);
+        snap_triangle(v0, v1, v2, &p0, &p1, &p2, &rcpW, &lo, &hi, c_viewport_width, c_viewport_height);
         if (prepareTriangle(p0, p1, p2, lo, hi, &d1, &d2, &area, c_viewport_width, c_viewport_height, c_samples_log2) == 0)
             numSubtris++;
 
@@ -571,7 +574,7 @@ inline void triangle_setup(
         v2.z = ov0.z + od1.z * bary[i * 2 + 0] + od2.z * bary[i * 2 + 1];
         v2.w = ov0.w + od1.w * bary[i * 2 + 0] + od2.w * bary[i * 2 + 1];
 
-        snapTriangle(v0, v1, v2, &p0, &p1, &p2, &rcpW, &lo, &hi, c_viewport_width, c_viewport_height);
+        snap_triangle(v0, v1, v2, &p0, &p1, &p2, &rcpW, &lo, &hi, c_viewport_width, c_viewport_height);
         if (prepareTriangle(p0, p1, p2, lo, hi, &d1, &d2, &area, c_viewport_width, c_viewport_height, c_samples_log2) == 0)
         {
 
