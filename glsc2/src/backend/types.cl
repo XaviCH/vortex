@@ -39,6 +39,15 @@ inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) {
     return value;
 }
 
+static inline void write_vertex_buffer(wo_vertex_buffer_t vertex_buffer, uint index, float4 value) 
+{ 
+    #ifdef DEVICE_IMAGE_ENABLED
+        write_imagef(vertex_buffer, index, value);
+    #else
+        vertex_buffer[index] = value;
+    #endif
+}
+
 static inline uint read_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2 size, uint mode)
 {
 

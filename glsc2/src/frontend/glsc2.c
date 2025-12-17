@@ -168,8 +168,8 @@ static GLenum      _depth_func = GL_LESS;
 static depth_range_t _depth_range = { .n=0.0, .f=1.0};
 
 // Enqeueu State
-static clear_state_t _clear_state;
 static draw_state_t  _draw_state;
+static clear_state_t _clear_state;
 
 // Device State
 static device_shared_objects_t      device_shared_objects;
@@ -1592,7 +1592,7 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
     flush_draw_state();
     flush_clear_state();
 
-    device_context_t *context = (_current_program != 0) ? 
+    device_context_t *context =  (_current_program != 0) ? 
             contexts[_current_program-1] : NULL;
 
     switch (framebuffer->color_attachment0.target)
@@ -1611,6 +1611,8 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
             );
             break;
     }
+
+    printf("current_program=%ld, context_id=%ld\n", _current_program, _draw_state.context_id);
 
     device_shared_launch_read_pixels(
         &device_shared_objects,
@@ -2074,7 +2076,7 @@ GL_APICALL void GL_APIENTRY glVertexAttrib4fv (GLuint index, const GLfloat *v)
 
 GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) 
 {
-    unsigned int va_size, va_type, va_active_pointer;
+    unsigned int va_size, va_type, va_normalize, va_active_pointer;
 
     if (index >= DEVICE_VERTEX_ATTRIBUTE_SIZE) RETURN_ERROR(GL_INVALID_VALUE);
 
@@ -2082,6 +2084,15 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLe
 
     if (gl_type_to_vertex_attribute_type(type, &va_type) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
 
+    if (normalized == GL_FALSE) 
+    {
+        va_normalize = 0;
+    }
+    else 
+    {
+        va_normalize = VERTEX_ATTRIBUTE_NORMALIZE;
+    }
+    
     if (stride < 0) RETURN_ERROR(GL_INVALID_VALUE);
     
     if (stride == 0) 
@@ -2100,6 +2111,7 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLe
         .misc = 
             va_type |
             va_size |
+            va_normalize |
             va_active_pointer,
     };
     vertex_attribute_binding[index] = (vertex_attribute_binding_t) {
@@ -2318,7 +2330,6 @@ static render_mode_t get_render_mode(GLenum mode)
             case GL_FRONT:
             case GL_FRONT_AND_BACK:
                 render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_FRONT;
-                printf("cull front\n");
             default:
         }
 
@@ -2327,7 +2338,6 @@ static render_mode_t get_render_mode(GLenum mode)
             case GL_BACK:
             case GL_FRONT_AND_BACK:
                 render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
-                printf("cull back\n");
             default:
         }
     }

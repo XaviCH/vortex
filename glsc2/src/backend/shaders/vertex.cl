@@ -11,14 +11,83 @@
     #include "glsc2/src/constants.device.h"
 #endif
 
+#define GENERIC_GET_FLOAT4_FROM_X(_X) \
+    static inline float4 gl_get_float4_from_##_X(global _X* ptr, uint size) \
+    { \
+        float4 result = {0,0,0,1}; \
+        switch (size) { \
+            case VERTEX_ATTRIBUTE_SIZE_4: \
+                result.w = (float) ptr[3]; \
+            case VERTEX_ATTRIBUTE_SIZE_3: \
+                result.z = (float) ptr[2]; \
+            case VERTEX_ATTRIBUTE_SIZE_2: \
+                result.y = (float) ptr[1]; \
+            default: \
+            case VERTEX_ATTRIBUTE_SIZE_1: \
+                result.x = (float) ptr[0]; \
+        } \
+        return result; \
+    }
 
-inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vertex_attribute_data_t vertex_attribute_data) {
-    data += vertex_attribute_data.offset;
+GENERIC_GET_FLOAT4_FROM_X(float);
+GENERIC_GET_FLOAT4_FROM_X(char);
+GENERIC_GET_FLOAT4_FROM_X(uchar);
+GENERIC_GET_FLOAT4_FROM_X(short);
+GENERIC_GET_FLOAT4_FROM_X(ushort);
 
+#undef GENERIC_GET_FLOAT4_FROM_X
+
+static inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vertex_attribute_data_t vertex_attribute_data) 
+{
+    size_t id = get_global_linear_id();
+    data += vertex_attribute_data.offset + (vertex_attribute_data.stride) * id;
+
+    uint type = gl_get_vertex_attribute_type(vertex_attribute_data);
+    uint size = gl_get_vertex_attribute_size(vertex_attribute_data);
+
+    float4 result;
+
+    switch (type)
+    {
+        default:
+        case VERTEX_ATTRIBUTE_TYPE_FLOAT:
+            return gl_get_float4_from_float((global float*) data, size);
+        case VERTEX_ATTRIBUTE_TYPE_BYTE:
+            result = gl_get_float4_from_char((global char*) data, size);
+            break;
+        case VERTEX_ATTRIBUTE_TYPE_UNSIGNED_BYTE:
+            result = gl_get_float4_from_uchar((global uchar*) data, size);
+            break;
+        case VERTEX_ATTRIBUTE_TYPE_SHORT:
+            result = gl_get_float4_from_short((global short*) data, size);
+            break;
+        case VERTEX_ATTRIBUTE_TYPE_UNSIGNED_SHORT:
+            result = gl_get_float4_from_ushort((global ushort*) data, size);
+            break;
+    }
+    
+    bool normalize = gl_get_vertex_attribute_normalize(vertex_attribute_data);
+
+    if (!normalize) return result;
+
+    switch (type)
+    {
+        default:
+            return result;
+        case VERTEX_ATTRIBUTE_TYPE_BYTE:
+            return result / (float4){CHAR_MAX+1, CHAR_MAX+1, CHAR_MAX+1, CHAR_MAX+1};
+        case VERTEX_ATTRIBUTE_TYPE_UNSIGNED_BYTE:
+            return result / (float4){UCHAR_MAX, UCHAR_MAX, UCHAR_MAX, UCHAR_MAX};
+        case VERTEX_ATTRIBUTE_TYPE_SHORT:
+            return result / (float4){SHRT_MAX+1, SHRT_MAX+1, SHRT_MAX+1, SHRT_MAX+1}; // TODO: check this
+        case VERTEX_ATTRIBUTE_TYPE_UNSIGNED_SHORT:
+            return result / (float4){USHRT_MAX, USHRT_MAX, USHRT_MAX, USHRT_MAX};
+    }
+
+    /*
     switch (vertex_attribute_data.misc & (VERTEX_ATTRIBUTE_SIZE_MASK | VERTEX_ATTRIBUTE_TYPE_MASK)) {
         default:
         case (VERTEX_ATTRIBUTE_SIZE_1 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 *(global float*)data, 
                 0, 
@@ -26,7 +95,6 @@ inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vert
                 1
                 );
         case (VERTEX_ATTRIBUTE_SIZE_2 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 ((global float*)data)[0],
                 ((global float*)data)[1], 
@@ -34,7 +102,6 @@ inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vert
                 1
                 );
         case (VERTEX_ATTRIBUTE_SIZE_3 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 ((global float*)data)[0],
                 ((global float*)data)[1],
@@ -42,7 +109,6 @@ inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vert
                 1
                 );
         case (VERTEX_ATTRIBUTE_SIZE_4 << 3) | VERTEX_ATTRIBUTE_TYPE_FLOAT:
-            data += (vertex_attribute_data.stride) * get_global_linear_id();
             return (float4)(
                 ((global float*)data)[0],
                 ((global float*)data)[1],
@@ -50,6 +116,7 @@ inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vert
                 ((global float*)data)[3]
                 );
     };
+    */
 }
 
 inline float4 gl_get_vertex_attribute(
@@ -85,7 +152,7 @@ inline void __attribute__((overloadable)) gl_set_vertex_attribute(float4* dst, G
 
 #undef GL_SET_VERTEX_ATTRIBUTE_ARGS
 
-inline void gl_fill_vertex_buffer(
+static inline void gl_fill_vertex_buffer(
     vertex_shader_output_t* output, 
     wo_vertex_buffer_t vertex_buffer
 ) {
@@ -98,11 +165,7 @@ inline void gl_fill_vertex_buffer(
         uint offset = id*output_size + attrib;
         float4 value = *(f4_output + attrib);
 
-        #ifdef DEVICE_IMAGE_ENABLED
-            write_imagef(vertex_buffer, offset, value);
-        #else
-            vertex_buffer[offset] = value;
-        #endif
+        write_vertex_buffer(vertex_buffer, offset, value);
     }
 }
 

@@ -193,6 +193,19 @@ typedef struct
     unsigned int misc; // size[3], type[3], normalized[1], vertex_attrib_pointer_active[1]
 } vertex_attribute_data_t;
 
+static inline cl_uint gl_get_vertex_attribute_type(vertex_attribute_data_t va_data)
+{
+    return va_data.misc & VERTEX_ATTRIBUTE_TYPE_MASK;
+}
+static inline cl_uint gl_get_vertex_attribute_size(vertex_attribute_data_t va_data)
+{
+    return (va_data.misc & VERTEX_ATTRIBUTE_SIZE_MASK) >> 3;
+}
+static inline cl_bool gl_get_vertex_attribute_normalize(vertex_attribute_data_t va_data)
+{
+    return (va_data.misc & VERTEX_ATTRIBUTE_NORMALIZE) != 0;
+}
+
 /*
 typedef struct
 {
