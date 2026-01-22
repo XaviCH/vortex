@@ -310,6 +310,7 @@
 #define VERTEX_ATTRIBUTE_TYPE_MASK              (0x7u << 0)
 #define VERTEX_ATTRIBUTE_SIZE_MASK              (0x3u << 3)
 #define VERTEX_ATTRIBUTE_ACTIVE_POINTER         (0x1u << 5)
+#define VERTEX_ATTRIBUTE_NORMALIZE              (0x1u << 6)
 
 // texture wrap parameters
 #define TEXTURE_WRAP_CLAMP_TO_EDGE 0

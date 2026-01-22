@@ -76,7 +76,7 @@ mask_container_t _masks = {
 
 pixel_store_t _pixel_store = { .unpack_aligment = 4 };
 
-clear_data_t _clear_data = {
+gl_clear_data_t _clear_data = {
     .color = { 0, 0, 0, 0 },
     .stencil = 0,
     .depth = 1,

@@ -350,17 +350,40 @@ cl_uint get_enabled_red_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 8) & 0x1u;
 }
+
+static void set_enabled_data_red_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 8;
+}
+
 cl_uint get_enabled_green_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 9) & 0x1u;
 }
+
+static void set_enabled_data_green_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 9;
+}
+
 cl_uint get_enabled_blue_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 10) & 0x1u;
 }
+
+static void set_enabled_data_blue_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 10;
+}
+
 cl_uint get_enabled_alpha_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 11) & 0x1u;
+}
+
+static void set_enabled_data_alpha_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 11;
 }
 
 cl_bool get_enabled_depth_data(enabled_data_t enabled_data)
@@ -401,6 +424,73 @@ void set_enabled_depth_data(enabled_data_t *enabled_data, cl_bool mask)
     enabled_data->misc &= ~(0x1u << 12);
     enabled_data->misc |= ((cl_ushort)mask & 0x1u) << 12;
 }
+
+typedef struct {
+    cl_uint misc;
+} rgba8_t;
+
+cl_uint get_rgba8_red(rgba8_t color)
+{
+    return (color.misc >> 0) & 0xFF;
+}
+
+void set_rgba8_red(rgba8_t* color, cl_uint value)
+{
+    color->misc &= 0xFFFFFF00u; 
+    color->misc |= (value & 0xFFu) << 0;
+}
+
+cl_uint get_rgba8_green(rgba8_t color)
+{
+    return (color.misc >> 8) & 0xFF;
+}
+
+void set_rgba8_green(rgba8_t* color, cl_uint value)
+{
+    color->misc &= 0xFFFF00FFu; 
+    color->misc |= (value & 0xFFu) << 8;
+}
+
+cl_uint get_rgba8_blue(rgba8_t color)
+{
+    return (color.misc >> 16) & 0xFF;
+}
+
+void set_rgba8_blue(rgba8_t* color, cl_uint value)
+{
+    color->misc &= 0xFF00FFFFu; 
+    color->misc |= (value & 0xFFu) << 16;
+}
+
+cl_uint get_rgba8_alpha(rgba8_t color)
+{
+    return (color.misc >> 24) & 0xFF;
+}
+
+void set_rgba8_alpha(rgba8_t* color, cl_uint value)
+{
+    color->misc &= 0x00FFFFFFu; 
+    color->misc |= (value & 0xFFu) << 24;
+}
+
+typedef struct {
+    cl_ushort misc;
+} depth16_t;
+
+void set_depth16(depth16_t* depth, cl_short value)
+{
+    depth->misc = value;
+}
+
+typedef struct {
+    cl_uchar misc;
+} stencil8_t;
+
+typedef struct {
+    rgba8_t color;
+    depth16_t depth;
+    stencil8_t stencil;
+} clear_data_t;
 
 typedef struct
 {

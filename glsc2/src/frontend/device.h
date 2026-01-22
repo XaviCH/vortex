@@ -1424,8 +1424,6 @@ void device_launch_vertex_shader(device_context_t *context, size_t num_vertices,
     
 }
 
-/*
-*/
 void device_launch_range_triangle_assembly(device_context_t *context, size_t num_vertices, size_t num_triangles, const size_t size, const unsigned short *data, size_t config) 
 {
     //printf("device_launch_range_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%d\n", context, num_vertices, size, config, context->vertex_command_queue_index);
@@ -1530,10 +1528,11 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
         }
         CL_CHECK(clEnqueueNDRangeKernel(queue, context->triangle_setup_arrays_kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_event[queue_index]));
     }
-    /*
+    
     size_t szof_offset_primitives = sizeof(cl_uchar[context->assembled_triangles]); 
     size_t sizeof_primitives = sizeof(cl_uchar[num_triangles]);
     
+    /*
     cl_uchar *primitives = malloc(sizeof_primitives);
     clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, szof_offset_primitives, sizeof_primitives, primitives, 0, NULL, NULL);
     printf("subtri=[%d", primitives[0]);
@@ -1542,8 +1541,8 @@ static void device_launch_arrays_triangle_assembly(device_context_t *context, si
     }
     printf("]\n");
     free(primitives);
-    */
-    /*
+    
+    
     size_t szof_offset_header = sizeof(triangle_header_t[context->assembled_triangles]);
     size_t sizeof_header = sizeof(triangle_header_t[num_triangles]);
     triangle_header_t *triangle_header = malloc(sizeof_header);
@@ -1845,7 +1844,7 @@ static void device_shared_launch_clear_framebuffer(
 
     CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_colorbuffer));
     CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_depthbuffer));
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_colorbuffer));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_stencilbuffer));
     #ifndef DEVICE_IMAGE_ENABLED
     {
         CL_CHECK(clSetKernelArg(kernel, count++, sizeof(c_colorbuffer_mode), &c_colorbuffer_mode));

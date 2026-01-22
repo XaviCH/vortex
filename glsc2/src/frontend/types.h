@@ -182,7 +182,7 @@ typedef struct {
     clear_color_t color;
     GLfloat depth; 
     GLint stencil;
-} clear_data_t;
+} gl_clear_data_t;
 
 typedef struct {
     GLboolean colorbuffer, depthbuffer, stencilbuffer;
