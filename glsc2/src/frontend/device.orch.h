@@ -39,11 +39,20 @@
 }
 
 
-
+typedef struct {
+    cl_kernel kernel;
+    uint32_t  number_attributes;
+    uint32_t  vertex_size;
+} vertex_data_t;
 
 typedef struct {
-    cl_kernel vertex, fragment, uniform_data, vertex_attrib_data;
+    vertex_data_t vertex;
+    cl_kernel fragment, uniform_data, vertex_attrib_data;
 } device_shader_kernels_t;
+
+typedef struct {
+    cl_command_queue queues[DEVICE_BIN_QUEUE_SIZE][DEVICE_BIN_QUEUE_SIZE]; // TODO: multiple queues
+} bin_queue_t;
 
 typedef struct {
     cl_platform_id          platform_id;
@@ -82,6 +91,8 @@ typedef struct {
     cl_mem              t_colorbuffer, t_depthbuffer, t_stencilbuffer;
     cl_command_queue    queue;
     cl_event            framebuffer_wait_event;
+
+    bin_queue_t    queue_bins    [HOST_FRAMEBUFFER_SIZE];
 } device_t;
 
 typedef union {
@@ -173,12 +184,17 @@ typedef struct {
 // TODO: rm control from device.h to orchestrator.h
 static size_t __device_get_vertex_command_index(device_context_t *context) 
 {
-    return context->vertex_command_queue_index;
+    return context->vertex_command_queue_index % DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
 }
 
 static void __device_advance_vertex_command_index(device_context_t *context) 
 {
-    context->vertex_command_queue_index = (context->vertex_command_queue_index + 1) % DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
+    context->vertex_command_queue_index += 1;
+}
+
+static void __device_reset_vertex_command_index(device_context_t *context) 
+{
+    context->vertex_command_queue_index = 0;
 }
 // ---------------------------------------------------------------
 
@@ -539,8 +555,8 @@ void device_init_context(
 // ---------------------------------------------------------------
 // Kernel argument setters
 static void __device_set_vertex_shader_kernel_args(
-    device_context_t* context, 
     cl_kernel kernel,
+    device_context_t* context, 
     size_t num_attributes,
     cl_mem g_vertex_attribute,
     cl_mem g_vertex_attribute_data,
@@ -564,6 +580,7 @@ static void __device_set_vertex_shader_kernel_args(
 }
 
 static void __device_set_triangle_setup_arrays_kernel_args(
+    cl_kernel kernel,
     device_context_t* context, 
     cl_uint c_vertex_offset,
     render_mode_t c_mode,
@@ -596,6 +613,7 @@ static void __device_set_triangle_setup_arrays_kernel_args(
 }
 
 static void __device_set_triangle_setup_range_kernel_args(
+    cl_kernel kernel,
     device_context_t* context, 
     cl_mem g_index_buffer,
     cl_uint c_vertex_offset,
@@ -605,8 +623,6 @@ static void __device_set_triangle_setup_range_kernel_args(
     cl_uint c_viewport_height,
     cl_uint c_viewport_width
 ) {
-    cl_kernel kernel = context->device->triangle_setup_range_kernel;
-
     cl_uint c_max_subtris = __device_get_max_number_subtriangles();
     cl_uint c_samples_log2 = 0; // TODO: not impl
     cl_mem  t_vertex_buffer = __device_get_texture_vertex_buffer(context);
@@ -630,8 +646,8 @@ static void __device_set_triangle_setup_range_kernel_args(
 }
 
 static void __device_set_bin_raster_kernel_args(
-    device_context_t* context,
     cl_kernel kernel,
+    device_context_t* context,
     cl_uint c_num_tris,
     cl_uint c_viewport_height,
     cl_uint c_viewport_width
@@ -672,10 +688,9 @@ static void __device_set_bin_raster_kernel_args(
 }
 
 static void __device_set_coarse_raster_kernel_args(
-    device_context_t* context,
     cl_kernel kernel,
+    device_context_t* context,
     cl_uint c_deferred_clear,
-    cl_uint c_num_tris,
     cl_uint c_viewport_height,
     cl_uint c_viewport_width
 ) {
@@ -723,8 +738,8 @@ static void __device_set_coarse_raster_kernel_args(
 }
 
 static void __device_set_fragment_shader_kernel_args(
-    device_context_t* context, 
     cl_kernel kernel,
+    device_context_t* context, 
     cl_mem t_colorbuffer,
     cl_mem t_depthbuffer,
     cl_mem t_stencilbuffer,
@@ -845,10 +860,12 @@ static size_t device_create_program_from_binary(device_t* device, size_t size, c
     cl_program program = device->programs[program_id];
     device_shader_kernels_t* kernels = &device->shaders[program_id];
 
-    CL_ASSIGN_CHECK(kernels->vertex,                clCreateKernel(program, "gl_vertex_shader",             &error));
+    CL_ASSIGN_CHECK(kernels->vertex.kernel,         clCreateKernel(program, "gl_vertex_shader",             &error));
     CL_ASSIGN_CHECK(kernels->fragment,              clCreateKernel(program, "fine_raster_single_sample",    &error));
     CL_ASSIGN_CHECK(kernels->uniform_data,          clCreateKernel(program, "gl_uniform_data",              &error));
     CL_ASSIGN_CHECK(kernels->vertex_attrib_data,    clCreateKernel(program, "gl_attribute_data",            &error));
+
+    #error missing vertex data 
 
     device->program_size += 1;
 
@@ -1542,57 +1559,35 @@ void device_load_vertex_attributes(device_context_t *context, const float attrib
 }
 */
 
-
+// TODO: separete rop config and uniform data loading
 void device_load_config(device_context_t* context, size_t config_id, rop_config_t* rop_config, cl_uchar* uniform_data) 
 {
-    /*
-    printf("device_load_config: config_id=%ld, vcq_index=%d\n", 
-        config_id,
-        context->vertex_command_queue_index
-    );
-    */
-    /*
-    uint32_t* uints = (uint32_t*) uniform_data;
-    printf("uniform_data=[");
-    for(int i=0; i<64; ++i) {
-        printf(" %d", uints[i]);
-    }
-    printf(" ]\n");
-    printf("rop_config: depth_data=%x\n", rop_config->depth_data);
-    */
-   
-    context->render_mode = rop_config->render_mode;
-    cl_event write_wait_event[2];
-
-    cl_command_queue queue = context->vertex_command_queues[get_vertex_command_index(context)];
+    // TODO: make it async, for now use a single vertex command queue
+    cl_command_queue queue = context->vertex_command_queues[__device_get_vertex_command_index(context)];
 
     CL_CHECK(clEnqueueWriteBuffer(
         queue,
-        context->mem_rop_configs,
+        context->rop_configs_mem,
         CL_FALSE,
         sizeof(rop_config_t) * config_id,
         sizeof(rop_config_t),
         rop_config,
         0,
         NULL,
-        &write_wait_event[0]
+        NULL
     ));
 
     CL_CHECK(clEnqueueWriteBuffer(
         queue,
-        context->mem_uniform_subbuffers[config_id],
+        context->fragment_uniform_subbuffer_mems[config_id],
         CL_FALSE,
         0,
         DEVICE_UNIFORM_CAPACITY,
         uniform_data,
         0,
         NULL,
-        &write_wait_event[1]
+        NULL
     ));
-    
-    CL_CHECK(clWaitForEvents(2, write_wait_event));
-    CL_CHECK(clReleaseEvent(write_wait_event[0]));
-    CL_CHECK(clReleaseEvent(write_wait_event[1]));
 }
 
 void device_destroy(device_t* device) 
@@ -1605,7 +1600,7 @@ void device_destroy_context(device_context_t* context)
     // TODO: release all mem objects and kernels
 }
 
-static void device_print_vertex_shader_output(
+static void __device_print_vertex_shader_output(
     device_context_t* context,
     cl_command_queue queue,
     size_t num_vertices,
@@ -1634,151 +1629,135 @@ static void device_print_vertex_shader_output(
     free(vertices);
 }
 
-static cl_mem get_binded_vertex_uniform(device_context_t* context) 
+static cl_mem __device_get_binded_vertex_uniform(device_context_t* context, size_t config_id)
 {
-    switch (context->uniform_binding)
+    switch (context->vertex_uniform_type)
     {
         default:
         case DEVICE_BINDING_VERTEX_FRAGMENT_UNIFORM:
-            return context->fragment_uniform_subbuffers[get_vertex_command_index(context)];
+            return context->fragment_uniform_subbuffer_mems[config_id];
         case DEVICE_BINDING_VERTEX_UNIFORM:
-            return context->vertex_uniform_subbuffers[get_vertex_command_index(context)];
+            return context->vertex_uniform_mem[__device_get_vertex_command_index(context)];
         break;
     }
-    if (context)
-    size_t config_id = context->vertex_command_queue_index % DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
-    return context->mem_uniform_subbuffers[config_id];
 }
 
-static void device_launch_vertex_shader(
-    device_context_t* context,
-    size_t init, size_t end, size_t offset
-)
+static void __device_get_device_and_host_pointers(device_context_t* context, cl_mem* mem, uint8_t* host, size_t size, size_t num_vertices)
 {
-    if (init != 0) CL_UNSUPORTED_MAPING();
+    vertex_attrib_pointer_type_t*   ptrs_type = context->vertex_attrib_pointer_types;
+    vertex_attrib_pointer_mem_u*    ptrs_mem = context->vertex_attrib_pointer_mems;
 
-    size_t num_vertices = end - init;
-    size_t queue_index = get_vertex_command_index(context);
-    cl_mem mem_uniform = get_binded_vertex_uniform(context);
-    
-    cl_command_queue queue = context->vertex_command_queues[queue_index];
-    cl_kernel kernel = context->vertex_shader_kernel;
-
-    size_t gw_offset = offset;
-    size_t gw_size = num_vertices;
-
-    device_set_vertex_shader_kernel_args(context, kernel);
-    cl_uint counter = 0;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attribs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_vertex_attrib_datas));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &mem_uniform)); //&context->mem_uniform_subbuffers[config_id]));
-
-    vertex_attrib_pointer_type_t* ptrs_type = context->vertex_attrib_pointer_types;
-    vertex_attrib_pointer_mem_u* ptrs_mem = context->vertex_attrib_pointer_mems;
-    cl_mem host_pointers[DEVICE_VERTEX_ATTRIBUTE_SIZE];
-
-    for (cl_uint attribute = 0; attribute < context->vertex_attrib_pointers_size; ++attribute)
+    for (size_t attribute = 0; attribute < size; ++attribute)
     {
         cl_mem pointer;
-        host_pointers[attribute] = NULL;
         if (ptrs_type[attribute] == HOST_VERTEX_ATTRIBUTE_POINTER) 
         {
             CL_ASSIGN_CHECK(pointer, clCreateBuffer(
-                context->shared_objects->context,
+                context->device->context,
                 CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR,
                 num_vertices * context->vertex_attrib_pointer_strides[attribute], // TODO: add right size
                 ptrs_mem[attribute].host,
                 &error
             ));
 
-            host_pointers[attribute] = pointer;
+            host[attribute] = 1;
         } 
         else 
         {
             pointer = ptrs_mem[attribute].device;
-            host_pointers[attribute] = NULL;
+
+            host[attribute] = 0;
         }
+        mem[attribute] = pointer;
+    }
+}
 
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &pointer));
+static void __device_destroy_host_pointers(device_context_t* context, cl_mem* mem, uint8_t* host, size_t size)
+{
+    for (size_t attribute = 0; attribute < size; ++attribute)
+    {
+        if (host[attribute])
+        {
+            CL_CHECK(clReleaseMemObject(mem[attribute]));
+        }
     }
+}
 
-    #ifdef DEVICE_IMAGE_ENABLED
-    {
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_vertex_buffer)); 
-    }
-    #else
-    {
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
-    }
-    #endif
+static void device_launch_vertex_shader(
+    device_context_t* context,
+    size_t shader_id,
+    size_t init, size_t end, size_t offset,
+    size_t config_id
+)
+{
+    if (init != 0) CL_UNSUPORTED_MAPING();
+
+    size_t num_vertices = end - init;
+    size_t queue_index = __device_get_vertex_command_index(context);
+    
+    cl_command_queue queue = context->vertex_command_queues[queue_index];
+    cl_kernel kernel = context->device->shaders[shader_id].vertex.kernel;
+
+
+    size_t n_attributes = context->device->shaders[shader_id].vertex.number_attributes;
+
+    uint8_t host_pointers       [DEVICE_VERTEX_ATTRIBUTE_SIZE];
+    cl_mem  attribute_pointers  [DEVICE_VERTEX_ATTRIBUTE_SIZE];
+
+    __device_get_device_and_host_pointers(
+        context,
+        attribute_pointers,
+        host_pointers,
+        n_attributes,
+        num_vertices
+    );
+
+    __device_set_vertex_shader_kernel_args(
+        kernel,
+        context,
+        n_attributes,
+        context->vertex_attributes_mem[queue_index],
+        context->vertex_attribute_data_mem[queue_index],
+        __device_get_binded_vertex_uniform(context, config_id),
+        attribute_pointers
+    );
+
+    size_t gw_offset = offset;
+    size_t gw_size = num_vertices;
     
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gw_offset, &gw_size, NULL, 0, NULL, NULL));
     
-    for (cl_uint attribute = 0; attribute < context->vertex_attrib_pointers_size; ++attribute)
-    {
-        if (host_pointers[attribute] != NULL) 
-        {
-            CL_CHECK(clReleaseMemObject(host_pointers[attribute]));
-        }
-    }
+    __device_destroy_host_pointers(
+        context,
+        attribute_pointers,
+        host_pointers,
+        n_attributes
+    );
     
-    // device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
+    // __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
 }
 
-void device_launch_range_triangle_assembly(
-    device_context_t* context, render_mode_t mode, size_t frag_config_id, 
-    size_t vertex_offset, size_t triangle_offset, size_t num_triangles,
-    size_t width, size_t height, size_t size, uint16_t* ptr
-)
-{
-    // triangle setup
-    const cl_uint index_buffer_arg = 1;
-    const cl_uint vertex_offset_arg = 6;
-    const cl_uint render_mode_arg = 8;
-    const cl_uint primitive_config_arg = 13;
-    //printf("device_launch_range_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%d\n", context, num_vertices, size, config, context->vertex_command_queue_index);
-
-    size_t queue_index = get_vertex_command_index(context);
-    cl_command_queue queue = context->vertex_command_queues[queue_index];
-
-    cl_uint primitive_config = frag_config_id;
-    size_t gwo = triangle_offset;
-    size_t gws = num_triangles;
-    
-    cl_uint c_vertex_offset = vertex_offset;
-    
-    cl_mem range_buffer;
-    CL_ASSIGN_CHECK(range_buffer, clCreateBuffer(context->shared_objects->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(cl_ushort[size]), (void*) ptr, &error));
-
-    CL_CHECK(clSetKernelArg(context->triangle_setup_range_kernel, index_buffer_arg, sizeof(range_buffer), &range_buffer));
-    CL_CHECK(clSetKernelArg(context->triangle_setup_range_kernel, vertex_offset_arg, sizeof(c_vertex_offset), &c_vertex_offset));
-    CL_CHECK(clSetKernelArg(context->triangle_setup_range_kernel, render_mode_arg, sizeof(mode), &mode));
-    CL_CHECK(clSetKernelArg(context->triangle_setup_range_kernel, primitive_config_arg, sizeof(primitive_config), &primitive_config));
-    
-    // printf("context->vertex_command_queue_index=%d\n", context->vertex_command_queue_index);
-    if (context->assembly_wait_event[queue_index] != NULL) {
-        clReleaseEvent(context->assembly_wait_event[queue_index]);
-    }
-    CL_CHECK(clEnqueueNDRangeKernel(queue, context->triangle_setup_range_kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_event[queue_index]));
-    CL_CHECK(clReleaseMemObject(range_buffer));
-
-    // update data
-    context->vertex_command_queue_index += 1;
-
-    // DEBUG outputs of range kernel
-    /*
+static void __device_print_range_triangle_assembly_output(
+    device_context_t* context,
+    cl_command_queue queue,
+    size_t size
+) {
     size_t sizeof_primitives = sizeof(cl_uchar[size]);
-    size_t sizeof_header = sizeof(triangle_header_t[size]);
-    cl_uchar *primitives = malloc(sizeof_primitives);
-    clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, 0, sizeof_primitives, primitives, 0, NULL, NULL);
+    cl_uchar *primitives = (cl_uchar*) malloc(sizeof_primitives);
+    CL_CHECK(clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, 0, sizeof_primitives, primitives, 0, NULL, NULL));
+
     printf("subtri=[%d", primitives[0]);
     for(int i= 1; i<size; ++i) {
         printf(",%d", primitives[i]);
     }
     printf("]\n");
 
-    triangle_header_t *triangle_header = malloc(sizeof_header);
-    clEnqueueReadBuffer(queue, context->g_tri_header, CL_TRUE, 0, sizeof_header, triangle_header, 0, NULL, NULL);
+    free(primitives);
+
+    size_t sizeof_header = sizeof(triangle_header_t[size]);
+    triangle_header_t *triangle_header = (triangle_header_t*) malloc(sizeof_header);
+    CL_CHECK(clEnqueueReadBuffer(queue, context->g_tri_header, CL_TRUE, 0, sizeof_header, triangle_header, 0, NULL, NULL));
+
     for(int i=0; i<size; ++i) {
         triangle_header_t *header = &triangle_header[i];
         printf("header[%d]{v0x=%d,v0y=%d,v1x=%d,v1y=%d,v2x=%d,v2y=%d}\n",i, 
@@ -1790,75 +1769,100 @@ void device_launch_range_triangle_assembly(
             header->v2y >> (CR_SUBPIXEL_LOG2 - 1)
         );
     }
-    */
-    
+
+    free(triangle_header);
+}
+
+void device_launch_range_triangle_assembly(
+    device_context_t* context, 
+    size_t shader_id,
+    render_mode_t mode, 
+    size_t frag_config_id, 
+    size_t vertex_offset, size_t triangle_offset, size_t num_triangles,
+    size_t width, size_t height, size_t size, uint16_t* ptr
+)
+{
+    cl_kernel kernel = context->device->triangle_setup_range_kernel;
+
+    cl_mem g_index_buffer;
+    CL_ASSIGN_CHECK(g_index_buffer, clCreateBuffer(
+            context->device->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(cl_ushort[size]), (void*) ptr, &error
+    ));
+
+    __device_set_triangle_setup_range_kernel_args(
+        kernel,
+        context,
+        g_index_buffer,
+        vertex_offset,
+        mode,
+        context->device->shaders[shader_id].vertex.vertex_size,
+        frag_config_id,
+        height, 
+        width
+    );
+
+    size_t queue_index = __device_get_vertex_command_index(context);
+
+    // free event if previously used
+    if (context->assembly_wait_events[queue_index] != NULL) 
+    {
+        clReleaseEvent(context->assembly_wait_events[queue_index]);
+    }
+
+    cl_command_queue queue = context->vertex_command_queues[queue_index];
+    size_t gwo = triangle_offset;
+    size_t gws = num_triangles;
+
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_events[queue_index]));
+
+    CL_CHECK(clReleaseMemObject(g_index_buffer));
+
+    __device_advance_vertex_command_index(context);
+
+    // __device_print_range_triangle_assembly_output(context, queue, size);
 }
 
 static void device_launch_arrays_triangle_assembly(
-    device_context_t* context, render_mode_t mode, size_t frag_config_id, 
-    size_t vertex_offset, size_t triangle_offset, size_t num_triangles,
-    size_t width, size_t height, cl_ushort* ptr
-)
-{
-    //printf("device_launch_arrays_triangle_assembly: context=%p, num_vertices=%ld, size=%ld, config_id=%ld, command_queue=%ld\n", context, num_vertices, size, config_id, queue_index);
-    size_t queue_index = get_vertex_command_index(context);
+    device_context_t* context, 
+    size_t shader_id,
+    render_mode_t mode, 
+    size_t frag_config_id, 
+    size_t vertex_offset, 
+    size_t triangle_offset, 
+    size_t num_triangles,
+    size_t width, 
+    size_t height, 
+    size_t size,
+    cl_ushort* ptr
+) {
+    cl_kernel kernel = context->device->triangle_setup_range_kernel;
+
+    __device_set_triangle_setup_arrays_kernel_args(
+        kernel,
+        context,
+        vertex_offset,
+        mode,
+        context->device->shaders[shader_id].vertex.vertex_size,
+        frag_config_id,
+        height, 
+        width
+    );
+
+    size_t queue_index = __device_get_vertex_command_index(context);
+
+    // free event if previously used
+    if (context->assembly_wait_events[queue_index] != NULL) 
+    {
+        clReleaseEvent(context->assembly_wait_events[queue_index]);
+    }
 
     cl_command_queue queue = context->vertex_command_queues[queue_index];
-
-    // triangle setup
-    const cl_uint vertex_offset_arg = 5;
-    const cl_uint render_mode_arg = 7; 
-    const cl_uint primitive_config_arg = 12;
-    const cl_uint c_config_id = frag_config_id;
-
     size_t gwo = triangle_offset;
-    size_t gws = num_triangles; // for GL_TRIANGLES mode, TODO: add other modes
+    size_t gws = num_triangles;
 
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_events[queue_index]));
 
-    cl_uint vertex_offset = context->cummulative_vertices;
-
-    CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, vertex_offset_arg, sizeof(vertex_offset), &vertex_offset));
-    CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, render_mode_arg, sizeof(context->render_mode), &context->render_mode));
-    CL_CHECK(clSetKernelArg(context->triangle_setup_arrays_kernel, primitive_config_arg, sizeof(c_config_id), &c_config_id));
-
-    if (context->assembly_wait_event[queue_index] != NULL) {
-        clReleaseEvent(context->assembly_wait_event[queue_index]);
-    }
-    CL_CHECK(clEnqueueNDRangeKernel(queue, context->triangle_setup_arrays_kernel, 1, &gwo, &gws, NULL, 0, NULL, &context->assembly_wait_event[queue_index]));
-
-    /*
-    size_t szof_offset_primitives = sizeof(cl_uchar[context->assembled_triangles]); 
-    size_t sizeof_primitives = sizeof(cl_uchar[num_triangles]);
-    cl_uchar *primitives = malloc(sizeof_primitives);
-    clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, szof_offset_primitives, sizeof_primitives, primitives, 0, NULL, NULL);
-    printf("subtri=[%d", primitives[0]);
-    for(int i= 1; i<num_triangles; ++i) {
-        printf(",%d", primitives[i]);
-    }
-    printf("]\n");
-    free(primitives);
-    
-    
-    size_t szof_offset_header = sizeof(triangle_header_t[context->assembled_triangles]);
-    size_t sizeof_header = sizeof(triangle_header_t[num_triangles]);
-    triangle_header_t *triangle_header = malloc(sizeof_header);
-    clEnqueueReadBuffer(queue, context->g_tri_header, CL_TRUE, szof_offset_header, sizeof_header, triangle_header, 0, NULL, NULL);
-    for(int i=0; i<num_triangles; ++i) {
-        triangle_header_t *header = &triangle_header[i];
-        printf("header[%d]{v0x=%d,v0y=%d,v1x=%d,v1y=%d,v2x=%d,v2y=%d}\n",context->assembled_triangles+i, 
-            header->v0x, 
-            header->v0y,
-            header->v1x,
-            header->v1y,
-            header->v2x, 
-            header->v2y
-        );
-    }
-    free(triangle_header);
-    */
-
-    // update data
-    context->vertex_command_queue_index += 1;
+    __device_advance_vertex_command_index(context);
 }
 
 static cl_uint get_num_tris_arg_index() 
@@ -1878,39 +1882,67 @@ static void device_launch_bin_dispatch(
     size_t width, 
     size_t height
 ) {
-    size_t global_work_size[2], local_work_size[2];
-    
+    cl_kernel kernel = context->device->bin_raster_kernel;
+
+    __device_set_bin_raster_kernel_args(
+        kernel,
+        context,
+        num_triangles,
+        height, 
+        width
+    );
+
     size_t await_events = MIN(context->vertex_command_queue_index, DEVICE_VERTEX_COMMAND_QUEUE_SIZE);
 
-    cl_uint c_num_tris_arg = get_num_tris_arg_index();
-    cl_uint c_num_tris = num_triangles;
+    size_t local_work_size[2] = {DEVICE_SUB_GROUP_THREADS, DEVICE_BIN_SUB_GROUPS};
+    size_t global_work_size[2] = {local_work_size[0] * CR_BIN_STREAMS_SIZE, local_work_size[1]};
 
-    CL_CHECK(clSetKernelArg(context->bin_raster_kernel, c_num_tris_arg, sizeof(c_num_tris), &c_num_tris));
-    
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-    local_work_size[1] = DEVICE_BIN_SUB_GROUPS;
-    global_work_size[0] = local_work_size[0] * CR_BIN_STREAMS_SIZE;
-    global_work_size[1] = local_work_size[1];
-    // printf("context->vertex_command_queue_index=%d\n", context->vertex_command_queue_index);
-    CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->bin_raster_kernel, 2, NULL, global_work_size, local_work_size, await_events, context->assembly_wait_event, NULL));
+    CL_CHECK(clEnqueueNDRangeKernel(
+        context->raster_command_queue, 
+        kernel, 
+        2, 
+        NULL, 
+        global_work_size, 
+        local_work_size, 
+        await_events, 
+        context->assembly_wait_events, 
+        NULL)
+    );
+
+    for(size_t event=0; event<await_events; ++event) 
+    {
+        clReleaseEvent(context->assembly_wait_events[event]);
+        context->assembly_wait_events[event] = NULL;
+    }
+
+    __device_reset_vertex_command_index(context);
 }
 
 static void device_launch_tile_dispatch(
-    device_context_t* ctx,
+    device_context_t* context,
     uint32_t deferred_clear,
-    size_t width, size_t height
+    size_t width, 
+    size_t height
 ) {
-    size_t global_work_size[2], local_work_size[2];
-    
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-    local_work_size[1] = DEVICE_COARSE_SUB_GROUPS;
-    global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
-    global_work_size[1] = local_work_size[1];
-    CL_CHECK(clEnqueueNDRangeKernel(ctx->raster_command_queue, ctx->coarse_raster_kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
+    cl_kernel kernel = context->device->coarse_raster_kernel;
+
+    __device_set_coarse_raster_kernel_args(
+        kernel,
+        context,
+        deferred_clear,
+        height, 
+        width
+    );
+
+    size_t local_work_size[2] = {DEVICE_SUB_GROUP_THREADS, DEVICE_COARSE_SUB_GROUPS};
+    size_t global_work_size[2] = {local_work_size[0] * DEVICE_NUM_CORES, local_work_size[1]};
+
+    CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, &context->bin_wait_event[0]));
 }
 
 void device_launch_fragment_shader(
     device_context_t* context,
+    size_t shader_id,
     clear_data_t c_data,
     enabled_data_t c_enabled,
     size_t colorbuffer_id, size_t depthbuffer_id, size_t stencilbuffer_id,
@@ -1918,83 +1950,55 @@ void device_launch_fragment_shader(
     size_t width, size_t height, 
     size_t bin_queue_id
 ) {
-    size_t global_work_size[2], local_work_size[2];
+    cl_kernel kernel = context->device->shaders[shader_id].fragment;
 
-    cl_kernel kernel = context->fine_raster_kernel;
-    cl_uint counter = 0;
-    const cl_uint c_max_bin_segs  = CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE; // At least one segment x bin
-    const cl_uint c_max_tile_segs = CR_MAXTILES_SQR; // At least one segment x tile
-    const cl_uint c_max_subtris = DEVICE_MAX_NUMBER_TRIANGLES + DEVICE_MAX_NUMBER_SUBTRIANGLES;
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_buffer));
-    for(int i=0; i<DEVICE_TEXTURE_UNITS; ++i) 
-    {
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->texture_units[i]));
-    }
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->texture_datas));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_fine_counter));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_active_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_tile_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_active_tiles));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_first_seg));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_seg_count));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_seg_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_seg_next));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tri_header));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_color_buffer));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_depth_buffer));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_stencil_buffer));
-    #ifdef DEVICE_IMAGE_ENABLED
-    {
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_tri_data));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_tri_header));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_vertex_buffer));
-    }
-    #else
-    {
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tri_data));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
-    }
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem),      &context->mem_rop_configs));
-
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_data),   &c_clear_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_clear_enabled_data),   &context->c_clear_enabled_data));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_color_buffer_mode),    &context->c_color_buffer_mode));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),                  &c_max_bin_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),                   &c_max_subtris));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_tile_segs),                 &c_max_tile_segs));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_viewport_height),      &context->c_viewport_height));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_viewport_width),       &context->c_viewport_width));
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_width_tiles),          &context->c_width_tiles));
     gl_framebuffer_data_t framebuffer_data = {0};
-    if (context->enabled_colorbuffer) {
+
+    if (colorbuffer_id) 
+    {
         set_framebuffer_data_colorbuffer_enabled(&framebuffer_data);
-    } else {
+    } 
+    else 
+    {
         set_framebuffer_data_colorbuffer_disabled(&framebuffer_data);
     }
-    if (context->enabled_depthbuffer) {
+    if (depthbuffer_id) 
+    {
         set_framebuffer_data_depthbuffer_enabled(&framebuffer_data);
-    } else {
+    } 
+    else 
+    {
         set_framebuffer_data_depthbuffer_disabled(&framebuffer_data);
     }
-    if (context->enabled_stencilbuffer) {
+    if (stencilbuffer_id) 
+    {
         set_framebuffer_data_stencilbuffer_enabled(&framebuffer_data);
-    } else {
+    } 
+    else 
+    {
         set_framebuffer_data_stencilbuffer_disabled(&framebuffer_data);
     }
-    // printf("DEBUG: framebuffer_data.misc=%x\n", framebuffer_data.misc);
-    CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(framebuffer_data),    &framebuffer_data));
 
-    cl_uint wait_events = context->previous_wait_event == NULL ? 0 : 1;
+    __device_set_fragment_shader_kernel_args(
+        kernel,
+        context,
+        context->device->textures[colorbuffer_id],
+        context->device->textures[depthbuffer_id],
+        context->device->textures[stencilbuffer_id],
+        c_data,
+        c_enabled,
+        colorbuffer_mode,
+        height,
+        width,
+        framebuffer_data
+    );
 
-    local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-    local_work_size[1] = DEVICE_FINE_SUB_GROUPS;
-    global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
-    global_work_size[1] = local_work_size[1];
-    CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->fine_raster_kernel, 2, NULL, global_work_size, local_work_size, wait_events, context->previous_wait_event == NULL ? NULL : &context->previous_wait_event, &context->fine_wait_event));
-    
+    size_t local_work_size[2] = {DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS};
+    size_t global_work_size[2] = {local_work_size[0] * DEVICE_NUM_CORES, local_work_size[1]};
+
+    bin_queue_t *bin_queue = &context->device->queue_bins[bin_queue_id];
+
+    CL_CHECK(clEnqueueNDRangeKernel(bin_queue->queues[0][0], kernel, 2, NULL, global_work_size, local_work_size, 1, context->bin_wait_event, NULL));
 }
 
 static void device_launch_triangle_rasterization(device_context_t *context) 
@@ -2199,55 +2203,7 @@ static void device_launch_triangle_rasterization(device_context_t *context)
 
 }
 
-static void device_shared_set_renderbuffer_to_colorbuffer(device_shared_objects_t *shared, size_t renderbuffer_id) 
-{
-    shared->t_colorbuffer = shared->renderbuffers[renderbuffer_id];
-}
 
-static void device_shared_set_renderbuffer_to_depthbuffer(device_shared_objects_t *shared, size_t renderbuffer_id) 
-{
-    shared->t_depthbuffer = shared->renderbuffers[renderbuffer_id];
-}
-
-static void device_shared_set_renderbuffer_to_stencilbuffer(device_shared_objects_t *shared, size_t renderbuffer_id) 
-{
-    shared->t_stencilbuffer = shared->renderbuffers[renderbuffer_id];
-}
-
-static void device_shared_set_texture_to_colorbuffer(device_shared_objects_t *shared, size_t texture_id) 
-{
-    shared->t_colorbuffer = shared->textures[texture_id];
-}
-
-static void device_shared_set_texture_to_depthbuffer(device_shared_objects_t *shared, size_t texture_id) 
-{
-    shared->t_depthbuffer = shared->textures[texture_id];
-}
-
-static void device_shared_set_texture_to_stencilbuffer(device_shared_objects_t *shared, size_t texture_id) 
-{
-    shared->t_stencilbuffer = shared->textures[texture_id];
-}
-
-static void device_shared_set_dummy_to_colorbuffer(device_shared_objects_t *shared) 
-{
-    // printf("device_shared_set_dummy_to_colorbuffer.\n");
-    shared->t_colorbuffer = shared->mem_depthbuffer;
-}
-
-static void device_shared_set_dummy_to_depthbuffer(device_shared_objects_t *shared) 
-{
-    shared->t_depthbuffer = shared->mem_depthbuffer;
-}
-
-static void device_shared_set_dummy_to_stencilbuffer(device_shared_objects_t *shared) 
-{
-    shared->t_stencilbuffer = shared->mem_stencilbuffer;
-}
-
-typedef struct {
-    cl_command_queue queues[DEVICE_BIN_QUEUE_SIZE][DEVICE_BIN_QUEUE_SIZE]; // TODO: multiple queues
-} bin_queue_t;
 
 bin_queue_t* get_bin_queue(device_shared_objects_t* device, size_t bin_queue_id) 
 {
