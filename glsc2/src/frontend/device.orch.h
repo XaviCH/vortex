@@ -47,7 +47,7 @@ typedef struct {
 
 typedef struct {
     vertex_data_t vertex;
-    cl_kernel fragment, uniform_data, vertex_attrib_data;
+    cl_kernel fragment, uniform_data, attribute_data, varying_data;
 } device_shader_kernels_t;
 
 typedef struct {
@@ -92,7 +92,8 @@ typedef struct {
     cl_command_queue    queue;
     cl_event            framebuffer_wait_event;
 
-    bin_queue_t    queue_bins    [HOST_FRAMEBUFFER_SIZE];
+    size_t bin_queues_size;
+    bin_queue_t         bin_queues [HOST_FRAMEBUFFER_SIZE];
 } device_t;
 
 typedef union {
@@ -251,6 +252,13 @@ static cl_mem __device_get_texture_triangle_data(device_context_t* context)
     #else
         return context->g_tri_data;
     #endif
+}
+
+static bin_queue_t* __device_get_bin_queue(
+    device_t* device, 
+    size_t bin_queue_id
+) {
+    return device->bin_queues + bin_queue_id;
 }
 
 
@@ -846,8 +854,40 @@ void device_finish(device_context_t* context)
 {
     CL_CHECK(clFinish(context->raster_command_queue));
 }
+
 // ---------------------------------------------------------------
 // Device create functions
+
+static size_t device_create_bin_queue(
+    device_t* device
+) {
+    size_t bin_queue_id = device->bin_queues_size;
+
+    if (bin_queue_id >= HOST_BIN_QUEUES_SIZE) {
+        fprintf(stderr, "Error: Exceeded maximum number of bin queues.\n");
+        exit(1);
+    }
+
+    bin_queue_t* bin_queue = &device->bin_queues[bin_queue_id];
+
+    for(int i=0; i<DEVICE_BIN_QUEUE_SIZE; ++i) 
+    {
+        for(int j=0; j<DEVICE_BIN_QUEUE_SIZE; ++j)
+        {
+            CL_ASSIGN_CHECK(bin_queue->queues[i][j], clCreateCommandQueue(
+                device->context,
+                device->device_id,
+                0,
+                &error
+            ));
+        }
+    }
+
+    device->bin_queues_size += 1;
+
+    return bin_queue_id;
+}
+
 static size_t device_create_program_from_binary(device_t* device, size_t size, const unsigned char* binary) 
 {
     size_t program_id = device->program_size;
@@ -863,9 +903,16 @@ static size_t device_create_program_from_binary(device_t* device, size_t size, c
     CL_ASSIGN_CHECK(kernels->vertex.kernel,         clCreateKernel(program, "gl_vertex_shader",             &error));
     CL_ASSIGN_CHECK(kernels->fragment,              clCreateKernel(program, "fine_raster_single_sample",    &error));
     CL_ASSIGN_CHECK(kernels->uniform_data,          clCreateKernel(program, "gl_uniform_data",              &error));
-    CL_ASSIGN_CHECK(kernels->vertex_attrib_data,    clCreateKernel(program, "gl_attribute_data",            &error));
+    CL_ASSIGN_CHECK(kernels->attribute_data,        clCreateKernel(program, "gl_attribute_data",            &error));
+    CL_ASSIGN_CHECK(kernels->varying_data,          clCreateKernel(program, "gl_varying_data",              &error));
 
-    #error missing vertex data 
+    cl_uint kernel_varying_num_args;
+    clGetKernelInfo(kernels->varying_data, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_varying_num_args, NULL);
+    kernels->vertex.vertex_size = sizeof(cl_float4[kernel_varying_num_args]);
+
+    cl_uint kernel_attributes_num_args;
+    clGetKernelInfo(kernels->attribute_data, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_attributes_num_args, NULL);
+    kernels->vertex.number_attributes = kernel_attributes_num_args - 1;
 
     device->program_size += 1;
 
@@ -902,7 +949,7 @@ static size_t device_get_program_uniform_size(device_t* device, size_t program_i
 
 static void device_get_program_vertex_attrib_arg_data(device_t* device, size_t program_id, size_t location, arg_data_t* arg_data) 
 {
-    cl_kernel kernel = device->shaders[program_id].vertex_attrib_data;
+    cl_kernel kernel = device->shaders[program_id].attribute_data;
 
     char name[128];
     char type_name[32];
@@ -917,12 +964,7 @@ static void device_get_program_vertex_attrib_arg_data(device_t* device, size_t p
 
 static size_t device_get_program_vertex_attrib_size(device_t* device, size_t program_id)
 {
-    cl_kernel kernel = device->shaders[program_id].vertex_attrib_data;
-
-    cl_uint vertex_attib_size;
-    CL_CHECK(clGetKernelInfo(kernel, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &vertex_attib_size, NULL));
-
-    return vertex_attib_size - 1;
+    return device->shaders[program_id].vertex.number_attributes;
 }
 // ---------------------------------------------------------------
 /*
@@ -1940,7 +1982,41 @@ static void device_launch_tile_dispatch(
     CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, &context->bin_wait_event[0]));
 }
 
-void device_launch_fragment_shader(
+static void __device_set_framebuffer_data(
+    gl_framebuffer_data_t* fb_data,
+    size_t colorbuffer_id, 
+    size_t depthbuffer_id, 
+    size_t stencilbuffer_id
+) {
+    *fb_data = (gl_framebuffer_data_t){0};
+
+    if (colorbuffer_id) 
+    {
+        set_framebuffer_data_colorbuffer_enabled(fb_data);
+    } 
+    else 
+    {
+        set_framebuffer_data_colorbuffer_disabled(fb_data);
+    }
+    if (depthbuffer_id) 
+    {
+        set_framebuffer_data_depthbuffer_enabled(fb_data);
+    } 
+    else 
+    {
+        set_framebuffer_data_depthbuffer_disabled(fb_data);
+    }
+    if (stencilbuffer_id) 
+    {
+        set_framebuffer_data_stencilbuffer_enabled(fb_data);
+    } 
+    else 
+    {
+        set_framebuffer_data_stencilbuffer_disabled(fb_data);
+    }
+}
+
+static void device_launch_fragment_shader(
     device_context_t* context,
     size_t shader_id,
     clear_data_t c_data,
@@ -1954,30 +2030,12 @@ void device_launch_fragment_shader(
 
     gl_framebuffer_data_t framebuffer_data = {0};
 
-    if (colorbuffer_id) 
-    {
-        set_framebuffer_data_colorbuffer_enabled(&framebuffer_data);
-    } 
-    else 
-    {
-        set_framebuffer_data_colorbuffer_disabled(&framebuffer_data);
-    }
-    if (depthbuffer_id) 
-    {
-        set_framebuffer_data_depthbuffer_enabled(&framebuffer_data);
-    } 
-    else 
-    {
-        set_framebuffer_data_depthbuffer_disabled(&framebuffer_data);
-    }
-    if (stencilbuffer_id) 
-    {
-        set_framebuffer_data_stencilbuffer_enabled(&framebuffer_data);
-    } 
-    else 
-    {
-        set_framebuffer_data_stencilbuffer_disabled(&framebuffer_data);
-    }
+    __device_set_framebuffer_data(
+        &framebuffer_data,
+        colorbuffer_id,
+        depthbuffer_id,
+        stencilbuffer_id
+    );
 
     __device_set_fragment_shader_kernel_args(
         kernel,
@@ -1996,222 +2054,15 @@ void device_launch_fragment_shader(
     size_t local_work_size[2] = {DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS};
     size_t global_work_size[2] = {local_work_size[0] * DEVICE_NUM_CORES, local_work_size[1]};
 
-    bin_queue_t *bin_queue = &context->device->queue_bins[bin_queue_id];
+    bin_queue_t *bin_queue = __device_get_bin_queue(context->device, bin_queue_id);
 
     CL_CHECK(clEnqueueNDRangeKernel(bin_queue->queues[0][0], kernel, 2, NULL, global_work_size, local_work_size, 1, context->bin_wait_event, NULL));
 }
 
-static void device_launch_triangle_rasterization(device_context_t *context) 
-{
-    // printf("device_launch_triangle_rasterization: triangles=%d, vertices=%d\n", context->assembled_triangles, context->cummulative_vertices);
 
-    size_t global_work_size[2], local_work_size[2];
-    
-    size_t await_events = MIN(context->vertex_command_queue_index, DEVICE_VERTEX_COMMAND_QUEUE_SIZE);
-
-    {
-        cl_uint c_num_tris_arg = 15;
-        #ifdef CONF_BIN_IMAGE_ENABLED
-        ++c_num_tris_arg;
-        #endif
-        cl_uint c_num_tris = context->assembled_triangles;
-        CL_CHECK(clSetKernelArg(context->bin_raster_kernel, c_num_tris_arg, sizeof(c_num_tris), &c_num_tris));
-        
-        local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-        local_work_size[1] = DEVICE_BIN_SUB_GROUPS;
-        global_work_size[0] = local_work_size[0] * CR_BIN_STREAMS_SIZE;
-        global_work_size[1] = local_work_size[1];
-        // printf("context->vertex_command_queue_index=%d\n", context->vertex_command_queue_index);
-        CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->bin_raster_kernel, 2, NULL, global_work_size, local_work_size, await_events, context->assembly_wait_event, NULL));
-
-        /*
-        printf("num_tris=%d\n",c_num_tris);
-        size_t bins_size = context->c_width_bins * context->c_height_bins;
-        size_t sizeof_bins = sizeof(cl_int[bins_size * CR_BIN_STREAMS_SIZE]);
-        printf("bins_size=%ld\n", bins_size);
-        // printf("sizeof_bins=%ld\n", sizeof_bins/sizeof(cl_int));
-        cl_int *bin_first_seg = (cl_int*)malloc(sizeof_bins);
-        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->g_bin_first_seg, CL_TRUE, 0, sizeof_bins, bin_first_seg, 0, NULL, NULL));
-        cl_int first_active_bins = 0;
-        cl_int other_bins = 0;
-        for(int i=0; i<sizeof_bins/sizeof(cl_int); ++i) if (bin_first_seg[i] != -1) first_active_bins += 1;
-        printf("first_active_bins=%d\n", first_active_bins);
-        cl_uint a_num_bin_segs;
-        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_bin_segs, CL_TRUE, 0, sizeof(a_num_bin_segs), &a_num_bin_segs, 0, NULL, NULL));
-        printf("a_num_bin_segs=%d\n", a_num_bin_segs);
-        for(int j=0; j<bins_size; ++j) {
-            printf("bin_first_seg[%d]=[", j);
-            for(int i=0; i<CR_BIN_STREAMS_SIZE; ++i) {
-                printf(" %d", bin_first_seg[j*CR_BIN_STREAMS_SIZE+i]);
-            }
-            printf(" ]\n");
-        }
-        cl_int num_segs = 4;
-        size_t sizeof_segs_count = sizeof(cl_int[num_segs]);
-        size_t sizeof_segs_data = sizeof(cl_int[num_segs][CR_BIN_SEG_SIZE]);
-        cl_int *bin_seg_count = (cl_int*)malloc(sizeof_segs_count);
-        cl_int *bin_seg_data = (cl_int*)malloc(sizeof_segs_data);
-        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->g_bin_seg_count, CL_TRUE, 0, sizeof_segs_count, bin_seg_count, 0, NULL, NULL));
-        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->g_bin_seg_data, CL_TRUE, 0, sizeof_segs_data, bin_seg_data, 0, NULL, NULL));
-
-        for(int i=0; i<num_segs; ++i) {
-            printf("bin_seg_count[%d]=%d\n", i, bin_seg_count[i]);
-            printf("bin_seg_data[%d]=[", i);
-            for(int j=0; j<bin_seg_count[i]; ++j) {
-                printf(" %d", bin_seg_data[i*CR_BIN_SEG_SIZE+j] >> 3);
-            }
-            printf(" ]\n");
-        }
-
-        printf("End of bin raster\n");
-        */
-        //CL_CHECK(clFinish(context->raster_command_queue));
-        
-    }
-
-    {
-        local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-        local_work_size[1] = DEVICE_COARSE_SUB_GROUPS;
-        global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
-        global_work_size[1] = local_work_size[1];
-        CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->coarse_raster_kernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL));
-        /*
-        CL_CHECK(clFinish(context->raster_command_queue));
-        printf("End of coarse raster\n");
-        cl_int a_num_active_tiles, a_num_tile_segs;
-        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_active_tiles, CL_TRUE, 0, sizeof(a_num_active_tiles), &a_num_active_tiles, 0, NULL, NULL));
-        CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_num_tile_segs, CL_TRUE, 0, sizeof(a_num_tile_segs), &a_num_tile_segs, 0, NULL, NULL));
-        printf("a_num_active_tiles=%d, a_num_tile_segs=%d\n", a_num_active_tiles, a_num_tile_segs);
-        */
-    }
-
-    {
-        // program could be share so we need to set args again
-        cl_kernel kernel = context->fine_raster_kernel;
-        cl_uint counter = 0;
-        const cl_uint c_max_bin_segs  = CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE; // At least one segment x bin
-        const cl_uint c_max_tile_segs = CR_MAXTILES_SQR; // At least one segment x tile
-        const cl_uint c_max_subtris = DEVICE_MAX_NUMBER_TRIANGLES + DEVICE_MAX_NUMBER_SUBTRIANGLES;
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->mem_uniform_buffer));
-        for(int i=0; i<DEVICE_TEXTURE_UNITS; ++i) 
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->texture_units[i]));
-        }
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->texture_datas));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_fine_counter));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_active_tiles));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_bin_segs));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_subtris));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->a_num_tile_segs));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_active_tiles));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_first_seg));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_seg_count));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_seg_data));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tile_seg_next));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tri_header));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_color_buffer));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_depth_buffer));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_stencil_buffer));
-        #ifdef DEVICE_IMAGE_ENABLED
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_tri_data));
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_tri_header));
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->t_vertex_buffer));
-        }
-        #else
-        {
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_tri_data));
-            CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem), &context->g_vertex_buffer));
-        }
-        #endif
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(cl_mem),      &context->mem_rop_configs));
-
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_clear_data),   &c_clear_data));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_clear_enabled_data),   &context->c_clear_enabled_data));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_color_buffer_mode),    &context->c_color_buffer_mode));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_bin_segs),                  &c_max_bin_segs));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_subtris),                   &c_max_subtris));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_max_tile_segs),                 &c_max_tile_segs));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_viewport_height),      &context->c_viewport_height));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_viewport_width),       &context->c_viewport_width));
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(context->c_width_tiles),          &context->c_width_tiles));
-        gl_framebuffer_data_t framebuffer_data = {0};
-        if (context->enabled_colorbuffer) {
-            set_framebuffer_data_colorbuffer_enabled(&framebuffer_data);
-        } else {
-            set_framebuffer_data_colorbuffer_disabled(&framebuffer_data);
-        }
-        if (context->enabled_depthbuffer) {
-            set_framebuffer_data_depthbuffer_enabled(&framebuffer_data);
-        } else {
-            set_framebuffer_data_depthbuffer_disabled(&framebuffer_data);
-        }
-        if (context->enabled_stencilbuffer) {
-            set_framebuffer_data_stencilbuffer_enabled(&framebuffer_data);
-        } else {
-            set_framebuffer_data_stencilbuffer_disabled(&framebuffer_data);
-        }
-        // printf("DEBUG: framebuffer_data.misc=%x\n", framebuffer_data.misc);
-        CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(framebuffer_data),    &framebuffer_data));
-
-        cl_uint wait_events = context->previous_wait_event == NULL ? 0 : 1;
-
-        local_work_size[0] = DEVICE_SUB_GROUP_THREADS;
-        local_work_size[1] = DEVICE_FINE_SUB_GROUPS;
-        global_work_size[0] = local_work_size[0] * DEVICE_NUM_CORES;
-        global_work_size[1] = local_work_size[1];
-        CL_CHECK(clEnqueueNDRangeKernel(context->raster_command_queue, context->fine_raster_kernel, 2, NULL, global_work_size, local_work_size, wait_events, context->previous_wait_event == NULL ? NULL : &context->previous_wait_event, &context->fine_wait_event));
-        // printf("context=%p",context);
-        // printf("raster await_ptr=%p\n",context->fine_wait_event);
-        /*
-        CL_CHECK(clFinish(context->raster_command_queue));
-        printf("End of fine raster\n");
-        */
-        // cl_int a_fine_counter;
-        // CL_CHECK(clEnqueueReadBuffer(context->raster_command_queue, context->a_fine_counter, CL_TRUE, 0, sizeof(a_fine_counter), &a_fine_counter, 0, NULL, NULL));
-        // printf("a_fine_counter=%d\n", a_fine_counter);
-        
-    }
-
-    // CL_CHECK(clFinish(context->raster_command_queue));
-
-    // clean up vertex state
-    {
-        for(int i=0; i<await_events; ++i) {
-            CL_CHECK(clReleaseEvent(context->assembly_wait_event[i]));
-            context->assembly_wait_event[i] = NULL;
-        }
-        context->vertex_command_queue_index = 0;
-        
-        cl_uint max_number_triangles = DEVICE_MAX_NUMBER_TRIANGLES;
-        CL_CHECK(clEnqueueWriteBuffer(context->vertex_command_queues[0], context->a_num_subtris, CL_FALSE, 0, sizeof(cl_int), &max_number_triangles, 0, NULL, NULL));
-
-        context->cummulative_vertices = 0;
-        context->assembled_triangles = 0;
-    }
-    // clean up raster state
-    {
-        cl_uint ZERO = 0;
-        CL_CHECK(clEnqueueWriteBuffer(context->raster_command_queue, context->a_bin_counter, CL_FALSE, 0, sizeof(cl_int), &ZERO, 0, NULL, NULL));
-        CL_CHECK(clEnqueueWriteBuffer(context->raster_command_queue, context->a_coarse_counter, CL_FALSE, 0, sizeof(cl_int), &ZERO, 0, NULL, NULL));
-        CL_CHECK(clEnqueueWriteBuffer(context->raster_command_queue, context->a_fine_counter, CL_FALSE, 0, sizeof(cl_int), &ZERO, 0, NULL, NULL));
-        CL_CHECK(clEnqueueWriteBuffer(context->raster_command_queue, context->a_num_active_tiles, CL_FALSE, 0, sizeof(cl_int), &ZERO, 0, NULL, NULL));
-        CL_CHECK(clEnqueueWriteBuffer(context->raster_command_queue, context->a_num_bin_segs, CL_FALSE, 0, sizeof(cl_int), &ZERO, 0, NULL, NULL));
-        CL_CHECK(clEnqueueWriteBuffer(context->raster_command_queue, context->a_num_tile_segs, CL_FALSE, 0, sizeof(cl_int), &ZERO, 0, NULL, NULL));
-        // CL_CHECK(clFinish(context->raster_command_queue));
-    }
-
-}
-
-
-
-bin_queue_t* get_bin_queue(device_shared_objects_t* device, size_t bin_queue_id) 
-{
-    return device->bin_queues + bin_queue_id;
-}
 
 static void device_launch_clear_framebuffer(
-    device_shared_objects_t* device,
+    device_t* device,
     clear_data_t c_data,
     enabled_data_t c_enabled,
     size_t colorbuffer_id, size_t depthbuffer_id, size_t stencilbuffer_id,
@@ -2220,7 +2071,7 @@ static void device_launch_clear_framebuffer(
     size_t bin_queue_id
 ) {
     cl_kernel kernel = device->clear_kernel;
-    bin_queue_t* bin_queues = get_bin_queue(device, bin_queue_id);
+    bin_queue_t* bin_queue = __device_get_bin_queue(device, bin_queue_id);
 
     cl_uint c_colorbuffer_mode = colorbuffer_mode;
     cl_uint c_viewport_width = width;
@@ -2242,51 +2093,11 @@ static void device_launch_clear_framebuffer(
     size_t global_work_offset[2] = {0, 0};
     size_t global_work_size[2] = {width, height};
     
-    CL_CHECK(clEnqueueNDRangeKernel(bin_queues->queues[0][0], kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, &device->framebuffer_wait_event));
-}
-
-static void device_shared_launch_clear_framebuffer(
-    device_shared_objects_t *shared,
-    uint32_t colorbuffer_mode, uint32_t depthbuffer_mode, uint32_t stencilbuffer_mode,
-    uint32_t x, uint32_t y, uint32_t width, uint32_t height, 
-    cl_ulong clear_write_values, enabled_data_t clear_enabled_data
-)
-{
-    /*
-    printf("DEBUG: device_shared_launch_clear_framebuffer. x=%d, y=%d, width=%d, height=%d, write_values=%lx, enabled_data=%x\n",
-        x, y, width, height, clear_write_values, clear_enabled_data.misc
-    );
-    */
-
-    cl_kernel kernel = shared->clear_kernel;
-    cl_command_queue command_queue = shared->queue;
-
-    cl_uint c_colorbuffer_mode = colorbuffer_mode;
-    cl_uint c_viewport_width = width;
-
-    cl_uint count = 0;
-
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_colorbuffer));
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_depthbuffer));
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &shared->t_colorbuffer));
-    #ifndef DEVICE_IMAGE_ENABLED
-    {
-        CL_CHECK(clSetKernelArg(kernel, count++, sizeof(c_colorbuffer_mode), &c_colorbuffer_mode));
-        CL_CHECK(clSetKernelArg(kernel, count++, sizeof(c_viewport_width), &c_viewport_width));
-    }
-    #endif
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(clear_write_values), &clear_write_values));
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(clear_enabled_data), &clear_enabled_data));
-
-    size_t global_work_offset[2] = {x, y};
-    size_t global_work_size[2] = {width, height};
-    
-    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, &shared->framebuffer_wait_event));
-    // CL_CHECK(clFinish(command_queue));
+    CL_CHECK(clEnqueueNDRangeKernel(bin_queue->queues[0][0], kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, &device->framebuffer_wait_event));
 }
 
 static void device_launch_read_pixels(
-    device_shared_objects_t* device,
+    device_t* device,
     size_t colorbuffer_id,
     uint32_t colorbuffer_mode,
     size_t c_width, size_t c_height,
@@ -2296,7 +2107,7 @@ static void device_launch_read_pixels(
     uint32_t ptr_format,
     void* ptr
 ) {
-    bin_queue_t* bin_queues = get_bin_queue(device, bin_queue_id);
+    bin_queue_t* bin_queues = __device_get_bin_queue(device, bin_queue_id);
 
     cl_command_queue queue = bin_queues->queues[0][0];
 
@@ -2341,71 +2152,11 @@ static void device_launch_read_pixels(
     #endif
 }
 
-void device_shared_launch_read_pixels(
-    device_shared_objects_t* shared,
-    device_context_t* await_context,
-    size_t x, size_t y, size_t width, size_t height, 
-    void* pixels) 
-{
-    cl_command_queue queue = shared->queue;
-
-    cl_uint event_size = 0;
-    cl_event *event = NULL;
-    if (await_context != NULL) {
-        if (await_context->fine_wait_event != NULL) {
-            event = &await_context->fine_wait_event;
-            event_size = 1;
-        } else if (await_context->previous_wait_event != NULL) {
-            event = &await_context->previous_wait_event;
-            event_size = 1;
-        }
-    }
-
-    #ifdef DEVICE_IMAGE_ENABLED
-    {
-        size_t origin[3] = {x, y, 0};
-        size_t region[3] = {width, height, 1};
-        CL_CHECK(clEnqueueReadImage(
-            queue,
-            shared->t_colorbuffer,
-            CL_TRUE,
-            origin,
-            region,
-            0,
-            0,
-            pixels,
-            event_size,
-            event,
-            &shared->framebuffer_wait_event
-        ));
-    }
-    #else
-    {
-        size_t pixel_size = 4; // assuming RGBA8 for shared objects
-        size_t buffer_size = width * height * pixel_size;
-        size_t buffer_offset = (y * width + x) * pixel_size;
-
-        CL_CHECK(clEnqueueReadBuffer(
-            queue,
-            shared->t_colorbuffer,
-            CL_TRUE,
-            buffer_offset,
-            buffer_size,
-            pixels,
-            event_size,
-            event,
-            &shared->framebuffer_wait_event
-        ));
-    }
-    #endif
-
-}
-
 void device_wait_bin_queue(
-    device_shared_objects_t* device,
+    device_t* device,
     size_t bin_queue_id
 ) {
-    bin_queue_t* bin_queues = get_bin_queue(device, bin_queue_id);
+    bin_queue_t* bin_queues = __device_get_bin_queue(device, bin_queue_id);
 
     for(int i=0; i<DEVICE_BIN_QUEUE_SIZE; ++i) 
     {
@@ -2419,54 +2170,22 @@ void device_wait_bin_queue(
 }
 
 void device_bind_vertex_fragment_uniform(
-    device_context_t* context,
-    size_t config_id
+    device_context_t* context
 ) {
-    context->current_uniform_config_id = config_id;
-    context->binded_uniform = DEVICE_BINDING_VERTEX_FRAGMENT_UNIFORM;
+    context->vertex_uniform_type = DEVICE_BINDING_VERTEX_FRAGMENT_UNIFORM;
 }
 
-size_t device_create_bin_queue(
-    device_shared_objects_t* device
-) {
-    size_t bin_queue_id = device->num_bin_queues;
-
-    
-    if (bin_queue_id >= HOST_BIN_QUEUES_SIZE) {
-        fprintf(stderr, "Error: Exceeded maximum number of bin queues.\n");
-        exit(1);
-    }
-    
-
-    bin_queue_t* bin_queue = &device->bin_queues[bin_queue_id];
-
-    for(int i=0; i<DEVICE_BIN_QUEUE_SIZE; ++i) 
-    {
-        for(int j=0; j<DEVICE_BIN_QUEUE_SIZE; ++j)
-        {
-            CL_ASSIGN_CHECK(bin_queue->queues[i][j], clCreateCommandQueue(
-                device->context,
-                device->device_id,
-                0,
-                &error
-            ));
-        }
-    }
-
-    device->num_bin_queues += 1;
-
-    return bin_queue_id;
-}
 
 void device_load_vertex_attribute_data(
     device_context_t* context,
     vertex_attribute_data_t* data
 ) {
-    cl_command_queue queue = context->vertex_command_queues[get_vertex_command_index(context)];
+    size_t idx = __device_get_vertex_command_index(context);
+    cl_command_queue queue = context->vertex_command_queues[idx];
 
     CL_CHECK(clEnqueueWriteBuffer(
         queue,
-        context->mem_vertex_attrib_datas,
+        context->vertex_attribute_data_mem[idx],
         CL_FALSE,
         0,
         sizeof(vertex_attribute_data_t[DEVICE_VERTEX_ATTRIBUTE_SIZE]),
@@ -2481,11 +2200,13 @@ void device_load_vertex_attributes(
     device_context_t* context, 
     float* vertex_attribs
 ) {
-    cl_command_queue queue = context->vertex_command_queues[get_vertex_command_index(context)];
+    size_t idx = __device_get_vertex_command_index(context);
+
+    cl_command_queue queue = context->vertex_command_queues[idx];
 
     CL_CHECK(clEnqueueWriteBuffer(
         queue,
-        context->mem_vertex_attribs,
+        context->vertex_attributes_mem[idx],
         CL_FALSE,
         0,
         sizeof(cl_float[DEVICE_VERTEX_ATTRIBUTE_SIZE][4]),
@@ -2501,7 +2222,7 @@ void device_bind_buffer_to_vertex_attribute_pointer(
     size_t attribute, 
     size_t buffer_id
 ) {
-    cl_mem buffer_mem = context->shared_objects->buffers[buffer_id];
+    cl_mem buffer_mem = context->device->buffers[buffer_id];
 
     context->vertex_attrib_pointer_types    [attribute]         = DEVICE_VERTEX_ATTRIBUTE_POINTER;
     context->vertex_attrib_pointer_mems     [attribute].device  = buffer_mem;
@@ -2522,13 +2243,13 @@ void device_load_vertex_uniform(
     device_context_t* context, 
     void* uniform_data
 ) {
-    cl_command_queue queue = context->vertex_command_queues[get_vertex_command_index(context)];
+    size_t idx = __device_get_vertex_command_index(context);
 
-    cl_mem mem_uniform_buffer = context->mem_uniform_buffer;
+    cl_command_queue queue = context->vertex_command_queues[idx];
 
     CL_CHECK(clEnqueueWriteBuffer(
         queue,
-        mem_uniform_buffer,
+        context->vertex_uniform_mem[idx],
         CL_FALSE,
         0,
         sizeof(cl_char[DEVICE_UNIFORM_CAPACITY]),
