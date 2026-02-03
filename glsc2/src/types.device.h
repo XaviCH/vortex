@@ -206,6 +206,48 @@ static inline cl_bool gl_get_vertex_attribute_normalize(vertex_attribute_data_t 
     return (va_data.misc & VERTEX_ATTRIBUTE_NORMALIZE) != 0;
 }
 
+static inline void set_vertex_attribute_type(vertex_attribute_data_t *va_data, cl_uint type)
+{
+    va_data->misc &= ~VERTEX_ATTRIBUTE_TYPE_MASK;
+    va_data->misc |= type & VERTEX_ATTRIBUTE_TYPE_MASK;
+}
+
+static inline void set_vertex_attribute_size(vertex_attribute_data_t *va_data, cl_uint size)
+{
+    va_data->misc &= ~VERTEX_ATTRIBUTE_SIZE_MASK;
+    va_data->misc |= (size << 3) & VERTEX_ATTRIBUTE_SIZE_MASK;
+}
+
+static inline void set_vertex_attribute_normalize(vertex_attribute_data_t *va_data, cl_bool normalize)
+{
+    if (normalize) 
+    {
+        va_data->misc |= VERTEX_ATTRIBUTE_NORMALIZE;
+    } 
+    else 
+    {
+        va_data->misc &= ~VERTEX_ATTRIBUTE_NORMALIZE;
+    }
+}
+
+static void set_vertex_attribute(
+    vertex_attribute_data_t *va_data, 
+    cl_uint offset, 
+    cl_uint stride, 
+    cl_uint type, 
+    cl_uint size, 
+    cl_bool normalize
+) {
+    *va_data = (vertex_attribute_data_t) {
+        .offset = offset,
+        .stride = stride,
+        .misc = 0
+    };
+    set_vertex_attribute_type(va_data, type);
+    set_vertex_attribute_size(va_data, size);
+    set_vertex_attribute_normalize(va_data, normalize);
+}
+
 /*
 typedef struct
 {
@@ -292,6 +334,20 @@ void set_blending_data_function_dst(blending_data_t *blending_data, cl_uint rgb,
     blending_data->misc |= (alpha & 0xFu) << 28;
 }
 
+static void set_blending_data(
+    blending_data_t *blending_data, 
+    cl_uint rgb_equation,
+    cl_uint alpha_equation,
+    cl_uint rgb_src_func,
+    cl_uint alpha_src_func,
+    cl_uint rgb_dst_func,
+    cl_uint alpha_dst_func
+) {
+    set_blending_data_equation(blending_data, rgb_equation, alpha_equation);
+    set_blending_data_function_src(blending_data, rgb_src_func,  alpha_src_func);
+    set_blending_data_function_dst(blending_data, rgb_dst_func,  alpha_dst_func);
+}
+
 typedef struct
 {
     cl_uint front_misc;
@@ -341,6 +397,18 @@ void set_depth_data_range(depth_data_t *depth_data, cl_ushort near, cl_ushort fa
     depth_data->far = far;
 }
 
+static depth_data_t get_depth_data(cl_uint func, cl_ushort near, cl_ushort far) 
+{
+    depth_data_t depth_data;
+
+    set_depth_data_func(&depth_data, func);
+    set_depth_data_range(&depth_data, near, far);
+
+    return depth_data;
+} 
+
+//--------------------------------------------------------------------------------
+
 typedef struct
 {
     cl_ushort misc;
@@ -351,19 +419,9 @@ cl_uint get_enabled_red_data(enabled_data_t enabled_data)
     return (enabled_data.misc >> 8) & 0x1u;
 }
 
-static void set_enabled_data_red_enable(enabled_data_t* enabled_data)
-{
-    enabled_data->misc |= 0x1u << 8;
-}
-
 cl_uint get_enabled_green_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 9) & 0x1u;
-}
-
-static void set_enabled_data_green_enable(enabled_data_t* enabled_data)
-{
-    enabled_data->misc |= 0x1u << 9;
 }
 
 cl_uint get_enabled_blue_data(enabled_data_t enabled_data)
@@ -371,19 +429,9 @@ cl_uint get_enabled_blue_data(enabled_data_t enabled_data)
     return (enabled_data.misc >> 10) & 0x1u;
 }
 
-static void set_enabled_data_blue_enable(enabled_data_t* enabled_data)
-{
-    enabled_data->misc |= 0x1u << 10;
-}
-
 cl_uint get_enabled_alpha_data(enabled_data_t enabled_data)
 {
     return (enabled_data.misc >> 11) & 0x1u;
-}
-
-static void set_enabled_data_alpha_enable(enabled_data_t* enabled_data)
-{
-    enabled_data->misc |= 0x1u << 11;
 }
 
 cl_bool get_enabled_depth_data(enabled_data_t enabled_data)
@@ -406,6 +454,26 @@ cl_bool is_enabled_data_all_stencil_bits(enabled_data_t enabled_data)
     return (enabled_data.misc & ENABLED_STENCIL_CHANNEL_MASK) == ENABLED_STENCIL_CHANNEL_MASK;
 }
 
+static void set_enabled_data_red_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 8;
+}
+
+static void set_enabled_data_green_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 9;
+}
+
+static void set_enabled_data_blue_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 10;
+}
+
+static void set_enabled_data_alpha_enable(enabled_data_t* enabled_data)
+{
+    enabled_data->misc |= 0x1u << 11;
+}
+
 void set_enabled_color_data(enabled_data_t *enabled_data, cl_bool red, cl_bool green, cl_bool blue, cl_bool alpha)
 {
     enabled_data->misc &= ~(0xFu << 8);
@@ -423,6 +491,20 @@ void set_enabled_depth_data(enabled_data_t *enabled_data, cl_bool mask)
 {
     enabled_data->misc &= ~(0x1u << 12);
     enabled_data->misc |= ((cl_ushort)mask & 0x1u) << 12;
+}
+
+static enabled_data_t get_enabled_data(
+    cl_bool red, cl_bool green, cl_bool blue, cl_bool alpha,
+    cl_bool depth,
+    cl_uchar stencil
+) {
+    enabled_data_t enabled_data = {.misc = 0};
+
+    set_enabled_color_data(&enabled_data, red, green, blue, alpha);
+    set_enabled_depth_data(&enabled_data, depth);
+    set_enabled_stencil_data(&enabled_data, stencil);
+
+    return enabled_data;
 }
 
 typedef struct {
@@ -473,6 +555,18 @@ void set_rgba8_alpha(rgba8_t* color, cl_uint value)
     color->misc |= (value & 0xFFu) << 24;
 }
 
+static rgba8_t get_rgba8(cl_uint red, cl_uint green, cl_uint blue, cl_uint alpha)
+{
+    rgba8_t color = {.misc = 0};
+
+    set_rgba8_red(&color, red);
+    set_rgba8_green(&color, green);
+    set_rgba8_blue(&color, blue);
+    set_rgba8_alpha(&color, alpha);
+        
+    return color;
+}
+
 typedef struct {
     cl_ushort misc;
 } depth16_t;
@@ -496,7 +590,7 @@ typedef struct
 {
     render_mode_t render_mode;
     blending_data_t blending_data;
-    cl_uint blending_color;
+    rgba8_t blending_color;
     cl_uint stencil_data;
     cl_uint depth_data;
     enabled_data_t enabled_data;
