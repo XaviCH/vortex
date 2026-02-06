@@ -442,7 +442,7 @@ inline void execute_ROP_single_sample(
     
     // blending
     run_blend_shader(&blend_shader_output, color, *ptr_color,
-        rop_config.blending_color, rop_config.blending_data.misc, rop_config.render_mode.flags);
+        rop_config.blending_color.misc, rop_config.blending_data.misc, rop_config.render_mode.flags);
     if (blend_shader_output.write_color) {
         cl_uint enabled_color_mask = 0;
         if (get_enabled_red_data(rop_config.enabled_data)) enabled_color_mask |= 0x000000FF;
@@ -775,6 +775,26 @@ void fine_raster_single_sample(
             c_color_buffer_mode,
             (uint2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
         );
+        
+        /*
+        uint2 tile = (uint2) {tile_x, tile_y};
+            uint2 viewport = (uint2) {c_viewport_width, c_viewport_height};
+            bool load_colorbuffer =
+        is_framebuffer_data_colorbuffer_enabled(c_framebuffer_data) &&
+        !is_enabled_data_all_color_channels((enabled_data_t){c_clear_enabled_data});
+
+            
+            for (uint pixel=get_local_id(0); pixel < CR_TILE_SQR; pixel+=get_local_size(0)) {
+                uint2 surf = get_2d_surface_from_tile(tile, pixel);
+
+                if (is_surface_out_viewport(surf, viewport)) continue;
+
+                if (g_tile_seg_count[segment])
+                    w_tile_color[pixel] = 0xFFFF00FF;
+                else
+                    w_tile_color[pixel] = 0xFF00FFFF;
+            }
+        */
         
 
         // bound tile z

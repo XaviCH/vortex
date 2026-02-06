@@ -79,8 +79,21 @@ OBJS := $(addsuffix .o, $(notdir $(SRCS)))
 
 all: $(PROJECT)
 
+GLSC_PATH = $(VORTEX_PATH)/glsc2
+SRC_PATH = $(GLSC_PATH)/src 
+
+CL_FLAGS += -Werror -D__COMPILER_RELATIVE_PATH__ -I$(SRC_PATH)
+# OPT_FLAGS = -D'DEVICE_SUB_GROUP_SUPPORT=0' -D'DEVICE_IMAGE_SUPPORT=0'
+
+
+%.o: %.cl
+	$(GLSC_PATH)/src/compiler/clc $< $@ -DC_OPENCL_HOST $(CL_FLAGS) $(OPT_FLAGS)
+
+%.o.c: %.o
+	xxd -i $< > $@
+
 %.cc.o: %.cc
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(LD_PROJECT_FLAGS) -c $< -o $@
 
 %.cpp.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -125,15 +138,9 @@ run:
 	$(MAKE) display
 endif
 
-.depend: $(SRCS)
-	$(CXX) $(CXXFLAGS) -MM $^ > .depend;
 
 clean:
 	rm -rf $(PROJECT) *.o .depend
 
 clean-all: clean
 	rm -rf *.dump *.pocl *.ocl
-
-ifneq ($(MAKECMDGOALS),clean)
-    -include .depend
-endif

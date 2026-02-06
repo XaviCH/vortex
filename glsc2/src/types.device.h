@@ -230,13 +230,26 @@ static inline void set_vertex_attribute_normalize(vertex_attribute_data_t *va_da
     }
 }
 
+static inline void set_vertex_attribute_pointer(vertex_attribute_data_t *va_data, cl_bool pointer)
+{
+    if (pointer) 
+    {
+        va_data->misc |= VERTEX_ATTRIBUTE_ACTIVE_POINTER;
+    } 
+    else 
+    {
+        va_data->misc &= ~VERTEX_ATTRIBUTE_ACTIVE_POINTER;
+    }
+}
+
 static void set_vertex_attribute(
     vertex_attribute_data_t *va_data, 
     cl_uint offset, 
     cl_uint stride, 
     cl_uint type, 
     cl_uint size, 
-    cl_bool normalize
+    cl_bool normalize,
+    cl_bool pointer
 ) {
     *va_data = (vertex_attribute_data_t) {
         .offset = offset,
@@ -246,6 +259,7 @@ static void set_vertex_attribute(
     set_vertex_attribute_type(va_data, type);
     set_vertex_attribute_size(va_data, size);
     set_vertex_attribute_normalize(va_data, normalize);
+    set_vertex_attribute_pointer(va_data, pointer);
 }
 
 /*

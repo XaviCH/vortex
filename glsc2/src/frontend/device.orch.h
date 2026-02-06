@@ -525,7 +525,7 @@ void device_init_context(
     
     CL_ASSIGN_CHECK(context->rop_configs_mem, clCreateBuffer(device->context, CL_MEM_READ_ONLY, sizeof(rop_config_t[TRIANGLE_PRIMITIVE_CONFIGS]), NULL, &error));
 
-    for (size_t unit; unit < DEVICE_TEXTURE_UNITS; ++unit)
+    for (size_t unit = 0; unit < DEVICE_TEXTURE_UNITS; ++unit)
     {
         context->texture_units_mems[unit] = device->textures[0]; // default texture
     }
@@ -569,8 +569,6 @@ static void __device_set_triangle_setup_arrays_kernel_args(
     cl_uint c_viewport_height,
     cl_uint c_viewport_width
 ) {
-    cl_kernel kernel = context->device->triangle_setup_arrays_kernel;
-
     cl_uint c_max_subtris = __device_get_max_number_subtriangles();
     cl_uint c_samples_log2 = 0; // TODO: not impl
     cl_mem  t_vertex_buffer = __device_get_texture_vertex_buffer(context);
@@ -581,7 +579,7 @@ static void __device_set_triangle_setup_arrays_kernel_args(
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_header));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_data));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_subtris));
-    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &t_vertex_buffer)); 
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &t_vertex_buffer));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_vertex_offset),        &c_vertex_offset));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_max_subtris),          &c_max_subtris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_mode),                 &c_mode));
@@ -634,7 +632,6 @@ static void __device_set_bin_raster_kernel_args(
 ) {
     cl_uint c_max_subtris = __device_get_max_number_subtriangles();
     cl_uint c_max_bin_segs  = __device_get_max_number_bin_segments();
-    cl_uint c_samples_log2 = 0; // TODO: not impl
     cl_uint c_bin_batch_sz = __device_get_bin_batch_size();
     cl_uint c_height_bins = __device_get_num_bins_from_viewport(c_viewport_height);
     cl_uint c_width_bins = __device_get_num_bins_from_viewport(c_viewport_width);
@@ -655,7 +652,6 @@ static void __device_set_bin_raster_kernel_args(
     #ifdef DEVICE_IMAGE_ENABLED
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem), &context->t_tri_header));
     #endif
-    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_bin_batch_sz),      &c_bin_batch_sz));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_bin_batch_sz),      &c_bin_batch_sz));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_height_bins),       &c_height_bins));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_max_bin_segs),      &c_max_bin_segs));
@@ -841,7 +837,7 @@ static size_t device_create_bin_queue(
 
     bin_queue_t* bin_queue = &device->bin_queues[bin_queue_id];
 
-    for(int i=0; i<DEVICE_BIN_QUEUE_SIZE; ++i) 
+    for(int i=0; i<DEVICE_BIN_QUEUE_SIZE; ++i)
     {
         for(int j=0; j<DEVICE_BIN_QUEUE_SIZE; ++j)
         {
@@ -1253,10 +1249,10 @@ static void __device_print_vertex_shader_output(
     float *vertices = (float*) malloc(vertices_sizeof);
     clEnqueueReadBuffer(queue, context->g_vertex_buffer, CL_TRUE, 0, vertices_sizeof, vertices, 0, NULL, NULL);
     
-    for(int i= 0; i<num_vertices; ++i) 
+    for(size_t i= 0; i<num_vertices; ++i) 
     {
-        printf("vertex %d:", i);
-        for(int j=0; j<num_varying+1; ++j) {
+        printf("vertex %ld:", i);
+        for(size_t j=0; j<num_varying+1; ++j) {
             size_t offset = i*(num_varying+1)*4 + j*4;
             printf(" (%.2f,%.2f,%.2f,%.2f)", 
                 vertices[offset+0],
@@ -1376,7 +1372,7 @@ static void device_launch_vertex_shader(
         n_attributes
     );
     
-    // __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
+    __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
 }
 
 static void __device_print_range_triangle_assembly_output(
@@ -1478,7 +1474,7 @@ static void device_launch_arrays_triangle_assembly(
     size_t width, 
     size_t height 
 ) {
-    cl_kernel kernel = context->device->triangle_setup_range_kernel;
+    cl_kernel kernel = context->device->triangle_setup_arrays_kernel;
 
     __device_set_triangle_setup_arrays_kernel_args(
         kernel,
@@ -1641,6 +1637,7 @@ static void device_launch_fragment_shader(
         stencilbuffer_id
     );
 
+
     __device_set_fragment_shader_kernel_args(
         kernel,
         context,
@@ -1655,12 +1652,15 @@ static void device_launch_fragment_shader(
         framebuffer_data
     );
 
+
     size_t local_work_size[2] = {DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS};
     size_t global_work_size[2] = {local_work_size[0] * DEVICE_NUM_CORES, local_work_size[1]};
 
     bin_queue_t *bin_queue = __device_get_bin_queue(context->device, bin_queue_id);
 
+
     CL_CHECK(clEnqueueNDRangeKernel(bin_queue->queues[0][0], kernel, 2, NULL, global_work_size, local_work_size, 1, context->bin_wait_event, NULL));
+    CL_CHECK(clReleaseEvent(context->bin_wait_event[0]));
 }
 
 
