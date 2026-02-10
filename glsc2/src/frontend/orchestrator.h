@@ -210,6 +210,7 @@ static void __orch_flush_draw_state(orch_handler_t* orch, orch_framebuffer_handl
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
     device_launch_bin_dispatch(context, framebuffer->draw_state.assembled_triangles, framebuffer->width, framebuffer->height);
+
     device_launch_tile_dispatch(context, deferred_clear, framebuffer->width, framebuffer->height);
 
     device_launch_fragment_shader(
@@ -226,9 +227,12 @@ static void __orch_flush_draw_state(orch_handler_t* orch, orch_framebuffer_handl
         framebuffer->bin_queue_id
     );
 
+    printf("Flushed draw state: framebuffer_id=%zu, context_id=%zu, triangles=%zu\n", framebuffer - orch->framebuffers, framebuffer->context_id, framebuffer->draw_state.assembled_triangles);
+    
     framebuffer->draw_state.assembled_triangles  = 0;
     framebuffer->draw_state.assembled_vertices   = 0;
     framebuffer->clear_state.enabled = {0};
+
 }
 
 static void __orch_flush_clear_state(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
@@ -269,6 +273,14 @@ static void __orch_deattach_context(orch_handler_t* orch, orch_framebuffer_handl
     }
 }
 
+static void __orch_load_state_to_context(orch_handler_t* orch, device_context_t* context)
+{
+    device_load_vertex_attributes(context, &context->vertex_attributes);
+    device_load_vertex_attribute_data(context, &context->vertex_attribute_data);
+    device_load_texture_datas(context, &context->texture_datas);
+    device_load_config(context, 0, &context->rop_config, context->uniform_data);
+}
+
 static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
 {
     size_t context_id = __orch_get_next_context_id(orch);
@@ -282,10 +294,13 @@ static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_fr
 
     __orch_deattach_context(orch, framebuffer);
 
+    device_context_t* context = &orch->contexts[context_id];
+    __orch_load_state_to_context(orch, context);
+
     framebuffer->context_id = context_id;
     orch->context_framebuffer_attachments[context_id] = framebuffer;
 
-    return &orch->contexts[context_id];
+    return context;
 }
 
 /*
@@ -342,12 +357,15 @@ static void __orch_draw_vertices(
     if (__orch_require_flush_context(framebuffer, shader_id, mode, num_vertices))
     {
         context = __orch_attach_new_context(orch, framebuffer);
+        printf("Attached context_id=%zu\n", context - orch->contexts);
     }
 
     if (__orch_require_flush_vertices(framebuffer, mode, num_vertices))
     {
         __orch_flush_vertices(orch, framebuffer);
     }
+
+    printf("Launch draw vertices\n");
 
     device_launch_vertex_shader(
         context,
@@ -669,6 +687,8 @@ static void orch_draw_range(
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     __orch_draw_vertices(orch, framebuffer, shader_id, mode, init, end);
+
+    printf("Draw vertices\n");
 
     if (framebuffer->draw_state.pending_vertices == 0) return;
 
