@@ -39,9 +39,9 @@
 #endif
 
 // ------
-// RENDER CONFIG
+// RENDER CONFIGURATIONS
 // ------
-#define DEVICE_CONTEXT_NUMBER 2
+#define DEVICE_CONTEXT_NUMBER 4
 #define DEVICE_BIN_QUEUE_SIZE 1
 
 #define DEVICE_VERTEX_ATTRIBUTE_SIZE 16
@@ -52,13 +52,14 @@
 
 #define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
 #define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 8
+
 #define DEVICE_MAX_NUMBER_TRIANGLES (1UL << 12) // 4096 triangles
 #define DEVICE_MAX_NUMBER_SUBTRIANGLES (1UL << 12) // 4096 subtriangles
 #define DEVICE_VERTICES_SIZE (1UL << 12) // 4096 vertices
 #define DEVICE_VARYING_SIZE 16
 
 // ------
-// KERNEL CONFIG
+// KERNEL CONFIGURATIONS
 // ------
 
 // Triangle Setup Configuration

@@ -51,7 +51,7 @@ typedef struct {
 // Header methods
 //--------------------------------------------------------------------------
 
-static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer);
+static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer, size_t primitive_id);
 
 //--------------------------------------------------------------------------
 // Private methods
@@ -64,16 +64,28 @@ static orch_framebuffer_handler_t* __orch_get_framebuffer_from_id(orch_handler_t
     return &orch->framebuffers[framebuffer_id];
 }
 
+static device_context_t* __orch_get_context_from_id(orch_handler_t* orch, size_t context_id)
+{
+    if (context_id >= DEVICE_CONTEXT_NUMBER) return NULL;
+
+    return &orch->contexts[context_id];
+}
+
 static orch_framebuffer_handler_t* __orch_get_framebuffer_attached_to_context_id(orch_handler_t* orch, size_t context_id)
 {
     return orch->context_framebuffer_attachments[context_id];
 } 
 
+static device_context_t* __orch_get_attached_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
+{
+    return __orch_get_context_from_id(orch,framebuffer->context_id);
+}
+
 static device_context_t* __orch_get_attached_or_attach_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
 {
-    if (framebuffer->context_id == -1) return __orch_attach_new_context(orch, framebuffer);
+    if (framebuffer->context_id == -1) return __orch_attach_new_context(orch, framebuffer, framebuffer->draw_state.last_config_id);
 
-    return &orch->contexts[framebuffer->context_id];
+    return __orch_get_attached_context(orch, framebuffer);
 }
 
 static uint32_t __orch_get_deferred_clear(orch_framebuffer_handler_t* framebuffer)
@@ -181,7 +193,7 @@ static void __orch_flush_vertices(orch_handler_t* orch, orch_framebuffer_handler
 
     size_t vertices_offset = framebuffer->draw_state.assembled_vertices - framebuffer->draw_state.pending_vertices;
 
-    device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
+    device_context_t* context = __orch_get_attached_context(orch, framebuffer);
 
     device_launch_arrays_triangle_assembly(
         context,
@@ -207,7 +219,7 @@ static void __orch_flush_draw_state(orch_handler_t* orch, orch_framebuffer_handl
     
     uint32_t deferred_clear = __orch_get_deferred_clear(framebuffer);
 
-    device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
+    device_context_t* context = __orch_get_attached_context(orch, framebuffer);
 
     device_launch_bin_dispatch(context, framebuffer->draw_state.assembled_triangles, framebuffer->width, framebuffer->height);
 
@@ -273,16 +285,11 @@ static void __orch_deattach_context(orch_handler_t* orch, orch_framebuffer_handl
     }
 }
 
-static void __orch_load_state_to_context(orch_handler_t* orch, device_context_t* context)
-{
-    device_load_vertex_attributes(context, &context->vertex_attributes);
-    device_load_vertex_attribute_data(context, &context->vertex_attribute_data);
-    device_load_texture_datas(context, &context->texture_datas);
-    device_load_config(context, 0, &context->rop_config, context->uniform_data);
-}
-
-static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
-{
+static device_context_t* __orch_attach_new_context(
+    orch_handler_t* orch, 
+    orch_framebuffer_handler_t* framebuffer,
+    size_t primitive_id
+) {
     size_t context_id = __orch_get_next_context_id(orch);
 
     orch_framebuffer_handler_t* prev_framebuffer = __orch_get_framebuffer_attached_to_context_id(orch, context_id);
@@ -291,11 +298,16 @@ static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_fr
     {
         __orch_deattach_context(orch, prev_framebuffer);
     }
+    
+    device_context_t* context       = __orch_get_context_from_id(orch, context_id);
+    device_context_t* prev_context  = __orch_get_attached_context(orch, framebuffer);
+
+    if (prev_context != NULL && context != prev_context) 
+    {
+        device_copy_context_last_state(context, prev_context, primitive_id);
+    }
 
     __orch_deattach_context(orch, framebuffer);
-
-    device_context_t* context = &orch->contexts[context_id];
-    __orch_load_state_to_context(orch, context);
 
     framebuffer->context_id = context_id;
     orch->context_framebuffer_attachments[context_id] = framebuffer;
@@ -341,11 +353,11 @@ static uint8_t orch_require_flush_clear(orch_framebuffer_handler_t* framebuffer,
 */
 
 static void __orch_draw_vertices(
-    orch_handler_t* orch, 
-    orch_framebuffer_handler_t* framebuffer, 
-    size_t shader_id, 
-    render_mode_t mode, 
-    uint32_t init, 
+    orch_handler_t* orch,
+    orch_framebuffer_handler_t* framebuffer,
+    size_t shader_id,
+    render_mode_t mode,
+    uint32_t init,
     uint32_t end
 ) {
     size_t num_vertices = end - init;
@@ -356,8 +368,7 @@ static void __orch_draw_vertices(
 
     if (__orch_require_flush_context(framebuffer, shader_id, mode, num_vertices))
     {
-        context = __orch_attach_new_context(orch, framebuffer);
-        printf("Attached context_id=%zu\n", context - orch->contexts);
+        context = __orch_attach_new_context(orch, framebuffer, last_config_id);
     }
 
     if (__orch_require_flush_vertices(framebuffer, mode, num_vertices))
@@ -365,21 +376,21 @@ static void __orch_draw_vertices(
         __orch_flush_vertices(orch, framebuffer);
     }
 
-    printf("Launch draw vertices\n");
-
     device_launch_vertex_shader(
         context,
-        framebuffer->draw_state.shader_id,
+        shader_id,
         init, 
         end,
         framebuffer->draw_state.assembled_vertices,
-        last_config_id
+        last_config_id,
+        1
     );
 
     framebuffer->draw_state.last_render_mode = mode;
     framebuffer->draw_state.last_config_id = last_config_id;
     framebuffer->draw_state.assembled_vertices += num_vertices;
     framebuffer->draw_state.pending_vertices += num_vertices;
+    framebuffer->draw_state.shader_id = shader_id;
 }
 
 static void __orch_merge_clear_state(orch_framebuffer_handler_t* framebuffer, clear_data_t data, enabled_data_t enabled)
@@ -473,8 +484,8 @@ static size_t orch_create_framebuffer(orch_handler_t* orch)
         },
         .context_id = -1,
         .loaded_configs = 0,
-        .colorbuffer_id = 0, 
-        .depthbuffer_id = 0, 
+        .colorbuffer_id = 0,
+        .depthbuffer_id = 0,
         .stencilbuffer_id = 0,
         .colorbuffer_mode = 0,
         .width = 0,
@@ -581,31 +592,6 @@ static void orch_attach_vertex_attribute_host_ptr(orch_handler_t* orch, size_t f
     device_bind_host_pointer_to_vertex_attribute_pointer(context, attribute, stride, ptr);
 }
 
-static void orch_attach_vertex_uniform(
-    orch_handler_t* orch, 
-    size_t framebuffer_id, 
-    void* uniform_data
-) {
-    orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
-
-    device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
-
-    device_load_vertex_uniform(context, uniform_data);
-
-    device_bind_vertex_uniform(context);
-}
-
-static void orch_attach_vertex_fragment_uniform(
-    orch_handler_t* orch,
-    size_t framebuffer_id
-) {
-    orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
-
-    device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
-
-    device_bind_vertex_fragment_uniform(context);
-}
-
 // Write functions
 
 static void orch_write_buffer(
@@ -620,19 +606,19 @@ static void orch_write_buffer(
 
 // Upload functions
 
-static void orch_upload_vertex_attributes(
+static void orch_write_vertex_attributes(
     orch_handler_t* orch, 
     size_t framebuffer_id, 
-    float* vertex_attribs
+    float vertex_attributes[DEVICE_VERTEX_ATTRIBUTE_SIZE][4]
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
-    device_load_vertex_attributes(context, vertex_attribs);
+    device_write_vertex_attributes(context, vertex_attributes, 1);
 }
 
-static void orch_upload_vertex_attribute_data(
+static void orch_write_vertex_attribute_data(
     orch_handler_t* orch, 
     size_t framebuffer_id, 
     vertex_attribute_data_t* data
@@ -641,20 +627,21 @@ static void orch_upload_vertex_attribute_data(
 
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
-    device_load_vertex_attribute_data(context, data);
+    device_write_vertex_attribute_data(context, data);
 }
 
-static void orch_upload_fragment_data(
+static void orch_write_fragment_data(
     orch_handler_t* orch, 
     size_t framebuffer_id, 
-    void* uniform_data,
+    uint8_t uniform_data[DEVICE_UNIFORM_CAPACITY],
     rop_config_t config
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
-    device_load_config(context, framebuffer->loaded_configs, &config, (cl_uchar*)uniform_data);
+    device_write_fragment_uniform(context, framebuffer->loaded_configs, uniform_data);
+    device_write_rop_config(context, framebuffer->loaded_configs, &config);
     
     framebuffer->loaded_configs += 1;
 }
@@ -687,8 +674,6 @@ static void orch_draw_range(
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     __orch_draw_vertices(orch, framebuffer, shader_id, mode, init, end);
-
-    printf("Draw vertices\n");
 
     if (framebuffer->draw_state.pending_vertices == 0) return;
 

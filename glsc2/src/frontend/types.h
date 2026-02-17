@@ -1,5 +1,5 @@
-#ifndef __types_h__
-#define __types_h__ 1
+#ifndef __FRONTEND_TYPES_H__
+#define __FRONTEND_TYPES_H__
 
 #include <types.device.h>
 #include <GLSC2/glsc2.h>
@@ -120,6 +120,7 @@ typedef struct {
 typedef struct {
     attachment_t color_attachment0, depth_attachment, stencil_attachment;
     GLboolean used;
+    size_t id;
 } framebuffer_t;
 
 typedef struct {
@@ -128,7 +129,7 @@ typedef struct {
     GLsizei width, height;
     GLboolean used;
     size_t id;
-} renderbuffer_t;
+} gl_renderbuffer_t;
 
 typedef struct { GLfloat n, f; } depth_range_t;
 
@@ -256,4 +257,4 @@ typedef struct {
     GLenum draw_mode;
 } draw_state_t;
 
-#endif
+#endif // __FRONTEND_TYPES_H__
