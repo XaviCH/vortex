@@ -412,12 +412,12 @@ static void __device_reset_vertex_command_index(device_context_t *context)
 // Utils
 static size_t __device_get_max_number_subtriangles() 
 {
-    return  DEVICE_MAX_NUMBER_TRIANGLES + DEVICE_MAX_NUMBER_SUBTRIANGLES;
+    return DEVICE_MAX_NUMBER_TRIANGLES + DEVICE_MAX_NUMBER_SUBTRIANGLES;
 }
 
 static size_t __device_get_max_number_triangles() 
 {
-    return  DEVICE_MAX_NUMBER_TRIANGLES;
+    return DEVICE_MAX_NUMBER_TRIANGLES;
 }
 
 static size_t __device_get_max_number_bin_segments() 
@@ -1543,7 +1543,7 @@ static void device_launch_vertex_shader(
 
     CL_CHECK(clReleaseEvent(wait_event));
 
-    // __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
+    __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
 }
 
 void device_launch_range_triangle_assembly(
@@ -1591,7 +1591,7 @@ void device_launch_range_triangle_assembly(
 
     __device_advance_vertex_command_index(context);
 
-    // __device_print_triangle_assembly_output(context, queue, num_triangles);
+    __device_print_triangle_assembly_output(context, queue, num_triangles);
 }
 
 static void device_launch_arrays_triangle_assembly(
@@ -2128,45 +2128,19 @@ static void device_write_2d_texture(
     size_t texture_id, 
     size_t x, 
     size_t y, 
-    size_t width, 
-    size_t height, 
+    size_t width,
+    size_t height,
     uint32_t device_texture_mode,
     uint32_t host_texture_mode,
     const void* data
 ) 
 {
-    // TODO: Do it with a kernel
-    #ifdef DEVICE_IMAGE_ENABLED
-    {
-        size_t origin[3] = {x, y, 0};
-        size_t region[3] = {width, height, 1};
-        CL_CHECK(clEnqueueWriteImage(
-            device->queue,
-            device->textures[texture_id],
-            CL_TRUE,
-            origin,
-            region,
-            0,
-            0,
-            data,
-            0,
-            NULL,
-            NULL
-        ));
-    }
-    #else
-    {
-        size_t pixel_size = __device_get_bytes_from_texture_mode(device_texture_mode);
-        size_t buffer_size = width * height * pixel_size;
+    __device_mem_t* texture_mem = &device->textures[texture_id];
 
-        __device_mem_t* texture_mem = &device->textures[texture_id];
+    size_t origin[2] = {x,y};
+    size_t region[2] = {width, height};
 
-        size_t origin[2] = {x,y};
-        size_t region[2] = {width, height};
-
-        __device_write_2d_texture(&device->textures[texture_id], CL_TRUE, origin, region, 0, 0, data);
-    }
-    #endif
+    __device_write_2d_texture(&device->textures[texture_id], CL_TRUE, origin, region, 0, 0, data);
 }
 
 static void device_write_buffer(device_t* device, size_t buffer_id, size_t offset, size_t size, const void* data) 

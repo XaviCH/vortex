@@ -42,7 +42,7 @@ typedef struct {
     size_t rw_image2d_size;
     orch_rw_image2d_handler_t rw_image2ds[HOST_IMAGES_REF_SIZE];
     
-    size_t next_context_id = 0;
+    size_t next_context_id;
     device_context_t contexts[DEVICE_CONTEXT_NUMBER];
     orch_framebuffer_handler_t* context_framebuffer_attachments[DEVICE_CONTEXT_NUMBER];
 } orch_handler_t;
@@ -128,10 +128,10 @@ static uint32_t __orch_require_flush_context(
     render_mode_t mode, 
     size_t num_vertices
 ) {
-    if (framebuffer->draw_state.shader_id != shader_id) return true;
+    if (framebuffer->draw_state.shader_id != shader_id) return 1;
 
     // TODO: depends also on the varying size
-    if (framebuffer->draw_state.assembled_vertices + num_vertices > DEVICE_VERTICES_SIZE) return true;
+    if (framebuffer->draw_state.assembled_vertices + num_vertices > DEVICE_VERTICES_SIZE) return 1;
 
     size_t pending_triangles = __orch_get_num_triangles_from_vertices(
         framebuffer->draw_state.last_render_mode, 
@@ -140,11 +140,11 @@ static uint32_t __orch_require_flush_context(
 
     size_t requested_triangles = __orch_get_num_triangles_from_vertices(mode, num_vertices);
 
-    if (framebuffer->draw_state.assembled_triangles + pending_triangles + requested_triangles > DEVICE_MAX_NUMBER_TRIANGLES) return true;
+    if (framebuffer->draw_state.assembled_triangles + pending_triangles + requested_triangles > DEVICE_MAX_NUMBER_TRIANGLES) return 1;
 
     // TODO: maybe take account segments available
 
-    return false;
+    return 0;
 }
 
 // Attach functions
@@ -243,7 +243,7 @@ static void __orch_flush_draw_state(orch_handler_t* orch, orch_framebuffer_handl
     
     framebuffer->draw_state.assembled_triangles  = 0;
     framebuffer->draw_state.assembled_vertices   = 0;
-    framebuffer->clear_state.enabled = {0};
+    framebuffer->clear_state.enabled = (enabled_data_t) {0};
 
 }
 
@@ -264,7 +264,7 @@ static void __orch_flush_clear_state(orch_handler_t* orch, orch_framebuffer_hand
         framebuffer->bin_queue_id
     );
     
-    framebuffer->clear_state.enabled = {0};
+    framebuffer->clear_state.enabled = (enabled_data_t) {0};
 }
 
 static void __orch_flush_framebuffer(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
@@ -525,7 +525,7 @@ static size_t orch_create_renderbuffer(orch_handler_t* orch, size_t width, size_
     return orch_create_image2d(orch, width, height, mode);
 }
 
-static size_t orch_create_texture(orch_handler_t* orch, size_t width, size_t height, uint32_t mode)
+static size_t orch_create_2d_texture(orch_handler_t* orch, size_t width, size_t height, uint32_t mode)
 {
     return orch_create_image2d(orch, width, height, mode);
 }
@@ -583,8 +583,13 @@ static void orch_attach_vertex_attribute_ptr(orch_handler_t* orch, size_t frameb
     device_bind_buffer_to_vertex_attribute_pointer(context, attribute, buffer_id);
 }
 
-static void orch_attach_vertex_attribute_host_ptr(orch_handler_t* orch, size_t framebuffer_id, uint32_t attribute, size_t stride, void* ptr)
-{
+static void orch_attach_vertex_attribute_host_ptr(
+    orch_handler_t* orch, 
+    size_t framebuffer_id, 
+    uint32_t attribute, 
+    size_t stride, 
+    void* ptr
+) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
@@ -592,6 +597,18 @@ static void orch_attach_vertex_attribute_host_ptr(orch_handler_t* orch, size_t f
     device_bind_host_pointer_to_vertex_attribute_pointer(context, attribute, stride, ptr);
 }
 
+static void orch_attach_texture_unit(
+    orch_handler_t* orch, 
+    size_t framebuffer_id, 
+    size_t texture_unit, 
+    size_t texture_id
+) {
+    orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
+
+    device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
+
+    device_bind_texture_unit(context, texture_unit, texture_id);
+}
 // Write functions
 
 static void orch_write_buffer(
@@ -604,7 +621,28 @@ static void orch_write_buffer(
     device_write_buffer(&orch->device, buffer_id, offset, size, data);
 }
 
-// Upload functions
+static void orch_write_2d_texture(
+    orch_handler_t* orch, 
+    size_t texture_id,
+    size_t x,
+    size_t y,
+    size_t width, 
+    size_t height, 
+    uint32_t mode,
+    void* data
+) {
+    orch_rw_image2d_handler_t* image2d = &orch->rw_image2ds[texture_id];
+
+    device_write_2d_texture(
+        &orch->device, 
+        image2d->image_id, 
+        x, y,
+        width, height, 
+        image2d->mode,
+        mode, 
+        data
+    );
+}
 
 static void orch_write_vertex_attributes(
     orch_handler_t* orch, 
@@ -628,6 +666,20 @@ static void orch_write_vertex_attribute_data(
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
     device_write_vertex_attribute_data(context, data);
+}
+
+static void orch_write_fragment_texture_data(
+    orch_handler_t* orch,
+    size_t framebuffer_id,
+    gl_texture_data_t texture_data[DEVICE_TEXTURE_UNITS]
+) {
+    orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
+    
+    device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
+
+    __orch_flush_draw_state(orch, framebuffer);
+
+    device_write_fragment_texture_datas(context, texture_data);
 }
 
 static void orch_write_fragment_data(

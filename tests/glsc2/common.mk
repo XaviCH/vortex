@@ -27,7 +27,8 @@ OPENGLSC_PATH ?= $(realpath ..)
 
 VORTEX_RT_PATH ?= $(realpath ../../../runtime)
 VORTEX_KN_PATH ?= $(realpath ../../../kernel)
-VORTEX_GLSC_PATH ?= $(realpath ../../../glsc2)
+
+GLSC2_PATH ?= $(PROJECT_PATH)/glsc2
 VORTEX_EGL_PATH ?= $(realpath ../../../egl)
 
 FPGA_BIN_DIR ?= $(VORTEX_RT_PATH)/opae
@@ -45,13 +46,15 @@ CXXFLAGS += -Wno-deprecated-declarations -Wno-unused-parameter -Wno-narrowing
 CXXFLAGS += -pthread
 CXXFLAGS += -I$(POCL_RT_PATH)/include
 CXXFLAGS += -I$(VORTEX_EGL_PATH)/include
-CXXFLAGS += -I$(VORTEX_GLSC_PATH)/include
+CXXFLAGS += -I$(GLSC2_PATH)/include
+CXXFLAGS += -I$(GLSC2_PATH)/src
+CXXFLAGS += -I$(PROJECT_PATH)
 
 driver ?= opencl
 # Driver assigment
 ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
-	LDFLAGS += -lOpenCL $(VORTEX_GLSC_PATH)/src/frontend/libGLSC2.so
+	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so
 else
 ifeq ($(driver), gles)
 	CXXFLAGS += -DC_OPENGL_HOST
@@ -59,7 +62,7 @@ ifeq ($(driver), gles)
 else
 ifeq ($(driver), vortex)
 	CXXFLAGS += -DC_OPENCL_VORTEX
-	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(VORTEX_GLSC_PATH)/libGLSCv2.vortex.so $(VORTEX_EGL_PATH)/lib/egl.so
+	LDFLAGS += -L$(VORTEX_RT_PATH)/stub -lvortex $(POCL_RT_PATH)/lib/libOpenCL.so $(GLSC2_PATH)/libGLSCv2.vortex.so $(VORTEX_EGL_PATH)/lib/egl.so
 else
 	ERROR_MSG = ERROR: driver=$(driver) is not a valid driver, driver=[opencl|gles|vortex]
 -include error
@@ -86,7 +89,7 @@ endif
 endif
 endif
 
-GLSLC = $(VORTEX_GLSC_PATH)/src/compiler/glslc
+GLSLC = $(GLSC2_PATH)/src/compiler/glslc
 
 OBJS := $(addsuffix .o, $(notdir $(SRCS)))
 CSHADERS := $(addsuffix .o, $(notdir $(SHADERS)))
@@ -99,7 +102,7 @@ kernel.pocl: kernel.cl
 # build objects
 
 %.glsl.o: %.glsl
-	$(VORTEX_GLSC_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -I$(VORTEX_GLSC_PATH)/src/kernels/shaders -I$(VORTEX_GLSC_PATH)/src/kernels -I$(VORTEX_GLSC_PATH)/src/ -cl-kernel-arg-info
+	$(GLSC2_PATH)/glslcompiler $< $@ -DSHADER -D__COMPILER_RELATIVE_PATH__ -I$(GLSC2_PATH)/src/kernels/shaders -I$(GLSC2_PATH)/src/kernels -I$(GLSC2_PATH)/src/ -cl-kernel-arg-info
 
 %.cl.o: %.cl
 	$(GLSLC) $< $@

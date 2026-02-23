@@ -57,7 +57,7 @@ typedef struct {
     // Vertex data
     size_t                  vertex_attrib_sz;
     arg_data_t              vertex_attrib_arg_datas[DEVICE_VERTEX_ATTRIBUTE_SIZE];
-} program_t;
+} gl_program_t;
 
 typedef struct {
     cl_program triangle_setup, bin_raster, coarse_raster, force_clear;
@@ -99,7 +99,7 @@ typedef struct
     GLenum internalformat;
     GLboolean used; // ? maybe rm
     cl_mem mem; // TODO: rm
-} texture_t;
+} gl_texture_t;
 
 typedef struct
 {
@@ -110,7 +110,7 @@ typedef struct {
     GLsizeiptr size;
     GLenum usage;
     uint32_t id;
-} buffer_t;
+} gl_buffer_t;
 
 typedef struct {
     GLenum target;
@@ -121,7 +121,7 @@ typedef struct {
     attachment_t color_attachment0, depth_attachment, stencil_attachment;
     GLboolean used;
     size_t id;
-} framebuffer_t;
+} gl_framebuffer_t;
 
 typedef struct {
     cl_mem mem;
@@ -200,32 +200,6 @@ typedef struct {
 } rasterization_data_t;
 
 typedef struct {
-    cl_mem bin_counter, num_bin_segs, num_subtris;
-    cl_mem coarse_counter, num_active_tiles, num_tile_segs;
-    cl_mem fine_counter;
-} rasterization_atomic_mem_container_t;
-
-typedef struct {
-    cl_mem tri_data, tri_header, tri_subtris, vertex_buffer;
-    cl_mem bin_first_seg, bin_seg_count, bin_seg_data, bin_seg_next, bin_total;
-    cl_mem active_tiles, tile_first_seg, tile_seg_count, tile_seg_data, tile_seg_next;
-    cl_mem depthbuffer, stencilbuffer;
-} rasterization_global_mem_container_t;
-
-typedef struct {
-    cl_mem tri_header, tri_data, vertex_buffer;
-    cl_mem depthbuffer, stencilbuffer;
-} rasterization_texture_mem_container_t;
-
-typedef struct {
-
-    rasterization_atomic_mem_container_t    atomics;
-    rasterization_global_mem_container_t    globals;
-    rasterization_texture_mem_container_t   textures;
-
-} rasterization_mem_container_t;
-
-typedef struct {
     GLenum target;
     GLenum id;
     GLenum internalformat;
@@ -256,5 +230,27 @@ typedef struct {
     size_t config_count;
     GLenum draw_mode;
 } draw_state_t;
+
+typedef struct {
+    size_t              framebuffer_binding;
+    size_t              framebuffer_size;
+    gl_framebuffer_t    framebuffers[HOST_FRAMEBUFFER_SIZE];
+
+    size_t              renderbuffer_binding;
+    size_t              renderbuffer_size;
+    gl_renderbuffer_t   renderbuffers[HOST_RENDERBUFFERS_SIZE];
+
+    size_t              texture_binding;
+    size_t              texture_size;
+    gl_texture_t        textures[HOST_TEXTURES_SIZE];
+
+    size_t              buffer_binding;
+    size_t              buffer_size;
+    gl_buffer_t         buffers[HOST_BUFFERS_SIZE];
+
+    size_t              active_texture;
+    size_t              active_program;
+    gl_program_t        programs[HOST_PROGRAMS_SIZE];
+} gl_state_t;
 
 #endif // __FRONTEND_TYPES_H__

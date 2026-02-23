@@ -240,6 +240,7 @@ inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint 
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     {
+        sub_group_barrier(CLK_LOCAL_MEM_FENCE);
         result = sub_group_broadcast(value, id);
     }
     #else

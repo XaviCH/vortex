@@ -22,19 +22,19 @@ float VERTEX_BUFFER[] = {
 int NUM_TRIS = sizeof(INDEX_BUFFER)/sizeof(int)/3;
 int maxSubtrisSlack = 4096; // TODO: Check this
 int MAX_SUBTRIS = 1;
-int WIDTH = 100;
-int HEIGHT = 100;
+int WIDTH = 2048;
+int HEIGHT = 2048;
 
 typedef struct {
     float position[4];
     float color[4];
 } VertexData;
-
+ 
 int num_samples = 1;
 
 // KERNEL INPUTS
 cl_int samples_log2 = 0;
-cl_uint render_mode_flags = 0 | RENDER_MODE_FLAG_ENABLE_DEPTH | RENDER_MODE_FLAG_ENABLE_LERP;
+cl_uint render_mode_flags = RENDER_MODE_FLAG_ENABLE_DEPTH | RENDER_MODE_FLAG_ENABLE_LERP;
 const glm::ivec2 viewport_size = {WIDTH, HEIGHT};
 cl_int c_max_subtris = std::max(MAX_SUBTRIS, NUM_TRIS + maxSubtrisSlack);
 
@@ -90,13 +90,20 @@ int main(int argc, char** argv) {
         // .image_slice_pitch = 0,
         // .num_mip_levels = 0,
         // .num_samples = 0,
-    };
+    }; 
     cl_mem t_vertex_buffer = CL_CHECK2(clCreateImage(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, &image_format, &image_desc, &VERTEX_BUFFER, &_err));
     cl_mem g_tri_subtris = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_uchar[c_max_subtris]), NULL, &_err));
     cl_mem a_num_subtris = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, &_err)); // atomic
     cl_int c_viewport_width = WIDTH, c_viewport_height = HEIGHT;
 
-    // cl_mem debug_return = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err)); // atomic
+    // cl_mem debug_return = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err));
+    // cl_mem debug_prep_tri_value = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err));
+    // cl_mem debug_num_verts = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err));
+    // cl_mem debug_prep_tri_params = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float[30]), NULL, &_err));
+    // cl_mem debug_snap_tri_params = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float[18]), NULL, &_err));
+    // cl_mem debug_bary_values = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float[6]), NULL, &_err));
+    // cl_mem debug_vertex_values = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float[9]), NULL, &_err));
+    // cl_mem debug_indices_values = CL_CHECK2(clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int[3]), NULL, &_err));
 
     uint32_t counter = 0;
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(a_num_subtris),     &a_num_subtris));
@@ -113,7 +120,14 @@ int main(int argc, char** argv) {
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_height),       &c_viewport_height));
     CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(c_viewport_width),       &c_viewport_width));
     
-    // CL_CHECK(clSetKernelArg(kernel, 13, sizeof(debug_return),       &debug_return));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_return),            &debug_return));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_prep_tri_value),    &debug_prep_tri_value));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_num_verts),    &debug_num_verts));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_prep_tri_params),    &debug_prep_tri_params));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_snap_tri_params),    &debug_snap_tri_params));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_bary_values),    &debug_bary_values));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_vertex_values),    &debug_vertex_values));
+    // CL_CHECK(clSetKernelArg(kernel, counter++, sizeof(debug_indices_values),    &debug_indices_values));
 
     cl_command_queue command_queue = CL_CHECK2(clCreateCommandQueue(context, device_id, NULL, &_err));
     
@@ -138,16 +152,57 @@ int main(int argc, char** argv) {
     kernel_result.tri_subtris  = (cl_uchar*)           malloc(sizeof(cl_uchar          [c_max_subtris]));
     kernel_result.tri_header   = (CRTriangleHeader*)   malloc(sizeof(CRTriangleHeader  [c_max_subtris]));
     kernel_result.tri_data     = (CRTriangleData*)     malloc(sizeof(CRTriangleData    [c_max_subtris]));
-    int* result_debug_return = (int*) malloc(sizeof(int[3]));
+
+    //int* result_debug_return = (int*) malloc(sizeof(int[3]));
+    //int* result_debug_prep_tri_value = (int*) malloc(sizeof(int[3]));
+    //int* result_debug_num_verts = (int*) malloc(sizeof(int[3]));
+    //int* result_debug_prep_tri_params = (int*) malloc(sizeof(int[30]));
+    //float* result_debug_snap_tri_params = (float*) malloc(sizeof(float[18]));
+    //float* result_debug_bary_values = (float*) malloc(sizeof(float[6]));
+    //float* result_debug_vertex_values = (float*) malloc(sizeof(float[9]));
+    //int* result_debug_indices_values = (int*) malloc(sizeof(int[3]));
 
     CL_CHECK(clEnqueueReadBuffer(command_queue, a_num_subtris, CL_TRUE, 0, sizeof(cl_int), &kernel_result.a_num_subtris, 0, NULL, NULL));
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_tri_subtris, CL_TRUE, 0, sizeof(cl_uchar[c_max_subtris]), kernel_result.tri_subtris, 0, NULL, NULL));
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_tri_header, CL_TRUE, 0, sizeof(CRTriangleHeader[c_max_subtris]), kernel_result.tri_header, 0, NULL, NULL));
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_tri_data, CL_TRUE, 0, sizeof(CRTriangleData[c_max_subtris]), kernel_result.tri_data, 0, NULL, NULL));
+
     // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_return, CL_TRUE, 0, sizeof(int[3]), result_debug_return, 0, NULL, NULL));
-    // printf("DEBUG: return thread point: (%d,%d,%d)\n",result_debug_return[0], result_debug_return[1], result_debug_return[2]);
-    
-    emulateTriangleSetup(); 
+    // printf("DEBUG: return return: (%d,%d,%d)\n",result_debug_return[0], result_debug_return[1], result_debug_return[2]);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_prep_tri_value, CL_TRUE, 0, sizeof(int[3]), result_debug_prep_tri_value, 0, NULL, NULL));
+    // printf("DEBUG: return prep tri value: (%d,%d,%d)\n",result_debug_prep_tri_value[0], result_debug_prep_tri_value[1], result_debug_prep_tri_value[2]);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_num_verts, CL_TRUE, 0, sizeof(int[3]), result_debug_num_verts, 0, NULL, NULL));
+    // printf("DEBUG: return num vert: (%d,%d,%d)\n",result_debug_num_verts[0], result_debug_num_verts[1], result_debug_num_verts[2]);
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_prep_tri_params, CL_TRUE, 0, sizeof(int[30]), result_debug_prep_tri_params, 0, NULL, NULL));
+    // printf("DEBUG: return prep tri params: (%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d)\n",
+    //     result_debug_prep_tri_params[15], result_debug_prep_tri_params[16], result_debug_prep_tri_params[17],
+    //     result_debug_prep_tri_params[18], result_debug_prep_tri_params[19], result_debug_prep_tri_params[20],
+    //     result_debug_prep_tri_params[21], result_debug_prep_tri_params[22], result_debug_prep_tri_params[23],
+    //     result_debug_prep_tri_params[24], result_debug_prep_tri_params[25], result_debug_prep_tri_params[26],
+    //     result_debug_prep_tri_params[27], result_debug_prep_tri_params[28], result_debug_prep_tri_params[29]
+    // );
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_snap_tri_params, CL_TRUE, 0, sizeof(float[18]), result_debug_snap_tri_params, 0, NULL, NULL));
+    // printf("DEBUG: return snap tri params: (%f,%f,%f,%f,%f,%f,%f,%f,%f)\n",
+    //     result_debug_snap_tri_params[9], result_debug_snap_tri_params[10], result_debug_snap_tri_params[11],
+    //     result_debug_snap_tri_params[12], result_debug_snap_tri_params[13], result_debug_snap_tri_params[14],
+    //     result_debug_snap_tri_params[15], result_debug_snap_tri_params[16], result_debug_snap_tri_params[17]
+    // );
+// 
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_bary_values, CL_TRUE, 0, sizeof(float[6]), result_debug_bary_values, 0, NULL, NULL));
+    // printf("DEBUG: return bary values: (%f,%f,%f,%f,%f,%f)\n",
+    //     result_debug_bary_values[0], result_debug_bary_values[1], result_debug_bary_values[2],
+    //     result_debug_bary_values[3], result_debug_bary_values[4], result_debug_bary_values[5]
+    // );
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_vertex_values, CL_TRUE, 0, sizeof(float[9]), result_debug_vertex_values, 0, NULL, NULL));
+    // printf("DEBUG: return vertex values: (%f,%f,%f,%f,%f,%f,%f,%f,%f)\n",
+    //     result_debug_vertex_values[0], result_debug_vertex_values[1], result_debug_vertex_values[2],
+    //     result_debug_vertex_values[3], result_debug_vertex_values[4], result_debug_vertex_values[5],
+    //     result_debug_vertex_values[6], result_debug_vertex_values[7], result_debug_vertex_values[8]
+    // );
+    // CL_CHECK(clEnqueueReadBuffer(command_queue, debug_indices_values, CL_TRUE, 0, sizeof(int[3]), result_debug_indices_values, 0, NULL, NULL));
+    // printf("DEBUG: return indices values: (%d,%d,%d)\n",result_debug_indices_values[0], result_debug_indices_values[1], result_debug_indices_values[2]);
+
+    emulateTriangleSetup();
     
     printf("PERF: kernel time = %d ns\n", std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count());
     
@@ -163,14 +218,14 @@ int main(int argc, char** argv) {
             printf("INFO: tri_header[%d].v1y = %d\n", i, kernel_result.tri_header[i].v1y);
             printf("INFO: tri_header[%d].v2x = %d\n", i, kernel_result.tri_header[i].v2x);
             printf("INFO: tri_header[%d].v2y = %d\n", i, kernel_result.tri_header[i].v2y);
-            printf("INFO: tri_header[%d].misc = %d\n", i, kernel_result.tri_header[i].misc);
+            printf("INFO: tri_header[%d].misc = %x\n", i, kernel_result.tri_header[i].misc);
             ASSERT_EQ(emulate_result.tri_header[i], kernel_result.tri_header[i]);
             
             // if (emulate_result.tri_data[i].ub != kernel_result.tri_data[i].ub) {
             //     printf("ASSERTION: tri_data[%d].ub %d != %d\n",i, emulate_result.tri_data[i].ub, kernel_result.tri_data[i].ub);
             //     exit(1);
             // }
-            // ASSERT_EQ(emulate_result.tri_data[i], kernel_result.tri_data[i]);
+            ASSERT_EQ(emulate_result.tri_data[i], kernel_result.tri_data[i]);
         }
     }
 
@@ -258,6 +313,7 @@ void emulateTriangleSetup()
             }
         }
 
+        printf("numvert=%d\n",numVerts);
         // Setup subtriangles.
         int numSubtris = 0;
         for (int i = 0; i < numVerts - 2; i++)
@@ -373,7 +429,13 @@ bool setupTriangle(
         ((uint64_t)abs(zpleq.x) + abs(zpleq.y)) * (num_samples / 2), (uint64_t)FW_U32_MAX);
  
     // Write CRTriangleData.
-
+    printf("area %f\n", area);
+    printf("coef %f\n", (glm::min(v0.w, glm::min(v1.w, v2.w)) * (float)CR_BARY_MAX));
+    printf("rcpW (%f,%f,%f)\n", rcpW.x, rcpW.y, rcpW.z);
+    printf("wvert (%f,%f,%f)\n", wvert.x, wvert.y, wvert.z);
+    printf("uvert (%f,%f,%f)\n", uvert.x, uvert.y, uvert.z);
+    printf("vvert (%f,%f,%f)\n", vvert.x, vvert.y, vvert.z);
+    printf("upleq (%d,%d,%d)\n", upleq.x, upleq.y, upleq.z);
     CRTriangleData& td = emulate_result.tri_data[triIdx];
     td.zx = zpleq.x, td.zy = zpleq.y, td.zb = zpleq.z; td.zslope = zslope;
     td.wx = wpleq.x, td.wy = wpleq.y, td.wb = wpleq.z;

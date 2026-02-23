@@ -249,11 +249,6 @@ void emulateCoarseRaster()
 
     const CRTriangleHeader* triHeader       = TRI_HEADER;
 
-    // const S32*              binSegData      = (const S32*)m_binSegData.getPtr();
-    // const S32*              binSegNext      = (const S32*)m_binSegNext.getPtr();
-    // const S32*              binSegCount     = (const S32*)m_binSegCount.getPtr();
-    // CRAtomics&              atomics         = *(CRAtomics*)m_module->getGlobal("g_crAtomics").getMutablePtr();
-
     emulate_result.g_active_tiles    = (cl_int*) malloc(sizeof(cl_int[CR_MAXTILES_SQR]));
     emulate_result.g_tile_first_seg  = (cl_int*) malloc(sizeof(cl_int[CR_MAXTILES_SQR]));
     emulate_result.g_tile_seg_data   = (cl_int*) malloc(sizeof(cl_int[c_max_tile_segs][CR_TILE_SEG_SIZE]));

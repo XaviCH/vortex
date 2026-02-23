@@ -1,9 +1,11 @@
 #include <frontend/orchestrator.h>
 #include <tests/glsc2/common.h>
+#include <chrono>
 
 #define SHADER_PATH "kernel.cl.o"
-#define WIDTH 800
-#define HEIGHT 500
+#define SHADER2_PATH "kernel2.cl.o"
+#define WIDTH 1920
+#define HEIGHT 1080
 
 float triangle_positions[] = {
     0.0f,  1.0f, 0.0f,
@@ -15,6 +17,12 @@ float triangle_colors[] = {
     1.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f,
     0.0f, 0.0f, 1.0f,
+};
+
+float triangle_coord[] = {
+    0.0f,   1.0f,
+    0.0f,   0.0f,
+    1.0f,   0.0f,
 };
 
 int main() {    
@@ -31,11 +39,14 @@ int main() {
     orch_attach_render_stencilbuffer(&orch, framebuffer_id, stencilbuffer_id);
 
     file_t file;
-    read_file(SHADER_PATH, &file); 
+    read_file(SHADER_PATH, &file);
     size_t shader_id = orch_create_shader_from_binary(&orch, file.size, file.data);
 
-    // vertex shader data
+    file_t file2;
+    read_file(SHADER2_PATH, &file2); 
+    size_t shader_id2 = orch_create_shader_from_binary(&orch, file2.size, file2.data);
 
+    // vertex shader data
     size_t position_buffer_id = orch_create_buffer(&orch, sizeof(triangle_positions));
     orch_write_buffer(&orch, position_buffer_id, 0, sizeof(triangle_positions), triangle_positions);
 
@@ -47,19 +58,19 @@ int main() {
     size_t color_stride = sizeof(triangle_colors[0]) * 3;
     orch_attach_vertex_attribute_host_ptr(&orch, framebuffer_id, color_attribute_location, color_stride, triangle_colors);
 
+    size_t coord_stride = sizeof(triangle_coord[0]) * 2;
     vertex_attribute_data_t vertex_attribute_data[DEVICE_VERTEX_ATTRIBUTE_SIZE];
-    set_vertex_attribute(&vertex_attribute_data[position_attribute_location], 0, position_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
-    set_vertex_attribute(&vertex_attribute_data[color_attribute_location], 0, color_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
-    orch_upload_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
 
-    orch_attach_vertex_fragment_uniform(&orch, framebuffer_id);
-
+    ppm_image_t* ppm_image = read_ppm("../../assets/dog.ppm");
+    size_t texture_id = orch_create_2d_texture(&orch, ppm_image->x, ppm_image->y, TEX_RGBA8);
+    orch_write_2d_texture(&orch, texture_id, 0, 0, ppm_image->x, ppm_image->y, TEX_RGBA8, ppm_image->data);
+    orch_attach_texture_unit(&orch, framebuffer_id, 0, texture_id);
     // fragment shader data
 
     uint8_t uniform[DEVICE_UNIFORM_CAPACITY];
 
     render_mode_t mode = { 
-        .flags = RENDER_MODE_FLAG_ENABLE_DEPTH | RENDER_MODE_FLAG_ENABLE_LERP
+        .flags =  RENDER_MODE_FLAG_ENABLE_LERP
     };
     blending_data_t blending_data = {0};
     rgba8_t blending_color = get_rgba8(0, 0, 0, 255);
@@ -76,8 +87,6 @@ int main() {
         .enabled_data = enabled_data,
     };
 
-    orch_upload_fragment_data(&orch, framebuffer_id, uniform, rop_config);
-
     clear_data_t clear_data = {
         .color = get_rgba8(0, 0, 0, 255),
         .depth = {0xFFFFu},
@@ -85,17 +94,48 @@ int main() {
     };
 
     // Queries
-
-    orch_clear(&orch, framebuffer_id, clear_data, enabled_data);
-
-    orch_draw_arrays(&orch, framebuffer_id, shader_id, mode, 0, 3);
-
-    printf("Draw done\n");
-
     void* ptr = malloc(sizeof(rgba8_t[WIDTH][HEIGHT]));
 
+    auto begin = std::chrono::high_resolution_clock::now();
+
+    orch_clear(&orch, framebuffer_id, clear_data, enabled_data);
+    int samples = 1;
+    for(int i=0; i<samples; ++i)
+    {
+        orch_write_fragment_data(&orch, framebuffer_id, uniform, rop_config);
+
+        orch_attach_vertex_attribute_ptr(&orch, framebuffer_id, 0, position_buffer_id);
+        orch_attach_vertex_attribute_host_ptr(&orch, framebuffer_id, 1, color_stride, triangle_colors);
+
+        set_vertex_attribute(&vertex_attribute_data[0], 0, position_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
+        set_vertex_attribute(&vertex_attribute_data[1], 0, color_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
+        
+        orch_write_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
+        
+        // orch_draw_arrays(&orch, framebuffer_id, shader_id, mode, 0, 3);
+
+        //-------------------------------
+        
+        uint16_t index[3] = {0, 1, 2};
+        orch_write_fragment_data(&orch, framebuffer_id, uniform, rop_config);
+
+        orch_attach_vertex_attribute_host_ptr(&orch, framebuffer_id, 0, coord_stride, triangle_coord);
+        orch_attach_vertex_attribute_ptr(&orch, framebuffer_id, 1, position_buffer_id);
+        set_vertex_attribute(&vertex_attribute_data[0], 0, coord_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_2, 0, 1);
+        set_vertex_attribute(&vertex_attribute_data[1], 0, position_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
+        orch_write_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
+        
+        orch_draw_range(&orch, framebuffer_id, shader_id2, mode, 0, 3, 3, index);
+    }
+    
     orch_readnpixels(&orch, framebuffer_id, 0, 0, WIDTH, HEIGHT, TEX_RGBA8, ptr);
     
+    auto end = std::chrono::high_resolution_clock::now();
+    double total_time_microseconds = (double)std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count();
+  
+    printf("INFO: samples=%d.\n", samples);
+    printf("PERF: total_time_milliseconds=%.3fms.\n", total_time_microseconds/(1000));
+
     print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*)ptr);
     
     free(ptr);

@@ -131,8 +131,10 @@ static float color[] = {
 };
 */
 GLushort INDEX_BUFFER_TRIANGLES[] = {
-    0, 1, 3, 3, 1, 2,
-    1, 5, 2, 2, 5, 6,
+    0, 1, 3,
+    3, 1, 2,
+    1, 5, 2,
+    2, 5, 6,
     5, 4, 6, 6, 4, 7,
     4, 0, 7, 7, 0, 3,
     3, 2, 7, 7, 2, 6,
@@ -161,7 +163,8 @@ float position_array[] = {
     -1, -1, -1,
     1, -1, -1,
     1, 1, -1, 
-    -1, 1, -1, 
+    -1, 1, -1,
+
     -1, -1, 1, 
     1, -1, 1, 
     1, 1, 1, 
@@ -284,7 +287,7 @@ int main() {
   // glEnale(GL_STENCIL_TEST);
   // glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
   // glStencilFunc(GL_EQUAL, 1, 0xFF);
-  // glEnable(GL_DEPTH_TEST);
+  glEnable(GL_DEPTH_TEST);
 
   glVertexAttribPointer(loc_position, 3, GL_FLOAT, GL_FALSE, 0, &position_array);
   glEnableVertexAttribArray(loc_position);
@@ -297,13 +300,14 @@ int main() {
   glUniformMatrix4fv(loc_perspective, 1, GL_FALSE, &perspective[0][0]);
   glUniformMatrix4fv(loc_view, 1, GL_FALSE, &view[0][0]);
 
-  size_t cubes_number = 100;
+  size_t cubes_number = 1000;
 
   auto begin = std::chrono::high_resolution_clock::now();
   for (int cube_id = 0; cube_id < cubes_number; ++cube_id) {
-    float x = ((double) rand() / RAND_MAX) * 20 - 10;
-    float y = ((double) rand() / RAND_MAX) * 20 - 10;
-    float z = ((double) rand() / RAND_MAX) * 20 + 10;
+    const int scale = 50;
+    float x = ((double) rand() / RAND_MAX) * scale - scale/2;
+    float y = ((double) rand() / RAND_MAX) * scale - scale/2;
+    float z = ((double) rand() / RAND_MAX) * scale;
     float size = ((double) rand() / RAND_MAX) + 0.25;
     float angle = ((double) rand() / RAND_MAX) * 2 * M_PI;
 
@@ -312,13 +316,14 @@ int main() {
     model = glm::rotate(model, angle, glm::vec3(1));
     model = glm::scale(model, glm::vec3(1));
     glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
-    // if (cube_id >= 1)
-    glDrawRangeElements(GL_TRIANGLES, 0, sizeof(position_array)/sizeof(position_array[0])/3, sizeof(INDEX_BUFFER_TRIANGLES)/sizeof(INDEX_BUFFER_TRIANGLES[0]), GL_UNSIGNED_SHORT, &INDEX_BUFFER_TRIANGLES);
+
+    size_t count = sizeof(INDEX_BUFFER_TRIANGLES)/sizeof(INDEX_BUFFER_TRIANGLES[0]);
+    glDrawRangeElements(GL_TRIANGLES, 0, sizeof(position_array)/sizeof(position_array[0])/3, count, GL_UNSIGNED_SHORT, &INDEX_BUFFER_TRIANGLES);
   }
   glFinish();
   auto end = std::chrono::high_resolution_clock::now();
   double total_time_microseconds = (double)std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count();
-  
+
   printf("INFO: cubes_number=%d.\n", cubes_number);
   printf("PERF: time=%.3fms.\n", total_time_microseconds/(1000));
   // model = glm::mat4(1);

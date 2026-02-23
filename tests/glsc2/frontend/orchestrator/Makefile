@@ -4,7 +4,7 @@ PROJECT = main.exe
 
 SRCS = main.cpp
 
-SHADERS = kernel.cl
+SHADERS = kernel.cl kernel2.cl
 
 OBJS ?=
 
