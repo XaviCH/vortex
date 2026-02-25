@@ -13,5 +13,5 @@ VS_MAIN({
 })
 
 FS_MAIN({
-    gl_FragColor = (vec4)(1,1,1,1); // TEXTURE2D(sampl, out_coord);
+    gl_FragColor = TEXTURE2D(sampl, out_coord);
 })

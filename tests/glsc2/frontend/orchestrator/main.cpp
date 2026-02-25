@@ -61,10 +61,30 @@ int main() {
     size_t coord_stride = sizeof(triangle_coord[0]) * 2;
     vertex_attribute_data_t vertex_attribute_data[DEVICE_VERTEX_ATTRIBUTE_SIZE];
 
-    ppm_image_t* ppm_image = read_ppm("../../assets/dog.ppm");
-    size_t texture_id = orch_create_2d_texture(&orch, ppm_image->x, ppm_image->y, TEX_RGBA8);
-    orch_write_2d_texture(&orch, texture_id, 0, 0, ppm_image->x, ppm_image->y, TEX_RGBA8, ppm_image->data);
+    ppm_image_t* image = read_ppm("../../assets/dog.ppm");
+
+    uint8_t* data = (uint8_t*) malloc(image->x*image->y*sizeof(uint8_t[4]));
+    for(uint32_t i=0; i<image->x*image->y; ++i) {
+        data[i*4+0] = image->data[i].red;
+        data[i*4+1] = image->data[i].green;
+        data[i*4+2] = image->data[i].blue;
+        data[i*4+3] = 0x0Fu;
+    }
+
+    size_t texture_id = orch_create_2d_texture(&orch, image->x, image->y, TEX_RGBA8);
+    orch_write_2d_texture(&orch, texture_id, 0, 0, image->x, image->y, TEX_RGBA8, data);
     orch_attach_texture_unit(&orch, framebuffer_id, 0, texture_id);
+    gl_texture_data_t texture_data[DEVICE_TEXTURE_UNITS];
+    texture_data[0] = {
+        .width = (unsigned short) image->x,
+        .height = (unsigned short) image->y,
+    };
+    set_sampler2D_internalformat(&texture_data[0].sampler2D, TEX_RGBA8);
+    set_sampler2D_wrap_s(&texture_data[0].sampler2D, TEXTURE_WRAP_REPEAT);
+    set_sampler2D_wrap_t(&texture_data[0].sampler2D, TEXTURE_WRAP_REPEAT);
+    set_sampler2D_min_filter(&texture_data[0].sampler2D, TEXTURE_FILTER_NEAREST);
+    set_sampler2D_mag_filter(&texture_data[0].sampler2D, TEXTURE_FILTER_NEAREST);
+    orch_write_fragment_texture_data(&orch, framebuffer_id, texture_data);
     // fragment shader data
 
     uint8_t uniform[DEVICE_UNIFORM_CAPACITY];
@@ -98,10 +118,10 @@ int main() {
 
     auto begin = std::chrono::high_resolution_clock::now();
 
-    orch_clear(&orch, framebuffer_id, clear_data, enabled_data);
-    int samples = 1;
+    int samples = 1000;
     for(int i=0; i<samples; ++i)
     {
+        orch_clear(&orch, framebuffer_id, clear_data, enabled_data);
         orch_write_fragment_data(&orch, framebuffer_id, uniform, rop_config);
 
         orch_attach_vertex_attribute_ptr(&orch, framebuffer_id, 0, position_buffer_id);
@@ -112,11 +132,12 @@ int main() {
         
         orch_write_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
         
-        // orch_draw_arrays(&orch, framebuffer_id, shader_id, mode, 0, 3);
+        orch_draw_arrays(&orch, framebuffer_id, shader_id, mode, 0, 3);
 
         //-------------------------------
         
         uint16_t index[3] = {0, 1, 2};
+        *(cl_uint*)uniform = 0;
         orch_write_fragment_data(&orch, framebuffer_id, uniform, rop_config);
 
         orch_attach_vertex_attribute_host_ptr(&orch, framebuffer_id, 0, coord_stride, triangle_coord);
@@ -125,7 +146,7 @@ int main() {
         set_vertex_attribute(&vertex_attribute_data[1], 0, position_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
         orch_write_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
         
-        orch_draw_range(&orch, framebuffer_id, shader_id2, mode, 0, 3, 3, index);
+        orch_draw_range(&orch, framebuffer_id, shader_id, mode, 0, 3, 3, index);
     }
     
     orch_readnpixels(&orch, framebuffer_id, 0, 0, WIDTH, HEIGHT, TEX_RGBA8, ptr);

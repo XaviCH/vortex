@@ -355,7 +355,7 @@ static void __device_write_2d_texture(
         size_t host_origin[3] = {0, 0, 0};
         size_t host_row_pitch = 0;
         size_t host_slice_pitch = 0;
-
+        /*
         CL_CHECK(clEnqueueWriteBufferRect(
             mem->queue,
             mem->mem,
@@ -367,6 +367,18 @@ static void __device_write_2d_texture(
             input_slice_pitch,
             host_row_pitch,
             host_slice_pitch,
+            data,
+            0,
+            NULL,
+            wait_event
+        ));
+        */
+        CL_CHECK(clEnqueueWriteBuffer(
+            mem->queue,
+            mem->mem,
+            blocking_write,
+            0,
+            region[0]*region[1]*sizeof(cl_uint),
             data,
             0,
             NULL,
@@ -1543,7 +1555,7 @@ static void device_launch_vertex_shader(
 
     CL_CHECK(clReleaseEvent(wait_event));
 
-    __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
+    // __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
 }
 
 void device_launch_range_triangle_assembly(
@@ -1591,7 +1603,7 @@ void device_launch_range_triangle_assembly(
 
     __device_advance_vertex_command_index(context);
 
-    __device_print_triangle_assembly_output(context, queue, num_triangles);
+    // __device_print_triangle_assembly_output(context, queue, num_triangles);
 }
 
 static void device_launch_arrays_triangle_assembly(
