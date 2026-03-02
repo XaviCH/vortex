@@ -553,6 +553,26 @@ static size_t orch_create_buffer(orch_handler_t* orch, size_t size)
 
 // Get functions
 
+static size_t orch_get_shader_attribute_size(orch_handler_t* orch, size_t shader_id)
+{
+    return device_get_program_vertex_attrib_size(&orch->device, shader_id);
+}
+
+static size_t orch_get_shader_uniform_size(orch_handler_t* orch, size_t shader_id)
+{
+    return device_get_program_uniform_size(&orch->device, shader_id);
+}
+
+static void orch_get_shader_attribute_arg_data(orch_handler_t* orch, size_t shader_id, size_t location, arg_data_t *arg_data)
+{
+    device_get_program_vertex_attrib_arg_data(&orch->device, shader_id, location, arg_data);
+}
+
+static void orch_get_shader_uniform_arg_data(orch_handler_t* orch, size_t shader_id, size_t location, arg_data_t *arg_data)
+{
+    device_get_program_uniform_arg_data(&orch->device, shader_id, location, arg_data);
+}
+
 // Attach functions
 
 static void orch_attach_render_colorbuffer(orch_handler_t* orch, size_t framebuffer_id, size_t color_id)
@@ -705,7 +725,13 @@ static void orch_write_fragment_data(
 
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
+    if (framebuffer->loaded_configs == TRIANGLE_PRIMITIVE_CONFIGS)
+    {
+        __orch_attach_new_context(orch, framebuffer, framebuffer->loaded_configs-1);
+    }
+
     printf("loaded_configs=%ld\n",framebuffer->loaded_configs);
+
     device_write_fragment_uniform(context, framebuffer->loaded_configs, uniform_data);
     device_write_rop_config(context, framebuffer->loaded_configs, &config);
     
@@ -771,9 +797,9 @@ static void orch_draw_range(
 }
 
 static void orch_clear(
-    orch_handler_t* orch, 
+    orch_handler_t* orch,
     size_t framebuffer_id,
-    clear_data_t data, 
+    clear_data_t data,
     enabled_data_t enabled
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);

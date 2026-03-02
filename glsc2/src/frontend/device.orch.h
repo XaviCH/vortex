@@ -304,7 +304,7 @@ static void __device_write_mem(
     }
 
     cl_event* wait_event = blocking_write ? NULL : &mem->write_event;
-
+    
     CL_CHECK(clEnqueueWriteBuffer(
         mem->queue,
         mem->mem, 
@@ -622,7 +622,7 @@ static void __device_set_framebuffer_data(
 
 // ---------------------------------------------------------------
 
-static cl_uint  max_number_triangles = __device_get_max_number_triangles();
+static const cl_uint  max_number_triangles = 1;// __device_get_max_number_triangles();
 static cl_int   ZERO = 0;
 
 // ---------------------------------------------------------------
@@ -1495,6 +1495,9 @@ static void device_launch_vertex_shader(
                 .origin = DEVICE_UNIFORM_CAPACITY * primitive_id,
                 .size = DEVICE_UNIFORM_CAPACITY
         };
+
+        printf("primitive_id=%ld\n", primitive_id);
+
         CL_ASSIGN_CHECK(vertex_uniform_mem, clCreateSubBuffer(
             context->fragment_uniform_mem.mem, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION,
             &buffer_region, &error
@@ -1555,7 +1558,7 @@ static void device_launch_vertex_shader(
 
     CL_CHECK(clReleaseEvent(wait_event));
 
-    // __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
+    __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
 }
 
 void device_launch_range_triangle_assembly(
@@ -1603,7 +1606,7 @@ void device_launch_range_triangle_assembly(
 
     __device_advance_vertex_command_index(context);
 
-    // __device_print_triangle_assembly_output(context, queue, num_triangles);
+    __device_print_triangle_assembly_output(context, queue, num_triangles);
 }
 
 static void device_launch_arrays_triangle_assembly(
@@ -2042,7 +2045,10 @@ static void device_write_vertex_attribute_data(
     device_context_t* context,
     vertex_attribute_data_t vertex_attribute_data[DEVICE_VERTEX_ATTRIBUTE_SIZE]
 ) {
-    size_t idx = ++context->vertex_attribute_data_index;
+    context->vertex_attribute_data_index += 1;
+    context->vertex_attribute_data_index %= DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
+
+    size_t idx = context->vertex_attribute_data_index;
 
     __device_write_mem(
         &context->vertex_attribute_data_mem[idx],
@@ -2058,7 +2064,10 @@ static void device_write_vertex_attributes(
     float vertex_attributes[DEVICE_VERTEX_ATTRIBUTE_SIZE][4],
     int blocking_write
 ) {
-    size_t idx = ++context->vertex_attributes_index;
+    context->vertex_attributes_index += 1;
+    context->vertex_attributes_index %= DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
+
+    size_t idx = context->vertex_attributes_index;
 
     __device_write_mem(
         &context->vertex_attributes_mem[idx],
@@ -2074,7 +2083,10 @@ static void device_write_vertex_uniform(
     uint8_t uniform_data[DEVICE_UNIFORM_CAPACITY],
     int blocking_write
 ) {
-    size_t idx = ++context->vertex_uniform_index;
+    context->vertex_uniform_index += 1;
+    context->vertex_uniform_index %= DEVICE_VERTEX_COMMAND_QUEUE_SIZE;
+
+    size_t idx = context->vertex_uniform_index;
 
     __device_write_mem(
         &context->vertex_uniform_mem[idx], 
@@ -2149,8 +2161,8 @@ static void device_write_2d_texture(
 {
     __device_mem_t* texture_mem = &device->textures[texture_id];
 
-    size_t origin[2] = {x,y};
-    size_t region[2] = {width, height};
+    size_t origin[3] = {x, y, 1};
+    size_t region[3] = {width, height, 1};
 
     __device_write_2d_texture(&device->textures[texture_id], CL_TRUE, origin, region, 0, 0, data);
 }

@@ -262,6 +262,7 @@ int main() {
   
   // Clear scene
 
+  glClearColor(1,0,0,1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   // Draw Fan Stencil
@@ -288,6 +289,7 @@ int main() {
   // glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
   // glStencilFunc(GL_EQUAL, 1, 0xFF);
   glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
 
   glVertexAttribPointer(loc_position, 3, GL_FLOAT, GL_FALSE, 0, &position_array);
   glEnableVertexAttribArray(loc_position);
@@ -300,7 +302,7 @@ int main() {
   glUniformMatrix4fv(loc_perspective, 1, GL_FALSE, &perspective[0][0]);
   glUniformMatrix4fv(loc_view, 1, GL_FALSE, &view[0][0]);
 
-  size_t cubes_number = 1000;
+  size_t cubes_number = 1;
 
   auto begin = std::chrono::high_resolution_clock::now();
   for (int cube_id = 0; cube_id < cubes_number; ++cube_id) {
@@ -326,14 +328,6 @@ int main() {
 
   printf("INFO: cubes_number=%d.\n", cubes_number);
   printf("PERF: time=%.3fms.\n", total_time_microseconds/(1000));
-  // model = glm::mat4(1);
-  // model = glm::translate(model, glm::vec3{2,2,-3});
-  // model = glm::scale(model, glm::vec3{0.5});
-  // model = glm::rotate(model, (float)M_PI/8, glm::vec3{1,1,1});
-  // glUniformMatrix4fv(loc_model, 1, GL_FALSE, &model[0][0]);
-
-  //glDrawRangeElements(GL_TRIANGLES, 0, sizeof(position)/sizeof(position[0])/3, sizeof(INDEX_BUFFER)/sizeof(INDEX_BUFFER[0]), GL_UNSIGNED_SHORT, &INDEX_BUFFER);
-  //glFinish();
   
   uint8_t* result = (uint8_t*) malloc(sizeof(uint8_t[WIDTH][HEIGHT][4]));
 
@@ -342,7 +336,6 @@ int main() {
   #else
   glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
   #endif
-  glFinish();
 
   print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
 

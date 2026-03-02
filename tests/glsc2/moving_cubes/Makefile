@@ -1,8 +1,8 @@
-PROJECT_PATH = ../../..
-
-PROJECT = cube
+PROJECT = main.exe
 
 SRCS = main.cc
+
+SHADERS ?= kernel.cl
 
 LD_PROJECT_FLAGS ?= 
 

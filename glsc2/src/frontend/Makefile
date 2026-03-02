@@ -29,7 +29,7 @@ HEADER_FILES = $(wildcard *.h)
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC
 
 libGLSC2.so: glsc2.o
-	$(CC) -o $@ $< -shared $(LIBS)
+	$(CC) -shared -o $@ $< $(LIBS)
 
 glsc2.c.o: glsc2_tmp.c config.h debug.h types.h kernel.c $(KERNELS_C)
 	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC

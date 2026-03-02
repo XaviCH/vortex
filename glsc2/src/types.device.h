@@ -48,12 +48,12 @@ typedef struct
     cl_uint flags;
 } render_mode_t;
 
-inline cl_bool is_render_mode_flag_triangle_fan(const render_mode_t render_mode)
+static inline cl_bool is_render_mode_flag_triangle_fan(const render_mode_t render_mode)
 {
     return (render_mode.flags & RENDER_MODE_FLAG_TRIANGLE_FAN) != 0;
 }
 
-inline cl_bool is_render_mode_flag_triangle_strip(const render_mode_t render_mode)
+static inline cl_bool is_render_mode_flag_triangle_strip(const render_mode_t render_mode)
 {
     return (render_mode.flags & RENDER_MODE_FLAG_TRIANGLE_STRIP) != 0;
 }

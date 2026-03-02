@@ -1,3 +1,5 @@
+PROJECT_PATH = ../../..
+
 PROJECT = main.exe
 
 SRCS = main.cc
