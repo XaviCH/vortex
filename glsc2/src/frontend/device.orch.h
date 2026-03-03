@@ -290,6 +290,26 @@ static void __device_copy_mem(
     CL_CHECK(clEnqueueCopyBuffer(dst->queue, src->mem, dst->mem, src_offset, dst_offset, size, 0, NULL, &dst->write_event));
 }
 
+static void __device_read_mem(
+    __device_mem_t* mem,
+    cl_bool blocking_read,
+    size_t offset,
+    size_t size,
+    void* data
+) {
+    CL_CHECK(clEnqueueReadBuffer(
+        mem->queue,
+        mem->mem, 
+        blocking_read, 
+        offset, 
+        size, 
+        data, 
+        0, 
+        NULL, 
+        NULL
+    ));
+}
+
 static void __device_write_mem(
     __device_mem_t* mem,
     cl_bool blocking_write,
@@ -1495,9 +1515,6 @@ static void device_launch_vertex_shader(
                 .origin = DEVICE_UNIFORM_CAPACITY * primitive_id,
                 .size = DEVICE_UNIFORM_CAPACITY
         };
-
-        printf("primitive_id=%ld\n", primitive_id);
-
         CL_ASSIGN_CHECK(vertex_uniform_mem, clCreateSubBuffer(
             context->fragment_uniform_mem.mem, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION,
             &buffer_region, &error
@@ -1558,7 +1575,7 @@ static void device_launch_vertex_shader(
 
     CL_CHECK(clReleaseEvent(wait_event));
 
-    __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
+    // __device_print_vertex_shader_output(context, queue, num_vertices, /*num_varying=*/1);
 }
 
 void device_launch_range_triangle_assembly(
@@ -1606,7 +1623,7 @@ void device_launch_range_triangle_assembly(
 
     __device_advance_vertex_command_index(context);
 
-    __device_print_triangle_assembly_output(context, queue, num_triangles);
+    // __device_print_triangle_assembly_output(context, queue, num_triangles);
 }
 
 static void device_launch_arrays_triangle_assembly(
@@ -2170,6 +2187,11 @@ static void device_write_2d_texture(
 static void device_write_buffer(device_t* device, size_t buffer_id, size_t offset, size_t size, const void* data) 
 {
     __device_write_mem(&device->buffers[buffer_id], CL_TRUE, offset, size, data);
+}
+
+static void device_read_buffer(device_t* device, size_t buffer_id, size_t offset, size_t size, void* data) 
+{
+    __device_read_mem(&device->buffers[buffer_id], CL_TRUE, offset, size, data);
 }
 
 #endif // FRONTEND_DEVICE_H

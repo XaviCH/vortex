@@ -413,7 +413,7 @@ void set_depth_data_range(depth_data_t *depth_data, cl_ushort near, cl_ushort fa
 
 static depth_data_t get_depth_data(cl_uint func, cl_ushort near, cl_ushort far) 
 {
-    depth_data_t depth_data;
+    depth_data_t depth_data = { .misc = 0, .near = 0, .far = 0 };
 
     set_depth_data_func(&depth_data, func);
     set_depth_data_range(&depth_data, near, far);

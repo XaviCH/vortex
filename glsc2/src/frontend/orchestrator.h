@@ -730,8 +730,6 @@ static void orch_write_fragment_data(
         __orch_attach_new_context(orch, framebuffer, framebuffer->loaded_configs-1);
     }
 
-    printf("loaded_configs=%ld\n",framebuffer->loaded_configs);
-
     device_write_fragment_uniform(context, framebuffer->loaded_configs, uniform_data);
     device_write_rop_config(context, framebuffer->loaded_configs, &config);
     

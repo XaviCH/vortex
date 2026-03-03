@@ -26,17 +26,17 @@ GLushort INDEX_BUFFER[] = {
 };
 
 float position[] = {
-    -1, -1, -1,
-    1, -1, -1,
-    1, 1, -1, 
-    -1, 1, -1, 
-    -1, -1, 1, 
-    1, -1, 1, 
-    1, 1, 1, 
-    -1, 1, 1,
+  -1, -1, -1,
+  1, -1, -1,
+  1, 1, -1, 
+  -1, 1, -1, 
+  -1, -1, 1, 
+  1, -1, 1, 
+  1, 1, 1, 
+  -1, 1, 1,
 };
 
-float color[] {
+float color[] = {
   1, 0, 0,
   0, 1, 0,
   0, 0, 1,
@@ -147,13 +147,13 @@ int main() {
   perspective = glm::perspective((float)M_PI / 4, (float)WIDTH/HEIGHT, 0.1f, 100.f);
   view = glm::lookAt(glm::vec3{5, 5, -5}, glm::vec3{0,0,0},glm::vec3{0,1,0});
 
-  uint32_t sample = 10000;
+  uint32_t sample = 1000;
   auto begin = std::chrono::high_resolution_clock::now();
   for(int i=0; i<sample; ++i)
   {
     glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    
+   
     glUseProgram(program[0]);
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
@@ -176,18 +176,17 @@ int main() {
     // printf("DrawRangeElements\n");
     glDrawRangeElements(GL_TRIANGLES, 0, sizeof(position)/sizeof(position[0])/3, sizeof(INDEX_BUFFER)/sizeof(INDEX_BUFFER[0]), GL_UNSIGNED_SHORT, INDEX_BUFFER);
     
-    
     // Render Second Cube
     glUseProgram(program[1]);
 
-    // glDisable(GL_DEPTH_TEST);
+    glDisable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_SRC_ALPHA);
     glBlendEquation(GL_FUNC_ADD);
 
     // Set up vertex attrib
     glVertexAttribPointer(loc_position[1], 3, GL_FLOAT, GL_FALSE, 0, &position);
-    glEnableVertexAttribArray(loc_position[1]); 
+    glEnableVertexAttribArray(loc_position[1]);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
     glVertexAttribPointer(loc_color, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
@@ -203,7 +202,6 @@ int main() {
 
     // printf("DrawRangeElements\n");
     glDrawRangeElements(GL_TRIANGLES, 0, sizeof(position)/sizeof(position[0])/3, sizeof(INDEX_BUFFER)/sizeof(INDEX_BUFFER[0]), GL_UNSIGNED_SHORT, INDEX_BUFFER);
-    
   }
   glFinish();
   auto end = std::chrono::high_resolution_clock::now();
@@ -219,11 +217,10 @@ int main() {
 
   #ifdef C_OPENGL_HOST
     glReadPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, result);
-    #else
+  #else
     glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
-    #endif
-    glFinish();
-    print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
+  #endif
+  print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
 
   EGL_DESTROY();
 

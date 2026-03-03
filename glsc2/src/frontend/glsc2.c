@@ -791,8 +791,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
 
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding];
-    gl_program_t* program = &_programs[_current_program];
+    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_program_t* program = &_programs[_current_program-1];
     render_mode_t render_mode = get_render_mode(mode);
 
     write_gl_state_to_orch(mode);
@@ -802,6 +802,8 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
 GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices)
 {
+    if (_current_program == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
     if (is_valid_draw_mode(mode) == GL_FALSE) RETURN_ERROR(GL_INVALID_ENUM);
 
     if (count < 0) RETURN_ERROR(GL_INVALID_VALUE);
@@ -814,8 +816,8 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     
     if (count == 0) return;
 
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding];
-    gl_program_t* program = &_programs[_current_program];
+    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_program_t* program = &_programs[_current_program-1];
     render_mode_t render_mode = get_render_mode(mode);
 
     write_gl_state_to_orch(mode);
@@ -1760,15 +1762,16 @@ GL_APICALL void GL_APIENTRY glVertexAttribPointer (GLuint index, GLint size, GLe
     uint32_t is_buffer_bound = _buffer_binding;
 
     vertex_attibute_updated = 1;
-    vertex_attribute_datas[index] = (vertex_attribute_data_t) {
-        .stride = stride,
-        .offset = is_buffer_bound ? (uintptr_t) pointer : 0,
-        .misc = 
-            va_type |
-            va_size |
-            va_normalize |
-            va_active_pointer,
-    };
+    set_vertex_attribute(
+        &vertex_attribute_datas[index], 
+        is_buffer_bound ? (uintptr_t) pointer : 0, 
+        stride, 
+        va_type, 
+        va_size, 
+        va_normalize, 
+        va_active_pointer
+    );
+
     vertex_attribute_binding[index] = (vertex_attribute_binding_t) {
         .binding = _buffer_binding,
         .pointer = pointer,
@@ -1903,13 +1906,11 @@ static cl_ulong get_clear_write_values()
 
 static enabled_data_t get_clear_enabled_data(GLbitfield mask) 
 {
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
-
     enabled_data_t enabled_data;
 
-    GLboolean color_mask    = mask & GL_COLOR_BUFFER_BIT;
-    GLboolean depth_mask    = mask & GL_DEPTH_BUFFER_BIT;
-    GLboolean stencil_mask  = mask & GL_STENCIL_BUFFER_BIT;
+    GLbitfield color_mask    = mask & GL_COLOR_BUFFER_BIT;
+    GLbitfield depth_mask    = mask & GL_DEPTH_BUFFER_BIT;
+    GLbitfield stencil_mask  = mask & GL_STENCIL_BUFFER_BIT;
 
     set_enabled_color_data(
         &enabled_data,
@@ -2243,7 +2244,7 @@ static uint32_t get_blending_color()
 
 static blending_data_t get_blending_data() 
 {
-    blending_data_t blending_data;
+    blending_data_t blending_data = {0};
 
     set_blending_data_equation(
         &blending_data, 
@@ -2266,7 +2267,7 @@ static blending_data_t get_blending_data()
     return blending_data;
 }
 
-inline static enabled_data_t _from_gl_mask_from_gl_masks(mask_container_t masks) 
+inline static enabled_data_t get_enabled_data_from_gl_masks(mask_container_t masks) 
 {
     enabled_data_t enabled_data;
 
@@ -2342,7 +2343,7 @@ static rop_config_t get_rop_config(GLenum mode)
         .blending_color = get_blending_color(),
         .stencil_data   = get_stencil_data_from_gl_state().front_misc, // TODO: add for both
         .depth_data     = get_depth_data_from_gl_state().misc,
-        .enabled_data   = _from_gl_mask_from_gl_masks(_masks),
+        .enabled_data   = get_enabled_data_from_gl_masks(_masks),
     };
     
     return rop_config;
@@ -2423,7 +2424,7 @@ static GLboolean gl_type_to_vertex_attribute_type(GLenum gl_type, unsigned int* 
 static GLboolean gl_size_to_vertex_attribute_size(GLint gl_size, unsigned int* va_size)
 {
     #define CASE_GL_TO_VERTEX_ATTRIBUTE_SIZE(size) \
-        case size: *va_size = VERTEX_ATTRIBUTE_SIZE_##size << 3; break;
+        case size: *va_size = VERTEX_ATTRIBUTE_SIZE_##size; break;
 
     switch (gl_size)
     {

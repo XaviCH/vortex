@@ -103,7 +103,7 @@ static float texCoord[] = {
   1, 1,
 };
 
-const static size_t CUBES_SZ = 1000;
+const static size_t CUBES_SZ = 100;
 
 typedef struct {
   glm::vec3 position, speed, axis;
@@ -129,12 +129,12 @@ static void init_cube_data()
 {
   for(size_t cube_id = 0; cube_id < CUBES_SZ; ++cube_id)
   {
-    cube_world_data_t& cube = cube_world_data[CUBES_SZ];
+    cube_world_data_t& cube = cube_world_data[cube_id];
 
     cube.position = glm::vec3(
-      rand() % 20 + 20,
-      rand() % 20 + 20,
-      rand() % 20 + 20
+      rand() % 20 - 10,
+      rand() % 20 - 10,
+      rand() % 10 + 10
     );
 
     cube.speed = glm::vec3(
@@ -155,7 +155,7 @@ static void update_cube_data(float time)
 {
   for(size_t cube_id = 0; cube_id < CUBES_SZ; ++cube_id)
   {
-    cube_world_data_t& cube = cube_world_data[CUBES_SZ];
+    cube_world_data_t& cube = cube_world_data[cube_id];
 
     glm::vec3 tmp_position = cube.position + cube.speed*time;
 
@@ -189,7 +189,7 @@ static void draw_cubes()
 
   for (int cube_id = 0; cube_id < CUBES_SZ; ++cube_id) 
   {
-    cube_world_data_t& cube = cube_world_data[CUBES_SZ];
+    cube_world_data_t& cube = cube_world_data[cube_id];
 
     glm::mat4 model = glm::mat4(1);
     model = glm::translate(model, cube.position);
@@ -207,7 +207,7 @@ static void egl_setup(EGLDisplay* display, EGLSurface* surface)
   *display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
   
   EGLint major, minor;
-  eglInitialize(display, &major, &minor);
+  eglInitialize(*display, &major, &minor);
 
   eglBindAPI(EGL_OPENGL_API);
   EGLint configAttribs[] = {
@@ -224,7 +224,7 @@ static void egl_setup(EGLDisplay* display, EGLSurface* surface)
 
   EGLConfig config;
   EGLint numConfigs;
-  eglChooseConfig(display, configAttribs, &config, 1, &numConfigs);
+  eglChooseConfig(*display, configAttribs, &config, 1, &numConfigs);
 
   EGLint contextAttribs[] = {
       EGL_CONTEXT_MAJOR_VERSION, 3,
@@ -232,23 +232,45 @@ static void egl_setup(EGLDisplay* display, EGLSurface* surface)
       EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
       EGL_NONE
   };
-  EGLContext eglContext = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
+  EGLContext eglContext = eglCreateContext(*display, config, EGL_NO_CONTEXT, contextAttribs);
 
   EGLint surfaceAttribs[] = {
       EGL_WIDTH, static_cast<int>(WIDTH),
       EGL_HEIGHT, static_cast<int>(HEIGHT),
       EGL_NONE 
   };
-  EGLSurface surface = eglCreatePbufferSurface(display, config, surfaceAttribs);
+  
+  *surface = eglCreatePbufferSurface(*display, config, surfaceAttribs);
 
-  eglMakeCurrent(display, surface, surface, eglContext); 
+  eglMakeCurrent(*display, *surface, *surface, eglContext); 
+}
+
+static void offline_setup(GLuint *framebuffer, GLuint *colorbuffer, GLuint *depthbuffer)
+{
+  // Set Up Frame Context
+  glGenFramebuffers(1, framebuffer);
+  glGenTextures(1, colorbuffer);
+  glGenRenderbuffers(1, depthbuffer);
+
+  glBindTexture(GL_TEXTURE_2D, *colorbuffer);
+  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, WIDTH, HEIGHT);
+
+  glBindRenderbuffer(GL_RENDERBUFFER, *depthbuffer);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, WIDTH, HEIGHT);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, *framebuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *colorbuffer, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, *depthbuffer);
 }
 
 int main() 
 {
+  signal(SIGINT, catch_cntrl_c);
   
   // Set Up Window
-  egl_setup(&display, &surface);
+  // egl_setup(&display, &surface);
+  GLuint framebuffer, colorbuffer, depthbuffer;
+  offline_setup(&framebuffer, &colorbuffer, &depthbuffer);
 
   glViewport(0, 0, WIDTH, HEIGHT); 
 
@@ -274,13 +296,13 @@ int main()
   location_perspective  = glGetUniformLocation(program, "perspective");
   location_view         = glGetUniformLocation(program, "view");
   location_model        = glGetUniformLocation(program, "model");
-
+  
   if (location_perspective == -1 || location_view == -1 || location_model == -1)
   {
     fprintf(stderr, "ERROR: uniform locations: perspective=%d, view=%d, model=%d\n", location_perspective, location_view, location_model);
     exit(1);
   }
-  
+
   init_cube_data();
   
   auto begin = std::chrono::high_resolution_clock::now();
@@ -293,24 +315,38 @@ int main()
     double elapsed_microsenconds = std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count();
     update_cube_data(elapsed_microsenconds / 1e6);
     
+    glClearColor(0.1f, 0.1f, 0.1f, 1.f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     draw_cubes();
 
-    eglSwapBuffers(display, surface);
+    // eglSwapBuffers(display, surface);
     
     frame_count += 1;
     begin = end;
   }
-
+  // clean out line
+  printf("\n");
   glFinish();
   
   auto end = std::chrono::high_resolution_clock::now();
   double total_time_microseconds = (double)std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
 
-  printf("INFO: cubes_per_frame=%ld", CUBES_SZ);
+  printf("INFO: cubes_per_frame=%ld\n", CUBES_SZ);
   printf("PERF: fps=%.1f.\n", frame_count / (total_time_microseconds / 1e6));
 
+  /*
+  uint8_t* result = (uint8_t*) malloc(sizeof(uint8_t[WIDTH][HEIGHT][4]));
+
+  #ifdef C_OPENGL_HOST
+  glReadPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, result);
+  #else
+  glReadnPixels(0,0,WIDTH, HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, WIDTH*HEIGHT*4, result);
+  #endif
+
+  print_ppm("image.ppm", WIDTH, HEIGHT, (uint8_t*) result);
+  free(result);
+  */
   EGL_DESTROY();
 
   return 0; 

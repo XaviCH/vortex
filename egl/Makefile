@@ -1,12 +1,16 @@
 
+CC = gcc
+VORTEX_PATH = ..
+LIBS = -lX11 -lm
 
-.PHONEY: all egl
+.PHONEY: all
 
-./lib/egl.so: src/egl.c
-	gcc -o lib/egl.so src/egl.c -shared -I./include
+all: libEGL.so
 
-all: egl
+# mkdir -p lib
 
-egl:
-	mkdir -p lib
-	make ./lib/egl.so
+libEGL.so: FORCE
+	$(MAKE) -C src
+	$(CC) -shared -o libEGL.so src/egl.o $(LIBS)
+
+FORCE: ;

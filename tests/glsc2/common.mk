@@ -29,6 +29,7 @@ VORTEX_RT_PATH ?= $(realpath ../../../runtime)
 VORTEX_KN_PATH ?= $(realpath ../../../kernel)
 
 GLSC2_PATH ?= $(PROJECT_PATH)/glsc2
+EGL_PATH ?= $(PROJECT_PATH)/egl
 VORTEX_EGL_PATH ?= $(realpath ../../../egl)
 
 FPGA_BIN_DIR ?= $(VORTEX_RT_PATH)/opae
@@ -54,7 +55,7 @@ driver ?= opencl
 # Driver assigment
 ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
-	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so
+	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so
 else
 ifeq ($(driver), gles)
 	CXXFLAGS += -DC_OPENGL_HOST

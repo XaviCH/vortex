@@ -2,6 +2,7 @@
 #include <GLSC2/glsc2.h>
 
 #include <X11/Xlib.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 #define NOT_IMPLEMENTED             \
@@ -18,11 +19,11 @@ typedef struct {
     void* pixels;
     size_t width, height;
 
-    size_t current_framebuffer;
-    size_t framebuffer_ids[2];
-    size_t colorbuffers_ids[2];
-    size_t depthbuffers_ids[2];
-    size_t stencilbuffers_ids[2];
+    GLuint current_framebuffer;
+    GLuint framebuffer_ids[2];
+    GLuint colorbuffers_ids[2];
+    GLuint depthbuffers_ids[2];
+    GLuint stencilbuffers_ids[2];
 
     void* orch;
 } __egl_context_t;
@@ -42,7 +43,7 @@ static void __context_constructor__()
 
 EGLAPI EGLBoolean EGLAPIENTRY eglChooseConfig (EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config) 
 {
-    if (dpy != &egl_context.display) NOT_IMPLEMENTED;
+    if (dpy != egl_context.display) NOT_IMPLEMENTED;
 
     return EGL_TRUE; 
 }
@@ -50,16 +51,16 @@ EGLAPI EGLBoolean EGLAPIENTRY eglChooseConfig (EGLDisplay dpy, const EGLint *att
 EGLAPI EGLBoolean EGLAPIENTRY eglCopyBuffers (EGLDisplay dpy, EGLSurface surface, EGLNativePixmapType target) { return 0; }
 EGLAPI EGLContext EGLAPIENTRY eglCreateContext (EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list) 
 { 
-    if (dpy != &egl_context.display) NOT_IMPLEMENTED;
+    if (dpy != egl_context.display) NOT_IMPLEMENTED;
 
-    return EGL_TRUE; 
+    return NULL; 
 }
 EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferSurface (EGLDisplay dpy, EGLConfig config, const EGLint *attrib_list) 
 { 
-    if (dpy != &egl_context.display) NOT_IMPLEMENTED;
+    if (dpy != egl_context.display) NOT_IMPLEMENTED;
 
-    egl_context.width    = attrib_list[0];
-    egl_context.height   = attrib_list[1];
+    egl_context.width    = attrib_list[1];
+    egl_context.height   = attrib_list[3];
 
     glGenFramebuffers(2, egl_context.framebuffer_ids);
     glGenTextures(2, egl_context.colorbuffers_ids);
@@ -112,7 +113,7 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferSurface (EGLDisplay dpy, EGLConfig
                          32,
                          0);
 
-    return egl_context.window; 
+    return &egl_context.window; 
 }
 EGLAPI EGLSurface EGLAPIENTRY eglCreatePixmapSurface (EGLDisplay dpy, EGLConfig config, EGLNativePixmapType pixmap, const EGLint *attrib_list) { return 0; }
 EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface (EGLDisplay dpy, EGLConfig config, EGLNativeWindowType win, const EGLint *attrib_list) { return 0; }
@@ -125,7 +126,7 @@ EGLAPI EGLSurface EGLAPIENTRY eglGetCurrentSurface (EGLint readdraw) { return 0;
 
 EGLAPI EGLDisplay EGLAPIENTRY eglGetDisplay (EGLNativeDisplayType display_id) 
 {
-    if (EGL_DEFAULT_DISPLAY) return egl_context.display;
+    if (display_id == EGL_DEFAULT_DISPLAY) return egl_context.display;
     
     NOT_IMPLEMENTED;
 }
@@ -135,13 +136,13 @@ EGLAPI __eglMustCastToProperFunctionPointerType EGLAPIENTRY eglGetProcAddress (c
 
 EGLAPI EGLBoolean EGLAPIENTRY eglInitialize (EGLDisplay dpy, EGLint *major, EGLint *minor) 
 { 
-    if (dpy != &egl_context.display) NOT_IMPLEMENTED;
+    if (dpy != egl_context.display) NOT_IMPLEMENTED;
 
     return EGL_TRUE; 
 }
 EGLAPI EGLBoolean EGLAPIENTRY eglMakeCurrent (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx) 
 {
-    if (dpy != &egl_context.display) NOT_IMPLEMENTED;
+    if (dpy != egl_context.display) NOT_IMPLEMENTED;
     if (draw != &egl_context.window) NOT_IMPLEMENTED;
     if (read != &egl_context.window) NOT_IMPLEMENTED;
     
@@ -155,13 +156,13 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface (EGLDisplay dpy, EGLSurface surfac
 
 EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers (EGLDisplay dpy, EGLSurface surface) 
 { 
-    if (dpy != &egl_context.display) NOT_IMPLEMENTED;
+    if (dpy != egl_context.display) NOT_IMPLEMENTED;
     if (surface != &egl_context.window) NOT_IMPLEMENTED;
 
     glReadnPixels(0,0,egl_context.width, egl_context.height, GL_RGBA, GL_UNSIGNED_BYTE, egl_context.width*egl_context.height*4, egl_context.pixels);
 
-    XPutImage(dpy,
-              surface,
+    XPutImage(egl_context.display,
+              egl_context.window,
               egl_context.gc,
               egl_context.image,
               0, 0,
