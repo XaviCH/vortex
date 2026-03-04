@@ -39,3 +39,8 @@ clean-all:
 	$(MAKE) -C quad clean-all
 	$(MAKE) -C cube clean-all
 	$(MAKE) -C texture clean-all
+
+libparameters.so: force
+	g++ -shared -o $@ parameters.c -fPIC $(CFLAGS)
+
+force: ;

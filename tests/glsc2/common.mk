@@ -30,6 +30,7 @@ VORTEX_KN_PATH ?= $(realpath ../../../kernel)
 
 GLSC2_PATH ?= $(PROJECT_PATH)/glsc2
 EGL_PATH ?= $(PROJECT_PATH)/egl
+TEST_PATH ?= $(PROJECT_PATH)/tests
 VORTEX_EGL_PATH ?= $(realpath ../../../egl)
 
 FPGA_BIN_DIR ?= $(VORTEX_RT_PATH)/opae
@@ -51,11 +52,13 @@ CXXFLAGS += -I$(GLSC2_PATH)/include
 CXXFLAGS += -I$(GLSC2_PATH)/src
 CXXFLAGS += -I$(PROJECT_PATH)
 
+LDFLAGS += 	
+
 driver ?= opencl
 # Driver assigment
 ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
-	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so
+	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so ../libparameters.so
 else
 ifeq ($(driver), gles)
 	CXXFLAGS += -DC_OPENGL_HOST
@@ -124,7 +127,7 @@ $(PROJECT): $(OBJS)
 
 # commands
 
-run: $(PROJECT) $(CSHADERS)
+run: parameters $(PROJECT) $(CSHADERS)
 	./$(PROJECT) $(OPTS)
 
 display:
@@ -158,6 +161,26 @@ clean:
 
 clean-all: clean
 	rm -rf *.dump *.pocl *.ocl
+
+
+ifneq ($(width),)
+PARAMETERS_CFLAGS += -DWIDTH=$(width)
+endif
+
+ifneq ($(height),)
+PARAMETERS_CFLAGS += -DHEIGHT=$(height)
+endif
+
+ifneq ($(size),)
+PARAMETERS_CFLAGS += -DSIZE=$(size)
+endif
+
+ifneq ($(offline),)
+PARAMETERS_CFLAGS += -DOFFLINE=$(offline)
+endif
+
+parameters:
+	$(MAKE) -C .. libparameters.so CFLAGS="$(PARAMETERS_CFLAGS)"
 
 error:
 	$(error $(ERROR_MSG))
