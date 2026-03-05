@@ -242,7 +242,7 @@ static void __orch_flush_draw_state(orch_handler_t* orch, orch_framebuffer_handl
         framebuffer->bin_queue_id
     );
 
-    printf("Flushed draw state: framebuffer_id=%zu, context_id=%zu, triangles=%zu\n", framebuffer - orch->framebuffers, framebuffer->context_id, framebuffer->draw_state.assembled_triangles);
+    // printf("Flushed draw state: framebuffer_id=%zu, context_id=%zu, triangles=%zu\n", framebuffer - orch->framebuffers, framebuffer->context_id, framebuffer->draw_state.assembled_triangles);
     
     framebuffer->draw_state.assembled_triangles  = 0;
     framebuffer->draw_state.assembled_vertices   = 0;
@@ -311,7 +311,7 @@ static device_context_t* __orch_attach_new_context(
     
     __orch_deattach_context(orch, framebuffer);
 
-    device_context_t* context       = __orch_get_context_from_id(orch, context_id);
+    device_context_t* context = __orch_get_context_from_id(orch, context_id);
 
     if (prev_context != NULL && context != prev_context) 
     {

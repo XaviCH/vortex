@@ -52,13 +52,13 @@ CXXFLAGS += -I$(GLSC2_PATH)/include
 CXXFLAGS += -I$(GLSC2_PATH)/src
 CXXFLAGS += -I$(PROJECT_PATH)
 
-LDFLAGS += 	
+LDFLAGS += 	$(TEST_PATH)/glsc2/parameters.so
 
 driver ?= opencl
 # Driver assigment
 ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
-	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so ../libparameters.so
+	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so 
 else
 ifeq ($(driver), gles)
 	CXXFLAGS += -DC_OPENGL_HOST
@@ -180,7 +180,7 @@ PARAMETERS_CFLAGS += -DOFFLINE=$(offline)
 endif
 
 parameters:
-	$(MAKE) -C .. libparameters.so CFLAGS="$(PARAMETERS_CFLAGS)"
+	$(MAKE) -C $(TEST_PATH)/glsc2 parameters.so CFLAGS="$(PARAMETERS_CFLAGS)"
 
 error:
 	$(error $(ERROR_MSG))

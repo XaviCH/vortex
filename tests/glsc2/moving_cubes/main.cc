@@ -108,12 +108,11 @@ typedef struct {
 
 cube_world_data_t* cube_world_data;
 
-EGLDisplay display;
-EGLSurface surface;
 
 GLint program;
 GLint location_position, location_color;
 GLint location_model, location_view, location_perspective;
+GLuint position_buffer, color_buffer;
 
 volatile sig_atomic_t cntrl_c = 0;
 
@@ -147,6 +146,16 @@ static void init_cube_data()
       rand()
     ));
   }
+
+  glGenBuffers(1, &position_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, position_buffer);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(position_array), position_array, GL_STATIC_DRAW);
+
+  glGenBuffers(1, &color_buffer);
+  glBindBuffer(GL_ARRAY_BUFFER, color_buffer);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(color_array), color_array, GL_STATIC_DRAW);
+ 
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 const glm::mat4 perspective = glm::perspective((float)M_PI / 4, (float)test_get_width()/test_get_height(), 0.1f, 100.f);
@@ -177,10 +186,14 @@ static void draw_cubes()
 {
   glEnable(GL_DEPTH_TEST);
 
-  glVertexAttribPointer(location_position, 3, GL_FLOAT, GL_FALSE, 0, &position_array);
+  glBindBuffer(GL_ARRAY_BUFFER, position_buffer);
+  glVertexAttribPointer(location_position, 3, GL_FLOAT, GL_FALSE, 0, NULL);
   glEnableVertexAttribArray(location_position);
-  glVertexAttribPointer(location_color, 3, GL_FLOAT, GL_FALSE, 0, &color_array);
+
+  glBindBuffer(GL_ARRAY_BUFFER, color_buffer);
+  glVertexAttribPointer(location_color, 3, GL_FLOAT, GL_FALSE, 0, NULL);
   glEnableVertexAttribArray(location_color);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   glUniformMatrix4fv(location_perspective, 1, GL_FALSE, &perspective[0][0]);
   glUniformMatrix4fv(location_view, 1, GL_FALSE, &view[0][0]);
@@ -200,75 +213,17 @@ static void draw_cubes()
   }
 }
 
-static void egl_setup(EGLDisplay* display, EGLSurface* surface)
-{
-  *display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-  
-  EGLint major, minor;
-  eglInitialize(*display, &major, &minor);
-
-  eglBindAPI(EGL_OPENGL_API);
-  EGLint configAttribs[] = {
-    EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-    EGL_RED_SIZE, 8,
-    EGL_GREEN_SIZE, 8,
-    EGL_BLUE_SIZE, 8,
-    EGL_ALPHA_SIZE, 8,
-    EGL_DEPTH_SIZE, 16,
-    EGL_STENCIL_SIZE, 8,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-    EGL_NONE
-  };
-
-  EGLConfig config;
-  EGLint numConfigs;
-  eglChooseConfig(*display, configAttribs, &config, 1, &numConfigs);
-
-  EGLint contextAttribs[] = {
-      EGL_CONTEXT_MAJOR_VERSION, 3,
-      EGL_CONTEXT_MINOR_VERSION, 0,
-      EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-      EGL_NONE
-  };
-  EGLContext eglContext = eglCreateContext(*display, config, EGL_NO_CONTEXT, contextAttribs);
-
-  EGLint surfaceAttribs[] = {
-      EGL_WIDTH, static_cast<int>(test_get_width()),
-      EGL_HEIGHT, static_cast<int>(test_get_height()),
-      EGL_NONE 
-  };
-  
-  *surface = eglCreatePbufferSurface(*display, config, surfaceAttribs);
-
-  eglMakeCurrent(*display, *surface, *surface, eglContext); 
-}
-
-static void offline_setup(GLuint *framebuffer, GLuint *colorbuffer, GLuint *depthbuffer)
-{
-  // Set Up Frame Context
-  glGenFramebuffers(1, framebuffer);
-  glGenTextures(1, colorbuffer);
-  glGenRenderbuffers(1, depthbuffer);
-
-  glBindTexture(GL_TEXTURE_2D, *colorbuffer);
-  glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, test_get_width(), test_get_height());
-
-  glBindRenderbuffer(GL_RENDERBUFFER, *depthbuffer);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, test_get_width(), test_get_height());
-
-  glBindFramebuffer(GL_FRAMEBUFFER, *framebuffer);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, *colorbuffer, 0);
-  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, *depthbuffer);
-}
+#include <tests/glsc2/utils.hpp>
 
 int main() 
 {
   signal(SIGINT, catch_cntrl_c);
   
-  GLuint framebuffer, colorbuffer, depthbuffer;
+  EGLDisplay display;
+  EGLSurface surface;
+  GLuint framebuffer, colorbuffer, depthbuffer, stencilbuffer;
   // Set Up Window
-  egl_setup(&display, &surface);
-  offline_setup(&framebuffer, &colorbuffer, &depthbuffer);
+  tests::setup_egl_and_framebuffers(&display, &surface, &framebuffer, &colorbuffer, &depthbuffer, &stencilbuffer);
 
   glViewport(0, 0, test_get_width(), test_get_height()); 
 
@@ -302,6 +257,10 @@ int main()
   }
 
   init_cube_data();
+
+  // glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_SRC_ALPHA);
+  glBlendEquation(GL_FUNC_ADD);
   
   auto begin = std::chrono::high_resolution_clock::now();  
   auto last_goal_clock = begin;
@@ -311,6 +270,9 @@ int main()
 
   auto start = begin;
   int frame_count = 0;
+
+  printf("PERF: fps=0.\n");
+
   while (cntrl_c == 0) {
     auto end = std::chrono::high_resolution_clock::now();
 
@@ -322,9 +284,7 @@ int main()
 
     draw_cubes();
 
-    if (not test_is_offline_rendering()) {
-      eglSwapBuffers(display, surface);
-    }
+    tests::swap_buffers_if_needed(display, surface);
     
     frame_count += 1;
     last_goal_frame_count += 1;
@@ -332,6 +292,7 @@ int main()
     if (seconds_goal <= std::chrono::duration_cast<std::chrono::seconds>(end-start).count()) {
       double elapsed_microsenconds = std::chrono::duration_cast<std::chrono::microseconds>(end-last_goal_clock).count();
 
+      printf("\x1b[1F");
       printf("PERF: fps=%.1f.\n", last_goal_frame_count / (elapsed_microsenconds / 1e6));
       seconds_goal += 1;
       last_goal_clock = end;
@@ -343,26 +304,15 @@ int main()
   // clean out line
   glFinish();
 
-  printf("\n");
+  printf("\x1b[2K\n");
   
   auto end = std::chrono::high_resolution_clock::now();
   double total_time_microseconds = (double)std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
 
-  printf("PERF: fps=%.1f.\n", frame_count / (total_time_microseconds / 1e6));
+  printf("PERF: mean_fps=%.1f.\n", frame_count / (total_time_microseconds / 1e6));
   printf("PERF: frame_time=%.3f ms.\n", total_time_microseconds / frame_count / 1e3);
 
-  uint8_t* result = (uint8_t*) malloc(sizeof(uint8_t[test_get_width()][test_get_height()][4]));
-
-  #ifdef C_OPENGL_HOST
-  glReadPixels(0,0,test_get_width(), test_get_height(), GL_RGBA, GL_UNSIGNED_BYTE, result);
-  #else
-  glReadnPixels(0,0,test_get_width(), test_get_height(), GL_RGBA, GL_UNSIGNED_BYTE, test_get_width()*test_get_height()*4, result);
-  #endif
-
-  print_ppm("image.ppm", test_get_width(), test_get_height(), (uint8_t*) result);
-  free(result);
-  
-  EGL_DESTROY();
+  tests::save_framebuffer_as_ppm("image.ppm");
 
   return 0; 
 }

@@ -40,7 +40,9 @@ clean-all:
 	$(MAKE) -C cube clean-all
 	$(MAKE) -C texture clean-all
 
-libparameters.so: force
-	g++ -shared -o $@ parameters.c -fPIC $(CFLAGS)
+CFLAGS +=
+
+%.so: %.c force
+	g++ -shared -o $@ $< -fPIC $(CFLAGS)
 
 force: ;

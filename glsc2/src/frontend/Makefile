@@ -22,7 +22,7 @@ all: kernels glsc2.c.so
 kernels: $(KERNELS_CL)
 	make -C kernels
 
-HEADER_FILES = $(wildcard *.h)
+HEADER_FILES = $(wildcard *.h) $(wildcard ../*.h)
 
 %.o: %.c $(HEADER_FILES)
 	$(MAKE) -C $(SRC_PATH)/backend/pipeline

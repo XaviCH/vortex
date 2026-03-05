@@ -1486,6 +1486,7 @@ static void device_launch_vertex_shader(
         cl_mem *pointer = &attribute_pointer_mems[attribute];
         
         if (attribute_pointer->is_host) {
+            // high cost penalty, but we need to support that for compatibility with OpenGL
             CL_ASSIGN_CHECK(*pointer, clCreateBuffer(
                 context->device->context,
                 CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR,
@@ -2148,8 +2149,8 @@ static void device_write_fragment_texture_datas(
 }
 
 static void device_write_fragment_uniform(
-    device_context_t* context, 
-    size_t primitive_id, 
+    device_context_t* context,
+    size_t primitive_id,
     uint8_t uniform_data[DEVICE_UNIFORM_CAPACITY]
 ) {
     size_t size = sizeof(uint8_t[DEVICE_UNIFORM_CAPACITY]); 

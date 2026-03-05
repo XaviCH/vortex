@@ -844,14 +844,18 @@ GL_APICALL void GL_APIENTRY glEnableVertexAttribArray (GLuint index)
 
 GL_APICALL void GL_APIENTRY glFinish (void) 
 {
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding];
+    if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
 
     orch_finish(orch, framebuffer->id);
 }
 
 GL_APICALL void GL_APIENTRY glFlush (void) 
 {
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding];
+    if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
 
     orch_flush(orch, framebuffer->id);
 }
