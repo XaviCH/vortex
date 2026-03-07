@@ -41,7 +41,7 @@
 // ------
 // RENDER CONFIGURATIONS
 // ------
-#define DEVICE_CONTEXT_NUMBER 4
+#define DEVICE_CONTEXT_NUMBER 1
 #define DEVICE_BIN_QUEUE_SIZE 1
 
 #define DEVICE_VERTEX_ATTRIBUTE_SIZE 16
@@ -51,12 +51,15 @@
 #define DEVICE_TEXTURE_UNITS 8 // max number of active texture units
 
 #define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
-#define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 8
+#define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 10
 
-#define DEVICE_MAX_NUMBER_TRIANGLES (1UL << 12) // 4096 triangles
-#define DEVICE_MAX_NUMBER_SUBTRIANGLES (1UL << 12) // 4096 subtriangles
-#define DEVICE_VERTICES_SIZE (1UL << 12) // 4096 vertices
-#define DEVICE_VARYING_SIZE 16
+// max number of triangles could be rasterized
+#define DEVICE_MAX_NUMBER_TRIANGLES (1UL << 15) 
+#define DEVICE_MAX_NUMBER_SUBTRIANGLES (1UL << 12)
+
+// max number of vertices with varying attributes could be rastired
+#define DEVICE_VERTICES_SIZE (1UL << 16) // 
+#define DEVICE_VARYING_SIZE 2
 
 // ------
 // KERNEL CONFIGURATIONS

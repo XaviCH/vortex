@@ -118,7 +118,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
     #endif
 }
 
-inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
+static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
     uint result;
 
     uint id = get_local_linear_id();
@@ -152,6 +152,22 @@ inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, l
     return value;
 }
 
+/*
+static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
+    uint local_id = get_local_linear_id();
+    local volatile uint* ptr = &l_temp[local_id];
+    *ptr = value;
+    #pragma unroll
+    for(int i=1; i<get_local_linear_size(); i=i*2) {
+        barrier(CLK_LOCAL_MEM_FENCE);
+        if (local_id >= i) {
+            value += ptr[-i];    
+            *ptr = value;
+        }
+    }
+    return value;
+}
+*/
 
 
 inline uint __attribute__((overloadable)) local_scan_inclusive_min(uint value, local volatile uint* l_temp) {
@@ -446,6 +462,7 @@ inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool val
     sub_group_mask_t mask;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+        sub_group_barrier(CLK_LOCAL_MEM_FENCE);
         mask = ballot_sub_group_mask(value);
     #else
     {

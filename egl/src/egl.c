@@ -53,7 +53,7 @@ EGLAPI EGLContext EGLAPIENTRY eglCreateContext (EGLDisplay dpy, EGLConfig config
 { 
     if (dpy != egl_context.display) NOT_IMPLEMENTED;
 
-    return NULL; 
+    return &egl_context;
 }
 EGLAPI EGLSurface EGLAPIENTRY eglCreatePbufferSurface (EGLDisplay dpy, EGLConfig config, const EGLint *attrib_list) 
 { 

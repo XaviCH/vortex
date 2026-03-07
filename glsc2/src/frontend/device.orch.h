@@ -454,12 +454,12 @@ static size_t __device_get_max_number_triangles()
 
 static size_t __device_get_max_number_bin_segments() 
 {
-    return CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE*(DEVICE_MAX_NUMBER_TRIANGLES/CR_BIN_SEG_SIZE); // At least one segment x bin
+    return CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE*(DEVICE_MAX_NUMBER_TRIANGLES/CR_BIN_SEG_SIZE)/2; // At least one segment x bin
 }
 
 static size_t __device_get_max_number_tile_segments() 
 {
-    return CR_MAXTILES_SQR*(DEVICE_MAX_NUMBER_TRIANGLES/CR_TILE_SEG_SIZE); // At least one segment x tile
+    return CR_MAXTILES_SQR*(DEVICE_MAX_NUMBER_TRIANGLES/CR_TILE_SEG_SIZE)/2; // At least one segment x tile
 }
 
 static size_t __device_get_bin_batch_size() 
@@ -1695,7 +1695,7 @@ static void device_launch_bin_dispatch(
 
     cl_event wait_event;
 
-    CL_CHECK(clEnqueueNDRangeKernel(queue,kernel, 2, NULL, gws, lws, 0, NULL, &wait_event));
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, NULL, gws, lws, 0, NULL, &wait_event));
 
     __device_barrier_mem(&context->a_bin_counter,   wait_event);
 
@@ -1727,6 +1727,13 @@ static void device_launch_tile_dispatch(
         height, 
         width
     );
+
+    /*
+    cl_int a_bin_counter, a_num_bin_segs;
+    __device_read_mem(&context->a_bin_counter, CL_TRUE, 0, sizeof(a_bin_counter), &a_bin_counter);
+    __device_read_mem(&context->a_num_bin_segs, CL_TRUE, 0, sizeof(a_num_bin_segs), &a_num_bin_segs);
+    printf("a_bin_counter=%d, a_num_bin_segs=%d\n", a_bin_counter, a_num_bin_segs);
+    */
 
     size_t lws[2] = {DEVICE_SUB_GROUP_THREADS, DEVICE_COARSE_SUB_GROUPS};
     size_t gws[2] = {lws[0] * DEVICE_NUM_CORES, lws[1]};
@@ -1985,7 +1992,30 @@ static void device_bind_texture_unit(device_context_t* context, size_t unit_inde
 
 //-------------------------------------------------------------------------------------
 
-static void device_copy_context_last_state(device_context_t* dst, device_context_t* src, size_t primitive_id)
+static void device_copy_fragment_state(device_context_t* dst, device_context_t* src, size_t dst_id, size_t src_id)
+{
+    size_t sizeof_uniform = sizeof(cl_uchar[DEVICE_UNIFORM_CAPACITY]);
+
+    __device_copy_mem(
+        &src->fragment_uniform_mem,
+        &dst->fragment_uniform_mem,
+        sizeof_uniform * src_id,
+        sizeof_uniform * dst_id,
+        sizeof(cl_uchar[DEVICE_UNIFORM_CAPACITY])
+    );
+
+    size_t sizeof_rop_config = sizeof(rop_config_t);
+
+    __device_copy_mem(
+        &src->rop_configs_mem,
+        &dst->rop_configs_mem,
+        sizeof_rop_config * src_id,
+        sizeof_rop_config * dst_id,
+        sizeof(rop_config_t)
+    );
+}
+
+static void device_copy_context_last_state(device_context_t* dst, device_context_t* src)
 {
     memcpy(dst->texture_units_ids, src->texture_units_ids, sizeof(src->texture_units_ids));
     memcpy(dst->vertex_attribute_pointers, src->vertex_attribute_pointers, sizeof(src->vertex_attribute_pointers));
@@ -2032,26 +2062,6 @@ static void device_copy_context_last_state(device_context_t* dst, device_context
         0,
         0,
         sizeof(gl_texture_data_t[DEVICE_TEXTURE_UNITS])
-    );
-
-    size_t sizeof_uniform = sizeof(cl_uchar[DEVICE_UNIFORM_CAPACITY]);
-
-    __device_copy_mem(
-        &src->fragment_uniform_mem,
-        &dst->fragment_uniform_mem,
-        sizeof_uniform * primitive_id,
-        0,
-        sizeof(cl_uchar[DEVICE_UNIFORM_CAPACITY])
-    );
-
-    size_t sizeof_rop_config = sizeof(rop_config_t);
-
-    __device_copy_mem(
-        &src->rop_configs_mem,
-        &dst->rop_configs_mem,
-        sizeof_rop_config * primitive_id,
-        0,
-        sizeof_rop_config
     );
 }
 

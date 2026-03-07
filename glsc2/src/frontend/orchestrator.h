@@ -51,7 +51,7 @@ typedef struct {
 // Header methods
 //--------------------------------------------------------------------------
 
-static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer, size_t primitive_id);
+static device_context_t* __orch_attach_new_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer, int move_fragment_data);
 
 //--------------------------------------------------------------------------
 // Private methods
@@ -83,7 +83,7 @@ static device_context_t* __orch_get_attached_context(orch_handler_t* orch, orch_
 
 static device_context_t* __orch_get_attached_or_attach_context(orch_handler_t* orch, orch_framebuffer_handler_t* framebuffer)
 {
-    if (framebuffer->context_id == -1) return __orch_attach_new_context(orch, framebuffer, framebuffer->draw_state.last_config_id);
+    if (framebuffer->context_id == -1) return __orch_attach_new_context(orch, framebuffer, 0);
 
     return __orch_get_attached_context(orch, framebuffer);
 }
@@ -122,19 +122,26 @@ static uint8_t __orch_require_flush_vertices(orch_framebuffer_handler_t* framebu
     // return 0; TODO: check logic to optimize and do not always flush
 }
 
-static uint32_t __orch_require_flush_context(
+typedef enum {
+    NONE = 0,
+    SHADER_UPDATE,
+    VERTEX_BUFFER_CAPACITY,
+    TRIANGLE_BUFFER_CAPACITY
+} __orch_flush_context_reason_t;
+
+static __orch_flush_context_reason_t __orch_require_flush_context(
     orch_framebuffer_handler_t* framebuffer, 
     size_t shader_id, 
     render_mode_t mode, 
     size_t num_vertices
 ) {
     // no drawing done
-    if (framebuffer->draw_state.assembled_triangles == 0 && framebuffer->draw_state.assembled_vertices == 0) return 0;
+    if (framebuffer->draw_state.assembled_triangles == 0 && framebuffer->draw_state.assembled_vertices == 0) return NONE;
 
-    if (framebuffer->draw_state.shader_id != shader_id) return 1;
+    if (framebuffer->draw_state.shader_id != shader_id) return SHADER_UPDATE;
 
     // TODO: depends also on the varying size
-    if (framebuffer->draw_state.assembled_vertices + num_vertices > DEVICE_VERTICES_SIZE) return 1;
+    if (framebuffer->draw_state.assembled_vertices + num_vertices > DEVICE_VERTICES_SIZE) return VERTEX_BUFFER_CAPACITY;
 
     size_t pending_triangles = __orch_get_num_triangles_from_vertices(
         framebuffer->draw_state.last_render_mode, 
@@ -143,11 +150,11 @@ static uint32_t __orch_require_flush_context(
 
     size_t requested_triangles = __orch_get_num_triangles_from_vertices(mode, num_vertices);
 
-    if (framebuffer->draw_state.assembled_triangles + pending_triangles + requested_triangles > DEVICE_MAX_NUMBER_TRIANGLES) return 1;
+    if (framebuffer->draw_state.assembled_triangles + pending_triangles + requested_triangles > DEVICE_MAX_NUMBER_TRIANGLES) return TRIANGLE_BUFFER_CAPACITY;
 
     // TODO: maybe take account segments available
 
-    return 0;
+    return NONE;
 }
 
 // Attach functions
@@ -297,10 +304,15 @@ static void __orch_deattach_context(orch_handler_t* orch, orch_framebuffer_handl
 static device_context_t* __orch_attach_new_context(
     orch_handler_t* orch, 
     orch_framebuffer_handler_t* framebuffer,
-    size_t primitive_id
+    int move_fragment_data
 ) {
-    size_t context_id = __orch_get_next_context_id(orch);
     device_context_t* prev_context  = __orch_get_attached_context(orch, framebuffer);
+
+    size_t prev_loaded_configs = framebuffer->loaded_configs;
+
+    size_t a = framebuffer->loaded_configs;
+    
+    size_t context_id = __orch_get_next_context_id(orch);
 
     orch_framebuffer_handler_t* prev_framebuffer = __orch_get_framebuffer_attached_to_context_id(orch, context_id);
 
@@ -313,10 +325,18 @@ static device_context_t* __orch_attach_new_context(
 
     device_context_t* context = __orch_get_context_from_id(orch, context_id);
 
-    if (prev_context != NULL && context != prev_context) 
-    {
-        device_copy_context_last_state(context, prev_context, primitive_id);
-        framebuffer->loaded_configs = 1;
+    if (prev_context != NULL) {
+
+        if (context != prev_context) 
+        {
+            device_copy_context_last_state(context, prev_context);
+        } 
+
+        if (move_fragment_data && prev_loaded_configs > 0)
+        {
+            device_copy_fragment_state(context, prev_context, framebuffer->loaded_configs, prev_loaded_configs - 1);
+            framebuffer->loaded_configs += 1;
+        }
     }
 
     framebuffer->context_id = context_id;
@@ -372,20 +392,33 @@ static void __orch_draw_vertices(
 ) {
     size_t num_vertices = end - init;
     size_t num_triangles = __orch_get_num_triangles_from_vertices(mode, num_vertices);
-    size_t last_config_id = framebuffer->loaded_configs - 1;
 
     device_context_t* context = __orch_get_attached_or_attach_context(orch, framebuffer);
 
-    if (__orch_require_flush_context(framebuffer, shader_id, mode, num_vertices))
+    __orch_flush_context_reason_t flush_context_reason = __orch_require_flush_context(framebuffer, shader_id, mode, num_vertices); 
+    if (flush_context_reason)
     {
-        context = __orch_attach_new_context(orch, framebuffer, last_config_id);
-        last_config_id = framebuffer->loaded_configs - 1;
+        context = __orch_attach_new_context(orch, framebuffer, 1);
+
+        if (flush_context_reason == TRIANGLE_BUFFER_CAPACITY && num_triangles > DEVICE_MAX_NUMBER_TRIANGLES)
+        {
+            printf("ERROR: Do not supported triangle size draw call. num triangles => %ld > %d\n", num_triangles, DEVICE_MAX_NUMBER_TRIANGLES);
+            exit(1);
+        }
+
+        if (flush_context_reason == VERTEX_BUFFER_CAPACITY && num_vertices > DEVICE_VERTICES_SIZE)
+        {
+            printf("ERROR: Do not supported vertices size draw call. num vertices => %ld > %d\n", num_vertices, DEVICE_VERTICES_SIZE);
+            exit(1);
+        }
     }
 
     if (__orch_require_flush_vertices(framebuffer, mode, num_vertices))
     {
         __orch_flush_vertices(orch, framebuffer);
     }
+
+    size_t last_config_id = framebuffer->loaded_configs - 1;
 
     device_launch_vertex_shader(
         context,
@@ -727,7 +760,7 @@ static void orch_write_fragment_data(
 
     if (framebuffer->loaded_configs == TRIANGLE_PRIMITIVE_CONFIGS)
     {
-        __orch_attach_new_context(orch, framebuffer, framebuffer->loaded_configs-1);
+        __orch_attach_new_context(orch, framebuffer, 0);
     }
 
     device_write_fragment_uniform(context, framebuffer->loaded_configs, uniform_data);

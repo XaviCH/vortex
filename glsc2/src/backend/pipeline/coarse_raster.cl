@@ -77,6 +77,7 @@ inline void sub_group_emit_triangle_mask(
         set_bit_sub_group_mask(&mask_bit, get_local_id(0));
     }
 
+    /* TODO: fix optimization
     sub_group_mask_t small_tile = local_1dim_ballot(sizex <= 2 && sizey <= 2, l_temp);
 
     if (all_sub_group_mask(small_tile)) {
@@ -86,6 +87,7 @@ inline void sub_group_emit_triangle_mask(
         if (sizex == 2 && sizey == 2) atomic_or_sub_group_mask(curr_ptr + 1 + CR_BIN_SIZE, mask_bit);
         return;
     }
+    */
 
     // Initialize edge functions.
     int d12x, d12y, b01, b02, b12;
@@ -955,12 +957,7 @@ void coarse_raster(
 
         for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
         {
-            bool req_predicate;
-            #if (CR_BIN_SQR%DEVICE_SUB_GROUP_THREADS == 0 && (DEVICE_SUB_GROUP_RAW || DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT))
-                req_predicate = false;
-            #else
-                req_predicate = true;
-            #endif
+            bool req_predicate = true;
 
             int tile_in_bin = tile_in_bin_chunk + thread_local_id;
             bool pass = tile_in_bin >= CR_BIN_SQR;
@@ -1050,12 +1047,7 @@ void coarse_raster(
 
         for(int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
         {
-            bool req_predicate;
-            #if (CR_BIN_SQR%DEVICE_SUB_GROUP_THREADS == 0 && (DEVICE_SUB_GROUP_RAW || DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT))
-                req_predicate = false;
-            #else
-                req_predicate = true;
-            #endif
+            bool req_predicate = true;
 
             int tile_in_bin = tile_in_bin_chunk + thread_local_id;
             bool pass = tile_in_bin >= CR_BIN_SQR || s_tile_stream_curr_ofs[tile_in_bin] < 0;
