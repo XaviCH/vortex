@@ -9,6 +9,7 @@
 #include <backend/pipeline/bin_raster.o.c>
 #include <backend/pipeline/coarse_raster.o.c>
 #include <backend/pipeline/force_clear.o.c>
+#include <backend/pipeline/readnpixels.o.c>
 #include <constants.device.h>
 #include <frontend/types.h>
 
@@ -80,6 +81,7 @@ typedef struct {
     cl_program                  bin_raster_program;
     cl_program                  coarse_raster_program;
     cl_program                  clear_program;
+    cl_program                  read_pixels_program;
 
     cl_kernel                   bin_raster_kernel;
     cl_kernel                   clear_kernel;
@@ -675,12 +677,18 @@ static void device_init(device_t* shared)
     CL_ASSIGN_CHECK(shared->clear_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &force_clear_size, &force_clear_bin, NULL, &error));
     CL_CHECK(clBuildProgram(shared->clear_program, 1, &shared->device_id, NULL, NULL, NULL));
 
+    size_t read_pixels_size = sizeof(readnpixels_o);
+    const unsigned char *read_pixels_bin = readnpixels_o;
+    CL_ASSIGN_CHECK(shared->read_pixels_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &read_pixels_size, &read_pixels_bin, NULL, &error));
+    CL_CHECK(clBuildProgram(shared->read_pixels_program, 1, &shared->device_id, NULL, NULL, NULL));
+
     // Create kernels
     CL_ASSIGN_CHECK(shared->triangle_setup_arrays_kernel,   clCreateKernel(shared->triangle_setup_program,  "triangle_setup_arrays",    &error));
     CL_ASSIGN_CHECK(shared->triangle_setup_range_kernel,    clCreateKernel(shared->triangle_setup_program,  "triangle_setup_range",     &error));
     CL_ASSIGN_CHECK(shared->bin_raster_kernel,              clCreateKernel(shared->bin_raster_program,      "bin_raster",               &error));
     CL_ASSIGN_CHECK(shared->coarse_raster_kernel,           clCreateKernel(shared->coarse_raster_program,   "coarse_raster",            &error));
     CL_ASSIGN_CHECK(shared->clear_kernel,                   clCreateKernel(shared->clear_program,           "force_clear",              &error));
+    CL_ASSIGN_CHECK(shared->read_pixels_kernel,             clCreateKernel(shared->read_pixels_program,     "readnpixels",              &error));
 
     // Mem objects
     shared->textures_size = 1;
@@ -1106,17 +1114,23 @@ static void __device_set_clear_kernel_args(
 }
 
 static void __device_set_read_pixels_kernel_args(
-    device_context_t* context,
     cl_kernel kernel,
-    cl_mem g_pixel_buffer,
-    cl_uint c_viewport_height,
-    cl_uint c_viewport_width,
-    cl_uint c_read_format,
-    cl_uint c_read_type
+    cl_mem t_colorbuffer,
+    cl_mem g_buffer,
+    cl_uint c_colorbuffer_mode,
+    cl_uint c_buffer_mode,
+    cl_uchar c_swap_rb,
+    cl_uchar c_swap_y
 ) {
     cl_uint arg_idx = 0;
 
-    // TODO
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(t_colorbuffer), &t_colorbuffer));
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(g_buffer), &g_buffer))
+    // clSetKernelArgSVMPointer(kernel, arg_idx++, &g_buffer);
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_colorbuffer_mode), &c_colorbuffer_mode));
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_buffer_mode), &c_buffer_mode));
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_swap_rb), &c_swap_rb));
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_swap_y), &c_swap_y));
 }
 // ---------------------------------------------------------------
 
@@ -1865,9 +1879,9 @@ static void device_launch_clear_framebuffer(
 
     cl_uint count = 0;
 
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &device->textures[colorbuffer_id]));
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &device->textures[depthbuffer_id]));
-    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &device->textures[stencilbuffer_id]));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &device->textures[colorbuffer_id].mem));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &device->textures[depthbuffer_id].mem));
+    CL_CHECK(clSetKernelArg(kernel, count++, sizeof(cl_mem), &device->textures[stencilbuffer_id].mem));
     #ifndef DEVICE_IMAGE_ENABLED
     {
         CL_CHECK(clSetKernelArg(kernel, count++, sizeof(c_colorbuffer_mode), &c_colorbuffer_mode));
@@ -1888,18 +1902,51 @@ static void device_launch_read_pixels(
     size_t bin_queue_id,
     size_t colorbuffer_id,
     uint32_t colorbuffer_mode,
-    size_t c_width, size_t c_height,
     size_t x, size_t y,
     size_t width, size_t height,
-    uint32_t ptr_format,
+    uint32_t ptr_mode,
+    uint32_t swap_rb,
+    uint32_t swap_y,
     void* ptr
 ) {
-    __device_bin_queue_t* bin_queues = __device_get_bin_queue(device, bin_queue_id);
-
-    cl_command_queue queue = bin_queues->queues[0][0];
+    cl_kernel kernel = device->read_pixels_kernel;
 
     cl_mem colorbuffer = device->textures[colorbuffer_id].mem;
+    
+    size_t size = __device_get_bytes_from_texture_mode(ptr_mode) * (width - x) * (height - y);
 
+    cl_mem buffer;
+    CL_ASSIGN_CHECK(buffer, clCreateBuffer(
+        device->context,
+        CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR,
+        size,
+        ptr,
+        &error
+    ));
+    
+
+    __device_set_read_pixels_kernel_args(
+        kernel, 
+        colorbuffer,
+        buffer,
+        colorbuffer_mode,
+        ptr_mode,
+        swap_rb,
+        swap_y
+    );
+
+    __device_bin_queue_t* bin_queue = __device_get_bin_queue(device, bin_queue_id);
+    
+    cl_command_queue queue = bin_queue->queues[0][0];
+    size_t global_work_offset[2] = {x, y};
+    size_t global_work_size[2] = {width, height};
+    
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, NULL));
+    void* map_ptr;
+    CL_ASSIGN_CHECK(map_ptr, clEnqueueMapBuffer(queue, buffer, CL_TRUE, CL_MAP_READ, 0, size, 0, NULL, NULL, &error));
+    // CL_CHECK(clEnqueueReadBuffer(queue, buffer, CL_TRUE, 0, size, ptr, 0, NULL, NULL));
+    CL_CHECK(clReleaseMemObject(buffer));
+    /*
     #ifdef DEVICE_IMAGE_ENABLED
     {
         size_t origin[3] = {x, y, 0};
@@ -1937,6 +1984,7 @@ static void device_launch_read_pixels(
         ));
     }
     #endif
+    */
 }
 
 void device_wait_bin_queue(

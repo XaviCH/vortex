@@ -846,21 +846,25 @@ static void orch_readnpixels(
     size_t x, size_t y,
     size_t width, size_t height,
     uint32_t mode,
+    int swap_rb,
+    int swap_y,
     void* ptr
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     __orch_flush_framebuffer(orch, framebuffer);
 
+    if (framebuffer->width != width || framebuffer->height != height) CL_UNSUPORTED_MAPING();
+
     device_launch_read_pixels(
         &orch->device,
         framebuffer->bin_queue_id,
         framebuffer->colorbuffer_id,
         framebuffer->colorbuffer_mode,
-        framebuffer->width,
-        framebuffer->height,
         x, y, width, height, 
-        mode,
+        mode, 
+        swap_rb, 
+        swap_y,
         ptr
     );
 }

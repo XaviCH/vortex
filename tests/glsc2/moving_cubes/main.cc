@@ -258,7 +258,7 @@ int main()
 
   init_cube_data();
 
-  // glEnable(GL_BLEND);
+  glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_SRC_ALPHA);
   glBlendEquation(GL_FUNC_ADD);
   

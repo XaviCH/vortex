@@ -27,7 +27,7 @@
     typedef global uchar* restrict stencilbuffer_t;
 #endif
 
-inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) { 
+static inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) { 
     float4 value;
 
     #ifdef DEVICE_IMAGE_ENABLED
@@ -108,6 +108,52 @@ static inline uint read_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2 
     #endif
 }
 
+static inline void write_2d_texture_buffer(void* buffer, uint2 pos, uint2 size, uint mode, uint value)
+{
+    uint offset = pos.y * size.x + pos.x;
+
+    switch(mode) {
+        default:
+        case TEX_R8:
+            *((global uchar*) buffer + offset) = value;
+            break;
+        case TEX_RG8:
+            *((global ushort*) buffer + offset) = value;
+            break;
+        case TEX_RGB8:
+            {
+                global uchar* buffer = (global uchar*) buffer + (offset*3);
+                buffer[0] = value >>  0;
+                buffer[1] = value >>  8;
+                buffer[2] = value >> 16;
+            }
+            break;
+        case TEX_RGBA8:
+            *(((global uint*) buffer) + offset) = value;
+            break;
+        case TEX_RGBA4:
+            *((global ushort*) buffer + offset) = 
+                (value & 0x0000000F) >> 0 |
+                (value & 0x00000F00) >> 4 |
+                (value & 0x000F0000) >> 8 |
+                (value & 0x0F000000) >> 12;
+            break;
+        case TEX_RGB5_A1:
+            *((global ushort*) buffer + offset) = 
+                (value & 0x0000001F) >> 0 |
+                (value & 0x00001F00) >> 3 |
+                (value & 0x001F0000) >> 6 |
+                (value & 0x01000000) >> 9 ;
+            break;
+        case TEX_RGB565:
+            *((global ushort*) buffer + offset) = 
+                (value & 0x0000001F) >> 0 |
+                (value & 0x00003F00) >> 3 |
+                (value & 0x001F0000) >> 5 ;
+            break;
+    }
+}
+
 static inline void write_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2 size, uint mode, uint color) 
 {
     #ifdef DEVICE_IMAGE_ENABLED
@@ -116,47 +162,7 @@ static inline void write_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2
     }
     #else
     {
-        uint offset = pos.y * size.x + pos.x;
-
-        switch(mode) {
-            case TEX_R8:
-                *((global uchar*) colorbuffer + offset) = color;
-                break;
-            case TEX_RG8:
-                *((global ushort*) colorbuffer + offset) = color;
-                break;
-            case TEX_RGB8:
-                {
-                    global uchar* buffer = colorbuffer + offset*3;
-                    buffer[0] = color >>  0;
-                    buffer[1] = color >>  8;
-                    buffer[2] = color >> 16;
-                }
-                break;
-            case TEX_RGBA8:
-                *(((global uint*) colorbuffer) + offset) = color;
-                break;
-            case TEX_RGBA4:
-                *((global ushort*) colorbuffer + offset) = 
-                    (color & 0x0000000F) >> 0 |
-                    (color & 0x00000F00) >> 4 |
-                    (color & 0x000F0000) >> 8 |
-                    (color & 0x0F000000) >> 12;
-                break;
-            case TEX_RGB5_A1:
-                *((global ushort*) colorbuffer + offset) = 
-                    (color & 0x0000001F) >> 0 |
-                    (color & 0x00001F00) >> 3 |
-                    (color & 0x001F0000) >> 6 |
-                    (color & 0x01000000) >> 9 ;
-                break;
-            case TEX_RGB565:
-                *((global ushort*) colorbuffer + offset) = 
-                    (color & 0x0000001F) >> 0 |
-                    (color & 0x00003F00) >> 3 |
-                    (color & 0x001F0000) >> 5 ;
-                break;
-        }
+        write_2d_texture_buffer(colorbuffer, pos, size, mode, color);
     }
     #endif
 }

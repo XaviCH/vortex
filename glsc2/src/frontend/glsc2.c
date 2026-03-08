@@ -1320,10 +1320,9 @@ static uint32_t gl_get_texture_mode_from_format_type(GLenum format, GLenum type)
             return TEX_RGB8;
         default:
         case GL_RGBA:
-            return TEX_RGB8;
+            return TEX_RGBA8;
         }
     }
-    return TEX_RGB8;
 }
 
 GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, void *data) 
@@ -1338,7 +1337,22 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 
     uint32_t mode = gl_get_texture_mode_from_format_type(format, type);
     
-    orch_readnpixels(orch, framebuffer->id, x, y, width, height, mode, data);
+    orch_readnpixels(orch, framebuffer->id, x, y, width, height, mode, 0, 0, data);
+}
+
+GL_APICALL void GL_APIENTRY glEGLReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLboolean swap_rb, GLboolean swap_y, void *data) 
+{
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) RETURN_ERROR(GL_INVALID_FRAMEBUFFER_OPERATION);
+
+    if (!_framebuffer_binding) NOT_IMPLEMENTED; // TODO: Context related operation
+
+    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    
+    if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    uint32_t mode = gl_get_texture_mode_from_format_type(format, type);
+    
+    orch_readnpixels(orch, framebuffer->id, x, y, width, height, mode, swap_rb, swap_y, data);
 }
 
 GL_APICALL void GL_APIENTRY glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height) 

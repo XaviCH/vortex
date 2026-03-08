@@ -154,12 +154,15 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQueryContext (EGLDisplay dpy, EGLContext ctx, E
 EGLAPI const char *EGLAPIENTRY eglQueryString (EGLDisplay dpy, EGLint name) { return 0; }
 EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurface (EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint *value) { return 0; }
 
+
+GL_APICALL void GL_APIENTRY glEGLReadnPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLboolean swap_rb, GLboolean swap_y, void *data);
+
 EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers (EGLDisplay dpy, EGLSurface surface) 
 { 
     if (dpy != egl_context.display) NOT_IMPLEMENTED;
     if (surface != &egl_context.window) NOT_IMPLEMENTED;
 
-    glReadnPixels(0,0,egl_context.width, egl_context.height, GL_RGBA, GL_UNSIGNED_BYTE, egl_context.width*egl_context.height*4, egl_context.pixels);
+    glEGLReadnPixels(0,0,egl_context.width, egl_context.height, GL_RGBA, GL_UNSIGNED_BYTE, egl_context.width*egl_context.height*4, 1, 1, egl_context.pixels);
 
     XPutImage(egl_context.display,
               egl_context.window,

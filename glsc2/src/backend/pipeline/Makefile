@@ -3,6 +3,7 @@ GLSC_PATH = $(VORTEX_PATH)/glsc2
 SRC_PATH = $(GLSC_PATH)/src 
 
 UTILS_CL = $(wildcard ../utils/*.cl)
+BACKEND_CL = $(wildcard ../*.cl)
 KERNELS_CL = $(wildcard *.cl)
 KERNELS_O_C = $(KERNELS_CL:.cl=.o.c)
 
@@ -13,7 +14,7 @@ CL_FLAGS += -Werror -D__COMPILER_RELATIVE_PATH__ -I$(SRC_PATH)
 
 CLC = $(GLSC_PATH)/src/compiler/clc 
 
-%.o: %.cl $(UTILS_CL)
+%.o: %.cl $(UTILS_CL) $(BACKEND_CL)
 	$(CLC) $< $@ -DC_OPENCL_HOST $(CL_FLAGS) $(OPT_FLAGS)
 
 %.o.c: %.o
