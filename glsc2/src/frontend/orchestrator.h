@@ -1,4 +1,7 @@
-#include <frontend/device.orch.h>
+#ifndef FRONTEND_ORCHESTRATOR_H
+#define FRONTEND_ORCHESTRATOR_H
+
+#include <frontend/device.h>
 
 typedef struct {
     size_t shader_id;
@@ -892,3 +895,5 @@ static void orch_destroy(orch_handler_t* orch)
 {
     // device_destroy(orch->device);
 }
+
+#endif // FRONTEND_ORCHESTRATOR_H
