@@ -7,8 +7,8 @@ KERNEL_OBJ_FILES = $(wildcard backend/pipeline/*.o.c)
 
 all: compiler backend frontend
 
-libGLSC2.so: $(KERNEL_OBJ_FILES) $(OBJ_FILES)
-	$(CC) -shared -o $@ $^ $(LIBS)
+libGLSC2.so: backend frontend
+	$(CC) -shared -o $@ $(KERNEL_OBJ_FILES) $(OBJ_FILES) $(LIBS)
 
 clean:
 	$(MAKE) -C ./compiler clean

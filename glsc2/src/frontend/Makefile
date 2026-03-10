@@ -14,11 +14,11 @@ OBJECT_FILES = $(wildcard *.o)
 
 KERNEL_OBJ_FILES = $(wildcard $(PIPELINE_PATH)/*.o.c)
 
-%.o: %.c $(HEADER_FILES) backend
-	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC
+%.o: %.c $(HEADER_FILES)
+	$(CC) $(CXXFLAGS) -o $@ -c $< $(INCLUDES) -fPIC -O3
 
-libGLSC2.so: $(KERNEL_OBJ_FILES) $(OBJECT_FILES)
-	$(CC) -shared -o $@ $^ $(LIBS)
+libGLSC2.so: backend $(OBJECT_FILES)
+	$(CC) -shared -o $@ $(KERNEL_OBJ_FILES) $(OBJECT_FILES) $(LIBS)
 
 .PHONY: all backend
 

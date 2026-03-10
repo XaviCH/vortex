@@ -27,6 +27,119 @@
     typedef global uchar* restrict stencilbuffer_t;
 #endif
 
+// DATA functions
+
+/**
+ * Decompress a uint color to uint4 channel color.
+ * @deprecated Use rgba_t functions
+ */
+static inline uint4 uint_to_uint4(const int data, int mode);
+
+/**
+ * Transforms a uint4 channel color to an standard rgba float color from GL specs.
+ * @todo encapsulate float4 into color type. maybe 32 bit floating point presition is not required.
+ */
+static inline float4 uint4_to_float4_color(uint4 color, int mode);
+
+/**
+ * Compress a uint4 channel color to an standard rgba8 uint.
+ * @deprecated Use rgba_t functions
+ */
+static inline uint uint4_to_uint(const uint4 data);
+
+// ------------------------------------------------------------------------------
+// Implementation
+// ------------------------------------------------------------------------------
+
+// TODO: this does not support al image types
+static inline uint4 uint_to_uint4(const int data, int mode)
+{
+    uint4 color;
+
+    switch (mode) 
+    {
+        case TEX_RGBA8:
+        case TEX_RGBA4:
+        case TEX_RGB5_A1:
+        case TEX_RGB565:
+            color.w = (data >> 25) & 0xFFu;
+        case TEX_RGB8:
+            color.z = (data >> 16) & 0xFFu;
+        case TEX_RG8:
+            color.y = (data >>  8) & 0xFFu;
+        default:
+        case TEX_R8:
+            color.x = (data >>  0) & 0xFFu;
+            break;
+    }
+
+    return color;
+}
+
+// TODO: this does not support al image types
+static inline uint uint4_to_uint(const uint4 data)
+{
+    return 
+        (data.x <<  0) | 
+        (data.y <<  8) | 
+        (data.z << 16) | 
+        (data.w << 24) ;
+}
+
+static inline float4 uint4_to_float4_color(uint4 color, int mode)
+{
+    float4 colorf = {0,0,0,1};
+
+    switch (mode) 
+    {
+        // HW supported conversions
+        default:
+        case TEX_R8:
+            colorf.x = (float) color.x / 0xFFu;
+            break;
+        case TEX_RG8:
+            colorf.xy = convert_float2(color.xy) / 0xFFu; 
+            break;
+        case TEX_RGB8:
+            colorf.xyz = convert_float3(color.xyz) / 0xFFu; 
+            break;
+        case TEX_RGBA8:
+            colorf = convert_float4(color) / 0xFFu; 
+            break;
+        case TEX_RGB565:
+            colorf.xyz = convert_float3(color.xyz) / (float3){0x1Fu, 0x3Fu, 0x1Fu}; 
+            break;
+
+        // SW supported conversions
+        case TEX_RGBA4:
+            {
+                uint4 tmp = 
+                {
+                    (color.x >> 0) & 0xFu,
+                    (color.x >> 4) & 0xFu,
+                    (color.y >> 0) & 0xFu,
+                    (color.y >> 4) & 0xFu,
+                };
+                colorf = convert_float4(tmp) / 0xFu; 
+            }
+            break;
+        case TEX_RGB5_A1:
+            {
+                uint4 tmp = 
+                {
+                    (color.x >>  0) & 0x1Fu,
+                    (color.x >>  5) & 0x1Fu,
+                    (color.x >> 10) & 0x1Fu,
+                    (color.x >> 15) & 0x1u,
+                };
+                colorf = convert_float4(tmp) / (float4){0x1Fu, 0x1Fu, 0x1Fu, 0x1u}; 
+            }
+            break;
+    }
+
+    return colorf;
+}
+
 static inline float4 read_vertex_buffer(ro_vertex_buffer_t vertex_buffer, uint index) { 
     float4 value;
 
@@ -48,7 +161,7 @@ static inline void write_vertex_buffer(wo_vertex_buffer_t vertex_buffer, uint in
     #endif
 }
 
-static inline uint read_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2 size, uint mode)
+static inline uint read_colorbuffer(colorbuffer_t colorbuffer, int2 pos, uint2 size, uint mode)
 {
 
     #ifdef DEVICE_IMAGE_ENABLED
@@ -108,7 +221,7 @@ static inline uint read_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2 
     #endif
 }
 
-static inline void write_2d_texture_buffer(void* buffer, uint2 pos, uint2 size, uint mode, uint value)
+static inline void write_2d_texture_buffer(void* buffer, int2 pos, uint2 size, uint mode, uint value)
 {
     uint offset = pos.y * size.x + pos.x;
 
@@ -154,11 +267,11 @@ static inline void write_2d_texture_buffer(void* buffer, uint2 pos, uint2 size, 
     }
 }
 
-static inline void write_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2 size, uint mode, uint color) 
+static inline void write_colorbuffer(colorbuffer_t colorbuffer, int2 pos, uint2 size, uint mode, uint color) 
 {
     #ifdef DEVICE_IMAGE_ENABLED
     {
-        write_imageui(colorbuffer, pos, uint_to_uint4(color));
+        write_imageui(colorbuffer, pos, uint_to_uint4(color, mode));
     }
     #else
     {
@@ -167,7 +280,7 @@ static inline void write_colorbuffer(colorbuffer_t colorbuffer, uint2 pos, uint2
     #endif
 }
 
-static inline ushort read_depthbuffer(depthbuffer_t depthbuffer, uint2 pos, uint2 size)
+static inline ushort read_depthbuffer(depthbuffer_t depthbuffer, int2 pos, uint2 size)
 {
     #ifdef DEVICE_IMAGE_ENABLED
     {
@@ -181,11 +294,11 @@ static inline ushort read_depthbuffer(depthbuffer_t depthbuffer, uint2 pos, uint
     #endif
 }
 
-static inline void write_depthbuffer(depthbuffer_t depthbuffer, uint2 pos, uint2 size, ushort depth) 
+static inline void write_depthbuffer(depthbuffer_t depthbuffer, int2 pos, uint2 size, ushort depth) 
 {
     #ifdef DEVICE_IMAGE_ENABLED
     {
-        write_imageui(colorbuffer, pos, depth);
+        write_imageui(depthbuffer, pos, depth);
     }
     #else
     {
@@ -195,7 +308,7 @@ static inline void write_depthbuffer(depthbuffer_t depthbuffer, uint2 pos, uint2
     #endif
 }
 
-static inline ushort read_stencilbuffer(stencilbuffer_t stencilbuffer, uint2 pos, uint2 size)
+static inline ushort read_stencilbuffer(stencilbuffer_t stencilbuffer, int2 pos, uint2 size)
 {
     #ifdef DEVICE_IMAGE_ENABLED
     {
@@ -209,11 +322,11 @@ static inline ushort read_stencilbuffer(stencilbuffer_t stencilbuffer, uint2 pos
     #endif
 }
 
-static inline void write_stencilbuffer(stencilbuffer_t stencilbuffer, uint2 pos, uint2 size, ushort stencil) 
+static inline void write_stencilbuffer(stencilbuffer_t stencilbuffer, int2 pos, uint2 size, ushort stencil) 
 {
     #ifdef DEVICE_IMAGE_ENABLED
     {
-        write_imageui(colorbuffer, pos, stencil);
+        write_imageui(stencilbuffer, pos, stencil);
     }
     #else
     {

@@ -740,7 +740,7 @@ static void orch_write_vertex_attribute_data(
 static void orch_write_fragment_texture_data(
     orch_handler_t* orch,
     size_t framebuffer_id,
-    gl_texture_data_t texture_data[DEVICE_TEXTURE_UNITS]
+    texture_data_t texture_data[DEVICE_TEXTURE_UNITS]
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
     

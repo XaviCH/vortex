@@ -26,7 +26,7 @@
 //---------------------------
 
 #define CASE_TEXTURE2D(color, sampler, coord) \
-    case sampler: color = texture2D(gl_texture_datas[sampler], gl_texture_unit_##sampler, coord); break;
+    case sampler: color = texture2D(TEXTURE_UNIT_ARG(gl_texture_unit_##sampler), gl_texture_datas[sampler], coord); break;
 
 #define TEXTURE2D(sampler, coord) ({ \
     float4 color; \
@@ -493,7 +493,7 @@ typedef struct {
 #ifndef FS_KERNEL_PARAMS
 #define FS_KERNEL_PARAMS \
     T_REPEAT(8, ro_texture2d_t gl_texture_unit), \
-    global const gl_texture_data_t* gl_texture_datas,
+    global const texture_data_t* gl_texture_datas,
 #endif // FS_KERNEL_PARAMS
 
 //------------------------------------

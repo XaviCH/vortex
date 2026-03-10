@@ -749,12 +749,12 @@ void device_init_context(
         cl_image_desc image_desc;
         cl_image_format image_format;
         
-        image_format = {
+        image_format = (cl_image_format) {
             .image_channel_order = CL_RGBA,
             .image_channel_data_type = CL_UNSIGNED_INT32,
         };
 
-        image_desc = {
+        image_desc = (cl_image_desc) {
             .image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER,
             .image_row_pitch = 0,
             .image_width = triangle_header_size / sizeof(cl_uint4),
@@ -763,7 +763,7 @@ void device_init_context(
         
         CL_ASSIGN_CHECK(context->t_tri_header, clCreateImage(device->context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, &error));
 
-        image_desc = {
+        image_desc = (cl_image_desc) {
             .image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER,
             .image_width = triangle_data_size / sizeof(cl_uint4),
             .image_row_pitch = 0,
@@ -772,11 +772,11 @@ void device_init_context(
 
         CL_ASSIGN_CHECK(context->t_tri_data, clCreateImage(device->context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, &error));
 
-        image_format = {
+        image_format = (cl_image_format) {
             .image_channel_order = CL_RGBA,
             .image_channel_data_type = CL_FLOAT,
         };
-        image_desc = {
+        image_desc = (cl_image_desc) {
             .image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER,
             .image_width = vertex_buffer_size / sizeof(cl_float4),
             .image_row_pitch = 0,
@@ -826,7 +826,7 @@ void device_init_context(
     // Fragment context objects
     CL_ASSIGN_CHECK(context->raster_command_queue, clCreateCommandQueue(device->context, device->device_id, 0, &error));
 
-    __device_init_mem(context->device, &context->fragment_texture_datas_mem, CL_MEM_READ_ONLY, sizeof(gl_texture_data_t[DEVICE_TEXTURE_UNITS]), NULL);
+    __device_init_mem(context->device, &context->fragment_texture_datas_mem, CL_MEM_READ_ONLY, sizeof(texture_data_t[DEVICE_TEXTURE_UNITS]), NULL);
 
     __device_init_mem(context->device, &context->fragment_uniform_mem, CL_MEM_READ_ONLY, sizeof(cl_uchar[TRIANGLE_PRIMITIVE_CONFIGS][DEVICE_UNIFORM_CAPACITY]), NULL);
 
@@ -2114,7 +2114,7 @@ static void device_copy_context_last_state(device_context_t* dst, device_context
         &dst->fragment_texture_datas_mem,
         0,
         0,
-        sizeof(gl_texture_data_t[DEVICE_TEXTURE_UNITS])
+        sizeof(texture_data_t[DEVICE_TEXTURE_UNITS])
     );
 }
 
@@ -2198,9 +2198,9 @@ static void device_write_rop_config(
 // TODO: textures are not implemented for vertex
 static void device_write_fragment_texture_datas(
     device_context_t* context, 
-    const gl_texture_data_t texture_datas[DEVICE_TEXTURE_UNITS]
+    const texture_data_t texture_datas[DEVICE_TEXTURE_UNITS]
 ) {
-    size_t size = sizeof(gl_texture_data_t[DEVICE_TEXTURE_UNITS]); 
+    size_t size = sizeof(texture_data_t[DEVICE_TEXTURE_UNITS]); 
 
     __device_write_mem(
         &context->fragment_texture_datas_mem, 

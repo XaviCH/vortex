@@ -86,4 +86,11 @@
 #define HOST_RENDERBUFFERS_SIZE 8
 #define HOST_TEXTURES_SIZE 8
 
+// -----
+// OBJECTS CONFIG
+// -----
+#define DEVICE_MAX_TEXTURE_SIZE_LOG2 11 // (2048 x 2048) max size  
+// TODO: Add mipmapping support
+#define DEVICE_MIPMAP_LEVELS
+
 #endif
