@@ -21,11 +21,13 @@ libGLSC2.so: backend frontend
 
 # $(MAKE) -C ./compiler clean
 clean:
+	$(MAKE) -C ./compiler clean
 	$(MAKE) -C ./backend clean
 	$(MAKE) -C ./frontend clean
 
 # $(MAKE) -C ./compiler clean-all
 clean-all: clean
+	$(MAKE) -C ./compiler clean-all
 	$(MAKE) -C ./backend clean-all
 	$(MAKE) -C ./frontend clean-all
 	rm -f *.so

@@ -1,5 +1,5 @@
 #ifndef NVIDIA_SM_VERSION
-#define NVIDIA_SM_VERSION 61
+#error NVIDIA_SM_VERSION required to use this extension.
 #endif
 
 inline uint sub_group_any(int p) { 

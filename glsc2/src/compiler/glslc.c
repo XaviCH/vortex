@@ -127,7 +127,7 @@ int main(int argc, char** argv) {
     cl_program program = clCreateProgramWithSource(context, 2, (const char**) file, file_size, &error);
     CHECK(error);
 
-    const char default_options[] = "-DSHADER -D__COMPILER_RELATIVE_PATH__ -cl-kernel-arg-info -I" SHADERS_PATH " -I" SRC_PATH;
+    const char default_options[] = "-DSHADER -D__COMPILER_RELATIVE_PATH__ -cl-kernel-arg-info -cl-nv-verbose -I" SHADERS_PATH " -I" SRC_PATH;
 
     char *options = NULL;
     
@@ -136,22 +136,19 @@ int main(int argc, char** argv) {
 
     for(size_t flag = flags_init; flag < argc; ++flag)
     {
-        size += strlen(argv[flag++]);
+        size += strlen(argv[flag]) + 1;
     }
 
-    options = (char*) malloc(size + argc-3);
-
-    size_t offset = 0;
+    options = (char*) malloc(size);
     strcpy(options, default_options);
-    offset += size;
-    options[offset] = ' ';
 
+    size_t offset = sizeof(default_options) - 1;
+    
     for(size_t flag = flags_init; flag < argc; ++flag)
     {
-        ++offset;
+        options[offset++] = ' ';
         strcpy(options + offset, argv[flag]);
-        offset += strlen(argv[flag]);
-        options[offset] = ' ';
+        offset += strlen(argv[flag]) + 1;
     }
 
     options[offset] = '\0';

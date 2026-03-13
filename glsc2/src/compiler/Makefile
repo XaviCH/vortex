@@ -24,5 +24,5 @@ glslc: glslc.c $(HEADER_FILES)
 
 clean:
 
-clean-all:
+clean-all: clean
 	rm -f clc glslc

@@ -97,4 +97,8 @@
 // TODO: Add mipmapping support
 #define DEVICE_MIPMAP_LEVELS
 
+// NVIDIA
+#define NVIDIA_SM_VERSION 61
+
+
 #endif

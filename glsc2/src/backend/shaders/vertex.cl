@@ -40,7 +40,8 @@ GENERIC_GET_FLOAT4_FROM_X(ushort);
 static inline float4 gl_get_vertex_attribute_from_pointer(global const void* data, vertex_attribute_data_t vertex_attribute_data) 
 {
     size_t id = get_global_linear_id();
-    data += vertex_attribute_data.offset + (vertex_attribute_data.stride) * id;
+
+    data = (global const void*) ( (global const uchar*) data + vertex_attribute_data.offset + (vertex_attribute_data.stride) * id);
 
     uint type = gl_get_vertex_attribute_type(vertex_attribute_data);
     uint size = gl_get_vertex_attribute_size(vertex_attribute_data);

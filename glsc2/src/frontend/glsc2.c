@@ -613,6 +613,7 @@ GL_APICALL void GL_APIENTRY glCullFace (GLenum mode)
         case GL_FRONT:
         case GL_BACK:
         case GL_FRONT_AND_BACK:
+            ;
     }
 
     _rasterization_data.cull_face = mode;
@@ -634,6 +635,7 @@ GL_APICALL void GL_APIENTRY glDepthFunc (GLenum func)
         case GL_NOTEQUAL:
         case GL_GEQUAL:
         case GL_ALWAYS:
+            ;
     }
 
     _depth_func = func;
@@ -1242,6 +1244,7 @@ GL_APICALL void GL_APIENTRY glHint (GLenum target, GLenum mode)
     case GL_FASTEST:
     case GL_NICEST:
     case GL_DONT_CARE:
+        ;
     }
 
     _hint = mode;
@@ -1424,7 +1427,8 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
 
     switch (func)
     {
-        default: RETURN_ERROR(GL_INVALID_ENUM);
+        default: 
+            RETURN_ERROR(GL_INVALID_ENUM);
         case GL_NEVER:
         case GL_LESS:
         case GL_EQUAL:
@@ -1433,6 +1437,7 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
         case GL_NOTEQUAL:
         case GL_GEQUAL:
         case GL_ALWAYS:
+            ;
     }
 
     switch (face)
@@ -1441,6 +1446,7 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
         case GL_FRONT_AND_BACK:
             set_stencil_function(&_stencil_data.front.function, func, ref, mask);
         default:
+            ;
     }
 
     switch (face)
@@ -1449,6 +1455,7 @@ GL_APICALL void GL_APIENTRY glStencilFuncSeparate (GLenum face, GLenum func, GLi
         case GL_FRONT_AND_BACK:
             set_stencil_function(&_stencil_data.back.function, func, ref, mask);
         default:
+            ;
     }
 
     rop_config_updated = 1;
@@ -1469,6 +1476,7 @@ GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask)
         case GL_FRONT_AND_BACK:
             _masks.stencil.front = mask;
         default:
+            ;
     }
 
     switch (face)
@@ -1477,6 +1485,7 @@ GL_APICALL void GL_APIENTRY glStencilMaskSeparate (GLenum face, GLuint mask)
         case GL_FRONT_AND_BACK:
             _masks.stencil.back = mask;
         default:
+            ;
     }
 
     rop_config_updated = 1;
@@ -1506,6 +1515,7 @@ GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLen
         case GL_FRONT_AND_BACK:
             set_stencil_operation(&_stencil_data.front.operation, sfail, dpfail, dppass);
         default:
+        ;
     }
 
     switch (face)
@@ -1514,6 +1524,7 @@ GL_APICALL void GL_APIENTRY glStencilOpSeparate (GLenum face, GLenum sfail, GLen
         case GL_FRONT_AND_BACK:
             set_stencil_operation(&_stencil_data.back.operation, sfail, dpfail, dppass);
         default:
+        ;
     }
 
     rop_config_updated = 1;
@@ -2021,6 +2032,7 @@ static render_mode_t get_render_mode(GLenum mode)
             case GL_FRONT_AND_BACK:
                 render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_FRONT;
             default:
+                ;
         }
 
         switch (_rasterization_data.cull_face)
@@ -2029,6 +2041,7 @@ static render_mode_t get_render_mode(GLenum mode)
             case GL_FRONT_AND_BACK:
                 render_mode_flags.flags |= RENDER_MODE_FLAG_ENABLE_CULL_BACK;
             default:
+                ;
         }
     }
     
@@ -2041,6 +2054,7 @@ static render_mode_t get_render_mode(GLenum mode)
             render_mode_flags.flags |= RENDER_MODE_FLAG_TRIANGLE_STRIP;
             break;
         default:
+            ;
     }
 
     return render_mode_flags;
@@ -2139,6 +2153,7 @@ static GLboolean is_valid_stencil_operation(GLenum operation)
         case GL_INVERT:
         case GL_INCR_WRAP:
         case GL_DECR_WRAP:
+            ;
     }
 
     return GL_TRUE;
@@ -2174,7 +2189,7 @@ static uint32_t gl_tex_filter_to_tex_filter(GLint param)
         default:
         case GL_NEAREST:
             return TEXTURE_FILTER_NEAREST;
-            case GL_LINEAR:
+        case GL_LINEAR:
             return TEXTURE_FILTER_LINEAR;
         case GL_NEAREST_MIPMAP_NEAREST:
             return TEXTURE_FILTER_NEAREST_MIPMAP_NEAREST;
@@ -2195,33 +2210,40 @@ static GLboolean is_valid_tex_parameter(GLenum pname, GLint param)
         case GL_TEXTURE_WRAP_T:
             switch (param)
             {
-                default: return GL_FALSE;
+                default: 
+                    return GL_FALSE;
                 case GL_CLAMP_TO_EDGE:
                 case GL_REPEAT:
                 case GL_MIRRORED_REPEAT:
+                    ;
             }
             break;
         case GL_TEXTURE_MAG_FILTER:
             switch (param)
             {
-                default: return GL_FALSE;
+                default: 
+                    return GL_FALSE;
                 case GL_NEAREST:
                 case GL_LINEAR:
+                    ;
             }
             break;
         case GL_TEXTURE_MIN_FILTER:
             switch (param)
             {
-                default: return GL_FALSE;
+                default: 
+                    return GL_FALSE;
                 case GL_NEAREST:
                 case GL_LINEAR:
                 case GL_NEAREST_MIPMAP_NEAREST:
                 case GL_NEAREST_MIPMAP_LINEAR:
                 case GL_LINEAR_MIPMAP_NEAREST:
                 case GL_LINEAR_MIPMAP_LINEAR:
+                    ;
             }
             break;
-        default: return GL_FALSE;
+        default: 
+            return GL_FALSE;
     }
 
     return GL_TRUE;
