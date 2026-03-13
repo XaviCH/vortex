@@ -11,24 +11,16 @@
 #include "glsc2/src/constants.device.h"
 #endif
 
-float4 mul(const float16 mat, const float4 vec) {
-    
-    float4 result = 0;
+float4 mul(const float16 mat, const float4 vec)
+{
+    float4 result;
 
-    for(int i=0; i<16; ++i) {
-        result[i%4] += mat[i]*vec[i/4]; 
-    }
+    result  = mat.s0123 * vec.s0;
+    result += mat.s4567 * vec.s1;
+    result += mat.s89ab * vec.s2;
+    result += mat.scdef * vec.s3;
 
     return result;
-    /*
-    float4 *p = (float4*) &mat;
-    return (float4){
-        dot(p[0], vec),
-        dot(p[1], vec),
-        dot(p[2], vec),
-        dot(p[3], vec),
-    };
-    */
 }
 
 static inline float mod(float x, float y) {

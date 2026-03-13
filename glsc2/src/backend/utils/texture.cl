@@ -193,7 +193,7 @@ static inline float4 read_2d_bufferf(
     // generate mipmapping objects
     uint                lod_offset  = get_lod_offset(size, lod) * csize;
     texture_size_t      lod_size    = get_lod_size(size, lod);
-    global const void*  lod_buffer  = buffer + lod_offset;
+    global const void*  lod_buffer  = (global const void*) ((global const uchar*) buffer + lod_offset);
     float2              lod_ucoord  = get_lod_ucoordf(ncoord, size, lod);
     
 

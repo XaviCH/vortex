@@ -24,7 +24,7 @@ CLC = $(GLSC_PATH)/src/compiler/clc
 all: $(KERNELS_O_C)
 
 clean:
-	rm *.o
+	rm -f *.o
 
 clean-all: clean
-	rm  *.o.c
+	rm  -f *.o.c

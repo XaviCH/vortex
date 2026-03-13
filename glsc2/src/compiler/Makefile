@@ -12,9 +12,17 @@ HEADER_FILES = $(wildcard *.h)
 INCLUDES += -I$(SRC_PATH) -I$(INCLUDE_PATH)
 LIBS += -lOpenCL
 
+.PHONY: all clean clean-all
+
+all: clc glslc
 
 clc: clc.c $(HEADER_FILES)
 	$(CC) -o $@ $< $(INCLUDES) $(LIBS)
 
 glslc: glslc.c $(HEADER_FILES)
 	$(CC) -o $@ $< $(INCLUDES) $(LIBS) -DINSTALL_PATH="$(INSTALL_PATH)"
+
+clean:
+
+clean-all:
+	rm -f clc glslc

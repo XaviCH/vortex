@@ -1,3 +1,7 @@
+#ifndef NVIDIA_SM_VERSION
+#define NVIDIA_SM_VERSION 61
+#endif
+
 inline uint sub_group_any(int p) { 
     uint r; 
     asm volatile(
@@ -90,18 +94,39 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min (uint x) 
     return r;
 }
 
-inline uint __attribute__((overloadable)) sub_group_reduce_max (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_reduce_max (uint x) {
     uint r;
-    asm volatile(
-        "redux.sync.max.u32 %0, %1, 0xffffffff;"
-        : "=r"(r) : "r"(x));
+
+    #if NVIDIA_SM_VERSION >= 80
+    {
+        asm volatile(
+            "redux.sync.max.u32 %0, %1, 0xffffffff;"
+            : "=r"(r) : "r"(x));
+    }
+    #else
+    {
+        r = sub_group_scan_inclusive_max(x);
+        r = sub_group_broadcast(r,31);
+    }
+    #endif
+    
     return r;
 }
 
-inline uint __attribute__((overloadable)) sub_group_reduce_min (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_reduce_min (uint x) {
     uint r;
-    asm volatile(
-        "redux.sync.min.u32 %0, %1, 0xffffffff;"
-        : "=r"(r) : "r"(x));
+    #if NVIDIA_SM_VERSION >= 80
+    {
+        asm volatile(
+            "redux.sync.min.u32 %0, %1, 0xffffffff;"
+            : "=r"(r) : "r"(x));
+    }
+    #else
+    {
+        r = sub_group_scan_inclusive_min(x);
+        r = sub_group_broadcast(r,31);
+    }
+    #endif
+
     return r;
 }

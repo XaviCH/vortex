@@ -10,7 +10,8 @@ PIPELINE_PATH = $(SRC_PATH)/backend/pipeline
 
 HEADER_FILES = $(wildcard *.h) $(wildcard $(SRC_PATH)/*.h)
 
-OBJECT_FILES = $(wildcard *.o)
+C_FILES = $(wildcard *.c)
+OBJECT_FILES = $(C_FILES:.c=.o)
 
 KERNEL_OBJ_FILES = $(wildcard $(PIPELINE_PATH)/*.o.c)
 
@@ -28,7 +29,7 @@ backend:
 all: $(OBJECT_FILES)
 
 clean:
-	rm *.o
+	rm -f *.o
 
 clean-all: clean
-	rm *.so
+	rm -f *.so
