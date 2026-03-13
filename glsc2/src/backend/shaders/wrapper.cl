@@ -26,7 +26,7 @@
 //---------------------------
 
 #define CASE_TEXTURE2D(color, sampler, coord) \
-    case sampler: color = texture2D(gl_texture_datas[sampler], gl_texture_unit_##sampler, coord); break;
+    case sampler: color = texture2D(TEXTURE_UNIT_ARG(gl_texture_unit_##sampler), gl_texture_datas[sampler], coord); break;
 
 #define TEXTURE2D(sampler, coord) ({ \
     float4 color; \
@@ -467,16 +467,29 @@ typedef struct {
     SET_VARYINGS \
     SET_UNIFORMS
 
-#define T_REPEAT_1(_S) _S##_0
-#define T_REPEAT_2(_S) T_REPEAT_1(_S), _S##_1 
-#define T_REPEAT_3(_S) T_REPEAT_2(_S), _S##_2 
-#define T_REPEAT_4(_S) T_REPEAT_3(_S), _S##_3 
-#define T_REPEAT_5(_S) T_REPEAT_4(_S), _S##_4 
-#define T_REPEAT_6(_S) T_REPEAT_5(_S), _S##_5 
-#define T_REPEAT_7(_S) T_REPEAT_6(_S), _S##_6 
-#define T_REPEAT_8(_S) T_REPEAT_7(_S), _S##_7 
 
-#define T_REPEAT(_N, _S) T_REPEAT_##_N(_S)
+
+#define TA_REPEAT_1(_S) TEXTURE_UNIT_ARG(_S##_0)
+#define TA_REPEAT_2(_S) TA_REPEAT_1(_S), TEXTURE_UNIT_ARG(_S##_1) 
+#define TA_REPEAT_3(_S) TA_REPEAT_2(_S), TEXTURE_UNIT_ARG(_S##_2) 
+#define TA_REPEAT_4(_S) TA_REPEAT_3(_S), TEXTURE_UNIT_ARG(_S##_3) 
+#define TA_REPEAT_5(_S) TA_REPEAT_4(_S), TEXTURE_UNIT_ARG(_S##_4) 
+#define TA_REPEAT_6(_S) TA_REPEAT_5(_S), TEXTURE_UNIT_ARG(_S##_5) 
+#define TA_REPEAT_7(_S) TA_REPEAT_6(_S), TEXTURE_UNIT_ARG(_S##_6) 
+#define TA_REPEAT_8(_S) TA_REPEAT_7(_S), TEXTURE_UNIT_ARG(_S##_7) 
+
+#define TA_REPEAT(_N, _S) TA_REPEAT_##_N(_S)
+
+#define TP_REPEAT_1(_S) TEXTURE_UNIT_PARAM(_S##_0)
+#define TP_REPEAT_2(_S) TP_REPEAT_1(_S), TEXTURE_UNIT_PARAM(_S##_1) 
+#define TP_REPEAT_3(_S) TP_REPEAT_2(_S), TEXTURE_UNIT_PARAM(_S##_2) 
+#define TP_REPEAT_4(_S) TP_REPEAT_3(_S), TEXTURE_UNIT_PARAM(_S##_3) 
+#define TP_REPEAT_5(_S) TP_REPEAT_4(_S), TEXTURE_UNIT_PARAM(_S##_4) 
+#define TP_REPEAT_6(_S) TP_REPEAT_5(_S), TEXTURE_UNIT_PARAM(_S##_5) 
+#define TP_REPEAT_7(_S) TP_REPEAT_6(_S), TEXTURE_UNIT_PARAM(_S##_6) 
+#define TP_REPEAT_8(_S) TP_REPEAT_7(_S), TEXTURE_UNIT_PARAM(_S##_7) 
+
+#define TP_REPEAT(_N, _S) TP_REPEAT_##_N(_S)
 
 // TODO: compiler aware of DEVICE_TEXTURE_UNITS
 
@@ -486,14 +499,14 @@ typedef struct {
 
 #ifndef FS_KERNEL_ARGS
 #define FS_KERNEL_ARGS \
-    T_REPEAT(8, gl_texture_unit), \
+    TA_REPEAT(8, gl_texture_unit), \
     gl_texture_datas,
 #endif // FS_KERNEL_ARGS
 
 #ifndef FS_KERNEL_PARAMS
 #define FS_KERNEL_PARAMS \
-    T_REPEAT(8, ro_texture2d_t gl_texture_unit), \
-    global const gl_texture_data_t* gl_texture_datas,
+    TP_REPEAT(8, gl_texture_unit), \
+    global const texture_data_t* gl_texture_datas,
 #endif // FS_KERNEL_PARAMS
 
 //------------------------------------

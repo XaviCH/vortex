@@ -1,4 +1,4 @@
-inline uint __attribute__((overloadable)) sub_group_non_uniform_broadcast (uint value, uint index) 
+static inline uint __attribute__((overloadable)) sub_group_non_uniform_broadcast (uint value, uint index) 
 {
     uint r;
     asm volatile(
@@ -9,7 +9,7 @@ inline uint __attribute__((overloadable)) sub_group_non_uniform_broadcast (uint 
     return r;
 }
 
-inline uint __attribute__((overloadable)) sub_group_broadcast_first (uint value) 
+static inline uint __attribute__((overloadable)) sub_group_broadcast_first (uint value) 
 {
     uint r;
     asm volatile(
@@ -23,7 +23,7 @@ inline uint __attribute__((overloadable)) sub_group_broadcast_first (uint value)
     return r;
 }
 
-inline uint4 sub_group_ballot(int predicate) 
+static inline uint4 sub_group_ballot(int predicate) 
 {
     uint r; 
     asm volatile(

@@ -176,7 +176,7 @@ kernel void readnpixels(
   const uchar swap_rb_channels,
   const uchar swap_y_axis
 ) {
-  uint2 pos   = {get_global_id(0), get_global_id(1)};
+  int2 pos   = {get_global_id(0), get_global_id(1)};
   uint2 size  = {get_global_size(0), get_global_size(1)};
 
   uint color = read_colorbuffer(colorbuffer, pos, size, colorbuffer_mode);
@@ -189,7 +189,7 @@ kernel void readnpixels(
     color = (color & 0xFF00FF00u) | blue_color | (red_color << 16);
   }
 
-  uint2 out_pos = pos;
+  int2 out_pos = pos;
   if (swap_y_axis)
   {
     out_pos.y = size.y - out_pos.y; 

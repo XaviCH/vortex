@@ -168,7 +168,7 @@ static clear_state_t _clear_state;
 
 // Device State
 static orch_handler_t __orch;
-static const orch_handler_t* orch = &__orch;
+static orch_handler_t* const orch = &__orch;
 
 static size_t sizeof_gl_type(GLenum type);
 
@@ -707,7 +707,7 @@ static void write_gl_state_to_orch(GLenum draw_mode)
 
     if (texture_unit_updated) 
     {
-        gl_texture_data_t texture_datas[DEVICE_TEXTURE_UNITS];
+        texture_data_t texture_datas[DEVICE_TEXTURE_UNITS];
 
         for (size_t i = 0; i < DEVICE_TEXTURE_UNITS; ++i)
         {
@@ -715,40 +715,37 @@ static void write_gl_state_to_orch(GLenum draw_mode)
 
             gl_texture_t *texture = &_textures[texture_unit_bindings[i]-1];
 
-            gl_texture_data_t *texture_data = &texture_datas[i];
-            sampler2D_t *sampler2D = &texture_data->sampler2D;
+            texture_data_t *texture_data = &texture_datas[i];
 
-            set_sampler2D_internalformat(
-                sampler2D, 
+            set_texture_data_mode(
+                texture_data, 
                 get_texture_mode_from_internalformat(texture->internalformat)
             );
 
-            set_sampler2D_mag_filter(
-                sampler2D,
+            set_texture_data_mag_filter(
+                texture_data,
                 gl_tex_filter_to_tex_filter(texture->wraps.mag_filter)
             );
 
-            set_sampler2D_min_filter(
-                sampler2D, 
+            set_texture_data_min_filter(
+                texture_data, 
                 gl_tex_filter_to_tex_filter(texture->wraps.min_filter)
             );
 
-            set_sampler2D_wrap_s(
-                sampler2D, 
+            set_texture_data_wrap_s(
+                texture_data, 
                 gl_tex_wrap_to_tex_wrap(texture->wraps.s)
             );
 
-            set_sampler2D_wrap_t(
-                sampler2D, 
+            set_texture_data_wrap_t(
+                texture_data, 
                 gl_tex_wrap_to_tex_wrap(texture->wraps.t)
             );
 
-            #ifndef DEVICE_IMAGE_ENABLED
-            {
-                texture_data->height = texture->height;
-                texture_data->width = texture->width;
-            }
-            #endif
+            set_texture_data_size(
+                texture_data,
+                (texture_size_t){texture->width, texture->height}
+            );
         }
 
         orch_write_fragment_texture_data(orch, framebuffer->id, texture_datas);
@@ -822,7 +819,7 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
 
     write_gl_state_to_orch(mode);
 
-    orch_draw_range(orch, framebuffer->id, program->program_id, render_mode, start, end, count, indices);
+    orch_draw_range(orch, framebuffer->id, program->program_id, render_mode, start, end, count, (const uint16_t*) indices);
 }
 
 GL_APICALL void GL_APIENTRY glEnable (GLenum cap) 
@@ -1169,12 +1166,33 @@ GL_APICALL const GLubyte *GL_APIENTRY glGetString (GLenum name) {
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glGetTexParameterfv (GLenum target, GLenum pname, GLfloat *params) {
+GL_APICALL void GL_APIENTRY glGetTexParameterfv (GLenum target, GLenum pname, GLfloat *params) 
+{
+    if (target != GL_TEXTURE_2D) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (_texture_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    gl_texture_t* texture = &_textures[_texture_binding-1];
+
     NOT_IMPLEMENTED;
 }
 
-GL_APICALL void GL_APIENTRY glGetTexParameteriv (GLenum target, GLenum pname, GLint *params) {
-    NOT_IMPLEMENTED;
+GL_APICALL void GL_APIENTRY glGetTexParameteriv (GLenum target, GLenum pname, GLint *params) 
+{
+    if (target != GL_TEXTURE_2D) RETURN_ERROR(GL_INVALID_ENUM);
+
+    if (_texture_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
+
+    gl_texture_t* texture = &_textures[_texture_binding-1];
+
+    switch (target)
+    {
+    case GL_TEXTURE_IMMUTABLE_FORMAT:
+        *params = texture->height && texture->width ? GL_TRUE : GL_FALSE;
+        break;
+    default:
+        NOT_IMPLEMENTED;
+    }
 }
 
 GL_APICALL void GL_APIENTRY glGetnUniformfv (GLuint program, GLint location, GLsizei bufSize, GLfloat *params) {

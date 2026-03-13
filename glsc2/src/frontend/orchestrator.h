@@ -1,4 +1,7 @@
-#include <frontend/device.orch.h>
+#ifndef FRONTEND_ORCHESTRATOR_H
+#define FRONTEND_ORCHESTRATOR_H
+
+#include <frontend/device.h>
 
 typedef struct {
     size_t shader_id;
@@ -325,7 +328,7 @@ static device_context_t* __orch_attach_new_context(
 
     device_context_t* context = __orch_get_context_from_id(orch, context_id);
 
-    if (prev_context != NULL) {
+    if (prev_context != NULL && context != NULL) { // context nullability is checked so compiler does no complain
 
         if (context != prev_context) 
         {
@@ -402,13 +405,13 @@ static void __orch_draw_vertices(
 
         if (flush_context_reason == TRIANGLE_BUFFER_CAPACITY && num_triangles > DEVICE_MAX_NUMBER_TRIANGLES)
         {
-            printf("ERROR: Do not supported triangle size draw call. num triangles => %ld > %d\n", num_triangles, DEVICE_MAX_NUMBER_TRIANGLES);
+            printf("ERROR: Do not supported triangle size draw call. num triangles => %ld > %ld\n", num_triangles, (size_t) DEVICE_MAX_NUMBER_TRIANGLES);
             exit(1);
         }
 
         if (flush_context_reason == VERTEX_BUFFER_CAPACITY && num_vertices > DEVICE_VERTICES_SIZE)
         {
-            printf("ERROR: Do not supported vertices size draw call. num vertices => %ld > %d\n", num_vertices, DEVICE_VERTICES_SIZE);
+            printf("ERROR: Do not supported vertices size draw call. num vertices => %ld > %ld\n", num_vertices, (size_t) DEVICE_VERTICES_SIZE);
             exit(1);
         }
     }
@@ -574,7 +577,7 @@ static size_t orch_create_2d_texture(orch_handler_t* orch, size_t width, size_t 
     return orch_create_image2d(orch, width, height, mode);
 }
 
-static size_t orch_create_shader_from_binary(orch_handler_t* orch, size_t lenght, void* binary)
+static size_t orch_create_shader_from_binary(orch_handler_t* orch, size_t lenght, const void* binary)
 {
     return device_create_program_from_binary(&orch->device, lenght, (const unsigned char*) binary);
 }
@@ -682,7 +685,7 @@ static void orch_write_buffer(
     size_t buffer_id,
     size_t offset,
     size_t size, 
-    void* data
+    const void* data
 ) {
     device_write_buffer(&orch->device, buffer_id, offset, size, data);
 }
@@ -695,7 +698,7 @@ static void orch_write_2d_texture(
     size_t width, 
     size_t height, 
     uint32_t mode,
-    void* data
+    const void* data
 ) {
     orch_rw_image2d_handler_t* image2d = &orch->rw_image2ds[texture_id];
 
@@ -737,7 +740,7 @@ static void orch_write_vertex_attribute_data(
 static void orch_write_fragment_texture_data(
     orch_handler_t* orch,
     size_t framebuffer_id,
-    gl_texture_data_t texture_data[DEVICE_TEXTURE_UNITS]
+    texture_data_t texture_data[DEVICE_TEXTURE_UNITS]
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
     
@@ -792,7 +795,7 @@ static void orch_draw_range(
     uint32_t init,
     uint32_t end, 
     uint32_t count, 
-    uint16_t* ptr
+    const uint16_t* ptr
 ) {
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
@@ -892,3 +895,5 @@ static void orch_destroy(orch_handler_t* orch)
 {
     // device_destroy(orch->device);
 }
+
+#endif // FRONTEND_ORCHESTRATOR_H

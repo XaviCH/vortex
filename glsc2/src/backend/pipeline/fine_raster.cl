@@ -28,27 +28,6 @@
 // Framebuffer operations
 //-----------------------
 
-inline uint uint4_to_int(const uint4 data) {
-    return data.x | (data.y << 8) | (data.z << 16) | (data.w << 24);
-}
-
-inline uint4 uint_to_uint4(const int data, int mode) {
-    switch (mode) {
-        case TEX_R8:
-            return (uint4) { data, 0, 0, 1};
-        case TEX_RG8:
-            return (uint4) { data, data >> 8, 0 ,1};
-        case TEX_RGB8:
-            return (uint4) { data, data >> 8, data >> 16, 1};
-        case TEX_RGBA8:
-        case TEX_RGBA4:
-        case TEX_RGB5_A1:
-        case TEX_RGB565:
-        default:
-            return (uint4) { data & 0xFF, data >> 8 & 0xFF, data >> 16 & 0xFF, data >> 24 & 0xFF};
-    }
-}
-
 inline uint read_tex_from_buffer(global const void* g_color_buffer, size_t position, uint tex_mode) {
     switch(tex_mode) {
         default:
@@ -164,6 +143,10 @@ inline bool run_fragment_shader(
 ) {
     // Fetch primitive data.
     uint4 t1, t2, t3;
+    
+    // TODO: check this
+    // if (data_idx < 0) return false; // invalid triangle, can happen when tile_seg_count is larger than actual segments assigned to the tile
+
     #ifdef DEVICE_IMAGE_ENABLED
     {
         t1 = read_imageui(t_tri_data, data_idx * 4 + 1); // wx, wy, wb, ux
@@ -177,7 +160,7 @@ inline bool run_fragment_shader(
         t3 = ((global const uint4*) g_tri_data)[data_idx * 4 + 3];
     }
     #endif
-
+    
     // Pixel varying data.
     int3 wpleq = (int3){t1.x, t1.y, t1.z};
     int3 upleq = (int3){t1.w, t2.x, t2.y};
@@ -467,14 +450,14 @@ inline void execute_ROP_single_sample(
 #define FS_KERNEL_PARAMS
 #endif // FS_KERNEL_PARAMS
 
-static inline bool is_surface_out_viewport(uint2 surf, uint2 viewport) 
+static inline bool is_surface_out_viewport(int2 surf, uint2 viewport) 
 {
     return surf.x >= viewport.x || surf.y >= viewport.y;
 }
 
-static inline uint2 get_2d_surface_from_tile(uint2 tile, uint pixel)
+static inline int2 get_2d_surface_from_tile(int2 tile, uint pixel)
 {
-    return (tile << CR_TILE_LOG2) + (uint2){
+    return (tile << CR_TILE_LOG2) + (int2){
         (pixel & (CR_TILE_SIZE - 1)),
         (pixel >> CR_TILE_LOG2)
     };
@@ -486,7 +469,7 @@ static inline void local_1dim_load_and_clean_framebuffer_to_local_mem(
     gl_framebuffer_data_t framebuffer_data,
     const ulong  clear_write_values, const enabled_data_t clear_enabled_data,
     const uint   colorbuffer_mode,
-    uint2 tile, uint2 viewport
+    int2 tile, uint2 viewport
 ) {
     bool load_colorbuffer, load_depthbuffer, load_stencilbuffer;
 
@@ -506,7 +489,7 @@ static inline void local_1dim_load_and_clean_framebuffer_to_local_mem(
     #pragma unroll
     for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
         
-        uint2 surf = get_2d_surface_from_tile(tile, pixel);
+        int2 surf = get_2d_surface_from_tile(tile, pixel);
 
         if (is_surface_out_viewport(surf, viewport)) continue;
         
@@ -551,7 +534,7 @@ static inline void local_1dim_store_local_mem_to_framebuffer(
     local uint* restrict l1_color, local ushort* restrict l1_depth, local uchar* restrict l1_stencil,
     const gl_framebuffer_data_t framebuffer_data,
     const uint colorbuffer_mode,
-    const uint2 tile, const uint2 viewport
+    const int2 tile, const uint2 viewport
 )
 {
     bool store_colorbuffer, store_depthbuffer, store_stencilbuffer;
@@ -565,7 +548,7 @@ static inline void local_1dim_store_local_mem_to_framebuffer(
     #pragma unroll
     for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
         
-        uint2 surf = get_2d_surface_from_tile(tile, pixel);
+        int2 surf = get_2d_surface_from_tile(tile, pixel);
 
         if (is_surface_out_viewport(surf, viewport)) continue;
 
@@ -773,28 +756,8 @@ void fine_raster_single_sample(
             c_framebuffer_data,
             c_clear_write_values, (enabled_data_t) {c_clear_enabled_data},
             c_color_buffer_mode,
-            (uint2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
+            (int2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
         );
-        
-        /*
-        uint2 tile = (uint2) {tile_x, tile_y};
-            uint2 viewport = (uint2) {c_viewport_width, c_viewport_height};
-            bool load_colorbuffer =
-        is_framebuffer_data_colorbuffer_enabled(c_framebuffer_data) &&
-        !is_enabled_data_all_color_channels((enabled_data_t){c_clear_enabled_data});
-
-            
-            for (uint pixel=get_local_id(0); pixel < CR_TILE_SQR; pixel+=get_local_size(0)) {
-                uint2 surf = get_2d_surface_from_tile(tile, pixel);
-
-                if (is_surface_out_viewport(surf, viewport)) continue;
-
-                if (g_tile_seg_count[segment])
-                    w_tile_color[pixel] = 0xFFFF00FF;
-                else
-                    w_tile_color[pixel] = 0xFF00FFFF;
-            }
-        */
         
 
         // bound tile z
@@ -802,6 +765,7 @@ void fine_raster_single_sample(
         bool tile_z_upd_max, tile_z_upd_min;
         init_tile_z_max(&tile_z_max, &tile_z_upd_max, w_tile_depth);
         init_tile_z_min(&tile_z_min, &tile_z_upd_min, w_tile_depth);
+
         // process fragments in tile
         for(;;)
         {
@@ -975,32 +939,6 @@ void fine_raster_single_sample(
             // TODO: Optimize, ordering on primitive is not always required.
             // loop while multiple threads access to same pixel and run ROP
             
-            /*
-            clear_sub_group_mask(&sg_temp->tile[pixel_in_tile]);
-            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-            if (active_rop_lane) 
-                atomic_or_sub_group_mask(&sg_temp->tile[pixel_in_tile], thread_bit);
-            
-            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-            bool enqueued_fragments;
-            do {
-
-                bool is_my_turn = !any_sub_group_mask(and_sub_group_mask(sg_temp->tile[pixel_in_tile], lt_mask));
-                if (is_my_turn) {
-                    execute_ROP_single_sample(
-                        &fragment_shader_output, depth,
-                        &w_tile_color[pixel_in_tile], &w_tile_depth[pixel_in_tile], &w_tile_stencil[pixel_in_tile],
-                        rop_config 
-                    );
-
-                    sg_temp->tile[pixel_in_tile] = and_sub_group_mask(sg_temp->tile[pixel_in_tile], not_sub_group_mask(thread_bit));
-                    active_rop_lane = false;
-                }
-                local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-
-                enqueued_fragments = any_sub_group_mask(local_1dim_ballot(active_rop_lane, &sg_temp->mask));
-            } while(enqueued_fragments);
-            */
             
             local_1dim_execute_rop(
                 w_tile_color, w_tile_depth, w_tile_stencil, sg_temp,
@@ -1019,7 +957,7 @@ void fine_raster_single_sample(
             (local uint*) w_tile_color, (local ushort*) w_tile_depth, (local uchar*) w_tile_stencil,
             c_framebuffer_data,
             c_color_buffer_mode,
-            (uint2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
+            (int2) {tile_x, tile_y}, (uint2) {c_viewport_width, c_viewport_height}
         );
     }
 

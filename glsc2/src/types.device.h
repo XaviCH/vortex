@@ -3,7 +3,6 @@
 
 #define CL_TARGET_OPENCL_VERSION 120
 
-
 #ifdef __COMPILER_RELATIVE_PATH__
 #include <constants.device.h>
 #else
@@ -12,15 +11,23 @@
 
 // defining primitives for c and cl context
 #ifdef __OPENCL_VERSION__
-typedef uint cl_uint;
-typedef ushort cl_ushort;
-typedef short cl_short;
-typedef bool cl_bool;
-typedef uint2 cl_uint2;
-typedef uint4 cl_uint4;
-typedef uchar cl_uchar;
+typedef bool    cl_bool;
+typedef uchar   cl_uchar;
+typedef uchar2   cl_uchar2;
+typedef short   cl_short;
+typedef ushort  cl_ushort;
+typedef ushort2  cl_ushort2;
+typedef int     cl_int;
+typedef uint    cl_uint;
+typedef uint2   cl_uint2;
+typedef uint4   cl_uint4;
+typedef ulong   cl_ulong;
+typedef ulong2   cl_ulong2;
 #else
 #include <CL/opencl.h>
+
+// float mod(float x, float y) { return x - y * floor(x/y); }
+// static float fmod(float a, float b) { return (float)((int)a % (int)b); }
 #endif
 
 #ifdef DEVICE_SUB_GROUP_ENABLED
@@ -277,52 +284,6 @@ typedef struct
 } render_mode_t;
 */
 
-typedef struct
-{
-    cl_ushort misc;
-    /*
-    unsigned int internalformat : 4;
-    unsigned int wrap_s : 2;
-    unsigned int wrap_t : 2;
-    unsigned int min_filter : 3;
-    unsigned int mag_filter : 1;
-    */
-} sampler2D_t;
-
-unsigned int get_sampler2D_internalformat(sampler2D_t sampler2D) { return (sampler2D.misc >> 0) & 0xFu; }
-unsigned int get_sampler2D_wrap_s(sampler2D_t sampler2D) { return (sampler2D.misc >> 4) & 0x3u; }
-unsigned int get_sampler2D_wrap_t(sampler2D_t sampler2D) { return (sampler2D.misc >> 6) & 0x3u; }
-unsigned int get_sampler2D_min_filter(sampler2D_t sampler2D) { return (sampler2D.misc >> 8) & 0x7u; }
-unsigned int get_sampler2D_mag_filter(sampler2D_t sampler2D) { return (sampler2D.misc >> 11) & 0x1u; }
-
-void set_sampler2D_internalformat(sampler2D_t *sampler2D, cl_ushort internalformat)
-{
-    sampler2D->misc = (sampler2D->misc & ~0xFu) | (internalformat & 0xFu);
-}
-
-void set_sampler2D_wrap_s(sampler2D_t *sampler2D, cl_ushort wrap_s)
-{
-    sampler2D->misc &= ~(0x3u << 4);
-    sampler2D->misc |= wrap_s << 4;
-}
-
-void set_sampler2D_wrap_t(sampler2D_t *sampler2D, cl_ushort wrap_t)
-{
-    sampler2D->misc &= ~(0x3u << 6);
-    sampler2D->misc |= wrap_t << 6;
-}
-
-void set_sampler2D_min_filter(sampler2D_t *sampler2D, cl_ushort min_filter)
-{
-    sampler2D->misc &= ~(0x7u << 8);
-    sampler2D->misc |= (min_filter & 0x7u) << 8;
-}
-
-void set_sampler2D_mag_filter(sampler2D_t *sampler2D, cl_ushort mag_filter)
-{
-    sampler2D->misc &= ~(0x1u << 11);
-    sampler2D->misc |= (mag_filter & 0x1u) << 11;
-}
 
 typedef struct
 {
@@ -610,14 +571,281 @@ typedef struct
     enabled_data_t enabled_data;
 } rop_config_t;
 
+// ----------------------------------------------------------
+// Texture Data Type 
+// ----------------------------------------------------------
+
+// texture_size_t definition
+
+#if DEVICE_MAX_TEXTURE_SIZE_LOG2 <= 8
+typedef cl_uchar2 texture_size_t;
+#elif DEVICE_MAX_TEXTURE_SIZE_LOG2 <= 16
+typedef cl_ushort2 texture_size_t;
+#elif DEVICE_MAX_TEXTURE_SIZE_LOG2 <= 32
+typedef cl_uint2 texture_size_t;
+#elif DEVICE_MAX_TEXTURE_SIZE_LOG2 <= 64
+typedef cl_ulong2 texture_size_t;
+#else
+#error DEVICE_MAX_TEXTURE_SIZE_LOG2 > 64 do not supported
+#endif
+
+// texture_data_t definition
+
 typedef struct
 {
-    sampler2D_t sampler2D;
+    /*
+    int internalformat : 4;
+    int wrap_s : 2;
+    int wrap_t : 2;
+    int min_filter : 3;
+    int mag_filter : 1;
+    */
     #ifndef DEVICE_IMAGE_ENABLED
-    cl_ushort width, height;
+    texture_size_t size;
     #endif
-} gl_texture_data_t;
+    cl_ushort misc;
+} texture_data_t;
 
+// texture data getters
+
+cl_uint get_texture_data_mode(texture_data_t texture_data)              { return (texture_data.misc >> 0) & 0xFu; }
+cl_uint get_texture_data_wrap_s(texture_data_t texture_data)            { return (texture_data.misc >> 4) & 0x3u; }
+cl_uint get_texture_data_wrap_t(texture_data_t texture_data)            { return (texture_data.misc >> 6) & 0x3u; }
+cl_uint get_texture_data_min_filter(texture_data_t texture_data)        { return (texture_data.misc >> 8) & 0x7u; }
+cl_uint get_texture_data_mag_filter(texture_data_t texture_data)        { return (texture_data.misc >> 11) & 0x1u; }
+cl_int  get_texture_data_max_level(texture_data_t texture_data)         { return 0; } // NOT IMPLEMENTED
+
+// texture data setters
+
+void set_texture_data_mode(texture_data_t *texture_data, cl_ushort mode)
+{
+    texture_data->misc = (texture_data->misc & ~0xFu) | (mode & 0xFu);
+}
+
+void set_texture_data_wrap_s(texture_data_t *texture_data, cl_ushort wrap_s)
+{
+    texture_data->misc &= ~(0x3u << 4);
+    texture_data->misc |= wrap_s << 4;
+}
+
+void set_texture_data_wrap_t(texture_data_t *texture_data, cl_ushort wrap_t)
+{
+    texture_data->misc &= ~(0x3u << 6);
+    texture_data->misc |= wrap_t << 6;
+}
+
+void set_texture_data_min_filter(texture_data_t *texture_data, cl_ushort min_filter)
+{
+    texture_data->misc &= ~(0x7u << 8);
+    texture_data->misc |= (min_filter & 0x7u) << 8;
+}
+
+void set_texture_data_mag_filter(texture_data_t *texture_data, cl_ushort mag_filter)
+{
+    texture_data->misc &= ~(0x1u << 11);
+    texture_data->misc |= (mag_filter & 0x1u) << 11;
+}
+
+// texture data utils
+
+static inline cl_bool is_texture_data_linear(texture_data_t texture_data)
+{
+    cl_uint min_filter = get_texture_data_min_filter(texture_data);
+
+    switch (min_filter)
+    {
+    case TEXTURE_FILTER_LINEAR:
+    case TEXTURE_FILTER_LINEAR_MIPMAP_NEAREST:
+    case TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static inline cl_bool is_texture_data_mipmapping(texture_data_t texture_data)
+{
+    cl_uint min_filter = get_texture_data_min_filter(texture_data);
+
+    switch (min_filter)
+    {
+    case TEXTURE_FILTER_NEAREST:
+    case TEXTURE_FILTER_LINEAR:
+        return 0;
+    default:
+        return 1;
+    }
+}
+
+static inline cl_bool is_texture_data_mipmapping_linear(texture_data_t texture_data)
+{
+    cl_uint min_filter = get_texture_data_min_filter(texture_data);
+
+    switch (min_filter)
+    {
+    case TEXTURE_FILTER_NEAREST_MIPMAP_LINEAR:
+    case TEXTURE_FILTER_LINEAR_MIPMAP_LINEAR:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static inline void set_texture_data_size(texture_data_t* texture_data, texture_size_t size)
+{
+    #ifndef DEVICE_IMAGE_ENABLED
+    texture_data->size = size;
+    #endif
+}
+
+static inline texture_size_t get_texture_data_size(texture_data_t texture_data)
+{
+    #ifndef DEVICE_IMAGE_ENABLED
+    return texture_data.size;
+    #else
+    return (texture_size_t){0,0};
+    #endif
+}
+
+static inline cl_int  get_texture_data_color_size(texture_data_t texture_data)
+{
+    int mode = get_texture_data_mode(texture_data);
+
+    switch (mode)
+    {
+    default:
+    case TEX_R8:
+        return sizeof(cl_uchar);
+    case TEX_RG8:
+    case TEX_RGBA4:
+    case TEX_RGB565:
+    case TEX_RGB5_A1:
+        return sizeof(cl_uchar[2]);
+    case TEX_RGB8:
+        return sizeof(cl_uchar[3]);
+    case TEX_RGBA8:
+        return sizeof(cl_uchar[4]);
+    }
+}
+
+// SW support for image addressing
+
+cl_bool get_texture_data_require_clamp_x(texture_data_t texture_data)
+{
+    cl_uint wrap_s = get_texture_data_wrap_s(texture_data);
+
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        cl_uint wrap_t = get_texture_data_wrap_t(texture_data);
+
+        return wrap_s == TEXTURE_WRAP_CLAMP_TO_EDGE && wrap_t != TEXTURE_WRAP_CLAMP_TO_EDGE; 
+    }
+    #else
+    {
+        return wrap_s == TEXTURE_WRAP_CLAMP_TO_EDGE;
+    }
+    #endif
+}
+
+cl_bool get_texture_data_require_clamp_y(texture_data_t texture_data)
+{
+    cl_uint wrap_t = get_texture_data_wrap_t(texture_data);
+
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        cl_uint wrap_s = get_texture_data_wrap_s(texture_data);
+
+        return wrap_t == TEXTURE_WRAP_CLAMP_TO_EDGE && wrap_s != TEXTURE_WRAP_CLAMP_TO_EDGE; 
+    }
+    #else
+    {
+        return wrap_t == TEXTURE_WRAP_CLAMP_TO_EDGE;
+    }
+    #endif
+}
+
+cl_bool get_texture_data_require_negate_x(texture_data_t texture_data, float x)
+{
+    cl_uint wrap_s = get_texture_data_wrap_s(texture_data);
+
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        cl_uint wrap_t = get_texture_data_wrap_t(texture_data);
+
+        return wrap_t == TEXTURE_WRAP_MIRRORED_REPEAT && wrap_s == TEXTURE_WRAP_REPEAT && fmod(x,2.f) == 1; 
+    }
+    #else
+    {
+        return wrap_s != TEXTURE_WRAP_CLAMP_TO_EDGE && x < 0.f;
+    }
+    #endif
+}
+
+cl_bool get_texture_data_require_negate_y(texture_data_t texture_data, float y)
+{
+    cl_uint wrap_t = get_texture_data_wrap_t(texture_data);
+    
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        cl_uint wrap_s = get_texture_data_wrap_s(texture_data);
+
+        return wrap_s == TEXTURE_WRAP_MIRRORED_REPEAT && wrap_t == TEXTURE_WRAP_REPEAT && fmod(y,2.f) == 1; 
+    }
+    #else
+    {
+        return wrap_t != TEXTURE_WRAP_CLAMP_TO_EDGE && y < 0.f;
+    }
+    #endif
+}
+
+cl_bool get_texture_data_require_diff_x(texture_data_t texture_data, float x)
+{
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        return 0;
+    }
+    #else
+    {
+        cl_uint wrap_s = get_texture_data_wrap_s(texture_data);
+        
+        return wrap_s == TEXTURE_WRAP_MIRRORED_REPEAT && fmod(x,2.f) == 1;
+    }
+    #endif 
+}
+
+cl_bool get_texture_data_require_diff_y(texture_data_t texture_data, float y)
+{
+    #ifdef DEVICE_IMAGE_ENABLED
+    {
+        return 0;
+    }
+    #else
+    {
+        cl_uint wrap_t = get_texture_data_wrap_t(texture_data);
+        
+        return wrap_t == TEXTURE_WRAP_MIRRORED_REPEAT && fmod(y,2.f) == 1;
+    }
+    #endif
+}
+
+cl_bool get_texture_data_require_software_support(texture_data_t texture_data)
+{
+    int mode = get_texture_data_mode(texture_data);
+
+    switch(mode)
+    {
+        case TEX_RGBA4:
+        case TEX_RGB5_A1:
+            return 1;
+        default:
+        return 0;
+    }
+}
+
+
+// ----------------------------------------------------------
+// FRAMEBUFFER
+// ----------------------------------------------------------
 
 typedef struct
 {

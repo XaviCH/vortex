@@ -9,7 +9,7 @@ void write_colorbuffer_channels(
     rw_texture2d_t colorbuffer,
     const ulong clear_write_values, 
     const ushort clear_enabled_data
-    #ifndef DEVICE_IMAGE_ENABLED
+    #ifndef DEVICE_RW_IMAGE_ENABLED
     , const uint colorbuffer_type, const uint buffer_width
     #endif
 ) {
@@ -30,7 +30,7 @@ void write_colorbuffer_channels(
     // Required read
     if (enabled_color_channel_mask != CLEAR_ENABLED_COLOR_CHANNEL_MASK) {
         uint4 buffer_value;
-        #ifdef DEVICE_IMAGE_ENABLED
+        #ifdef DEVICE_RW_IMAGE_ENABLED
             buffer_value = read_imageui(colorbuffer, (int2){x, y});
         #else
             uint compressed_buffer_value = ((global uchar*)colorbuffer)[x + y*buffer_width];
@@ -50,7 +50,7 @@ void write_colorbuffer_channels(
         };
     }
 
-    #ifdef DEVICE_IMAGE_ENABLED
+    #ifdef DEVICE_RW_IMAGE_ENABLED
         write_imageui(colorbuffer, (int2){x, y}, color_value);
     #else
         ((global uint*)colorbuffer)[x + y*buffer_width] = 
@@ -65,7 +65,7 @@ void write_depthbuffer_(
     rw_texture2d_t depthbuffer,
     const ulong clear_write_values, 
     const ushort clear_enabled_data
-    #ifndef DEVICE_IMAGE_ENABLED
+    #ifndef DEVICE_RW_IMAGE_ENABLED
     , const uint buffer_width
     #endif
 ) {
@@ -78,7 +78,7 @@ void write_depthbuffer_(
 
     ushort depth_value = (clear_write_values >> 32) & 0xFFFFu;
 
-    #ifdef DEVICE_IMAGE_ENABLED
+    #ifdef DEVICE_RW_IMAGE_ENABLED
     write_imageui(depthbuffer, (int2){x, y}, (uint4){depth_value,0,0,0});
     #else
     ((global ushort*)depthbuffer)[x + y*buffer_width] = depth_value;
@@ -89,7 +89,7 @@ void write_stencilbuffer_(
     rw_texture2d_t stencilbuffer,
     const ulong clear_write_values, 
     const ushort clear_enabled_data
-    #ifndef DEVICE_IMAGE_ENABLED
+    #ifndef DEVICE_RW_IMAGE_ENABLED
     , const uint buffer_width
     #endif
 ) {
@@ -105,7 +105,7 @@ void write_stencilbuffer_(
     // Required read
     if (enabled_stencil_channel_mask != CLEAR_ENABLED_STENCIL_CHANNEL_MASK) {
         uchar buffer_value;
-        #ifdef DEVICE_IMAGE_ENABLED
+        #ifdef DEVICE_RW_IMAGE_ENABLED
             buffer_value = read_imageui(stencilbuffer, (int2){x, y}).x;
         #else
             buffer_value = ((global uchar*)stencilbuffer)[x + y*buffer_width];
@@ -115,7 +115,7 @@ void write_stencilbuffer_(
         stencil_value = (buffer_value & ~bitmask) | (stencil_value & bitmask);
     }
 
-    #ifdef DEVICE_IMAGE_ENABLED
+    #ifdef DEVICE_RW_IMAGE_ENABLED
         write_imageui(stencilbuffer, (int2){x, y}, (uint4){stencil_value,0,0,0});
     #else
         ((global uchar*)stencilbuffer)[x + y*buffer_width] = stencil_value;
@@ -133,7 +133,7 @@ kernel void force_clear(
     rw_texture2d_t colorbuffer,
     rw_texture2d_t depthbuffer,
     rw_texture2d_t stencilbuffer,
-    #ifndef DEVICE_IMAGE_ENABLED
+    #ifndef DEVICE_RW_IMAGE_ENABLED
     const uint colorbuffer_type,
     const uint buffer_width,
     #endif
@@ -143,21 +143,21 @@ kernel void force_clear(
 
     write_colorbuffer_channels(
         colorbuffer, clear_write_values, clear_enabled_data
-        #ifndef DEVICE_IMAGE_ENABLED
+        #ifndef DEVICE_RW_IMAGE_ENABLED
         , colorbuffer_type, buffer_width
         #endif
     );
 
     write_depthbuffer_(
         depthbuffer, clear_write_values, clear_enabled_data
-        #ifndef DEVICE_IMAGE_ENABLED
+        #ifndef DEVICE_RW_IMAGE_ENABLED
         , buffer_width
         #endif
     );
 
     write_stencilbuffer_(
         stencilbuffer, clear_write_values, clear_enabled_data
-        #ifndef DEVICE_IMAGE_ENABLED
+        #ifndef DEVICE_RW_IMAGE_ENABLED
         , buffer_width
         #endif
     );

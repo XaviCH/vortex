@@ -16,6 +16,10 @@
 #define DEVICE_IMAGE_SUPPORT 0
 #endif
 
+#ifndef DEVICE_RW_IMAGE_SUPPORT
+#define DEVICE_RW_IMAGE_SUPPORT 0
+#endif
+
 #define DEVICE_SUB_GROUP_THREADS_LOG2 5
 
 // if disable the threads are executed as each local thread is independant of each other
@@ -51,7 +55,7 @@
 #define DEVICE_TEXTURE_UNITS 8 // max number of active texture units
 
 #define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
-#define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 10
+#define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 8
 
 // max number of triangles could be rasterized
 #define DEVICE_MAX_NUMBER_TRIANGLES (1UL << 15) 
@@ -85,5 +89,12 @@
 #define HOST_BUFFERS_SIZE 128
 #define HOST_RENDERBUFFERS_SIZE 8
 #define HOST_TEXTURES_SIZE 8
+
+// -----
+// OBJECTS CONFIG
+// -----
+#define DEVICE_MAX_TEXTURE_SIZE_LOG2 11 // (2048 x 2048) max size  
+// TODO: Add mipmapping support
+#define DEVICE_MIPMAP_LEVELS
 
 #endif
