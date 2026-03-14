@@ -223,7 +223,7 @@ static inline uint read_colorbuffer(colorbuffer_t colorbuffer, int2 pos, uint2 s
     #endif
 }
 
-static inline void write_2d_texture_buffer(void* buffer, int2 pos, uint2 size, uint mode, uint value)
+static inline void write_2d_texture_buffer(global void* buffer, int2 pos, uint2 size, uint mode, uint value)
 {
     uint offset = pos.y * size.x + pos.x;
 

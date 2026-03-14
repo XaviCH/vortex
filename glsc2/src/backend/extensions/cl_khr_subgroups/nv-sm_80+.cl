@@ -1,10 +1,46 @@
 #ifndef NVIDIA_SM_VERSION
-#error NVIDIA_SM_VERSION required to use this extension.
+    #error NVIDIA_SM_VERSION required to use this extension.
 #endif
 
-inline uint sub_group_any(int p) { 
+#if NVIDIA_SM_VERSION <= 0
+    #error NVIDIA_SM_VERSION is not supported
+#endif
+
+// Built-in Sub-Group Synchronization Functions
+
+static inline void __attribute__((overloadable)) sub_group_barrier(cl_mem_fence_flags flags) 
+{
+    __asm__ volatile("bar.warp.sync 0xffffffff;");
+}
+
+static inline void __attribute__((overloadable)) sub_group_barrier(cl_mem_fence_flags flags, memory_scope scope)
+{
+    sub_group_barrier(flags);
+}
+
+// Built-in Sub-Group Collective Functions
+
+static inline uint sub_group_all(int p) 
+{
     uint r; 
-    asm volatile(
+    
+    __asm__ volatile(
+        "{"
+        ".reg .pred pi;"
+        "setp.ne.u32 pi, %1, 0;"
+        "vote.sync.all.pred  pi, pi, 0xffffffff;"
+        "selp.u32 %0, 1, 0, pi;"
+        "}"
+        : "=r"(r) : "r"(p)); 
+
+    return r; 
+}
+
+static inline uint sub_group_any(int p) 
+{
+    uint r; 
+    
+    __asm__ volatile(
         "{"
         ".reg .pred pi;"
         "setp.ne.u32 pi, %1, 0;"
@@ -12,25 +48,27 @@ inline uint sub_group_any(int p) {
         "selp.u32 %0, 1, 0, pi;"
         "}"
         : "=r"(r) : "r"(p)); 
+
     return r; 
 }
 
 
-inline void sub_group_barrier(cl_mem_fence_flags flags) {
-    asm volatile("bar.warp.sync 0xffffffff;");
-}
-
-inline uint __attribute__((overloadable)) sub_group_broadcast (uint x, uint sub_group_local_id) {
+static inline uint __attribute__((overloadable)) sub_group_broadcast (uint x, uint sub_group_local_id) 
+{
     uint r;
-    asm volatile(
+    
+    __asm__ volatile(
         "shfl.sync.idx.b32  %0, %1, %2, 0x1f, 0xffffffff;"
         : "=r"(r) : "r"(x), "r"(sub_group_local_id));
+
     return r;
 }
 
-inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add (uint x) 
+{
     uint r;
-    asm volatile(
+
+    __asm__ volatile(
         "{"
         ".reg .pred p;"
         ".reg .b32 dst;"
@@ -47,12 +85,15 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add (uint x) 
         "@p add.u32        %0, dst, %0;"
         "}"
         : "=r"(r) : "r"(x));
+
     return r;
 }
 
-inline uint __attribute__((overloadable)) sub_group_scan_inclusive_max (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_scan_inclusive_max (uint x) 
+{
     uint r;
-    asm volatile(
+
+    __asm__ volatile(
         "{"
         ".reg .pred p;"
         ".reg .b32 dst;"
@@ -69,12 +110,15 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_max (uint x) 
         "@p max.u32        %0, dst, %0;"
         "}"
         : "=r"(r) : "r"(x));
+
     return r;
 }
 
-inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min (uint x) 
+{
     uint r;
-    asm volatile(
+    
+    __asm__ volatile(
         "{"
         ".reg .pred p;"
         ".reg .b32 dst;"
@@ -91,15 +135,17 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min (uint x) 
         "@p min.u32        %0, dst, %0;"
         "}"
         : "=r"(r) : "r"(x));
+
     return r;
 }
 
-static inline uint __attribute__((overloadable)) sub_group_reduce_max (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_reduce_max (uint x) 
+{
     uint r;
 
     #if NVIDIA_SM_VERSION >= 80
     {
-        asm volatile(
+        __asm__ volatile(
             "redux.sync.max.u32 %0, %1, 0xffffffff;"
             : "=r"(r) : "r"(x));
     }
@@ -113,11 +159,13 @@ static inline uint __attribute__((overloadable)) sub_group_reduce_max (uint x) {
     return r;
 }
 
-static inline uint __attribute__((overloadable)) sub_group_reduce_min (uint x) {
+static inline uint __attribute__((overloadable)) sub_group_reduce_min (uint x) 
+{
     uint r;
+
     #if NVIDIA_SM_VERSION >= 80
     {
-        asm volatile(
+        __asm__ volatile(
             "redux.sync.min.u32 %0, %1, 0xffffffff;"
             : "=r"(r) : "r"(x));
     }

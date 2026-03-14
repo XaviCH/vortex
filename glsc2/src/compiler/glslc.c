@@ -38,25 +38,29 @@ void parse_args(int argc, char** argv);
 
 int main(int argc, char** argv) {
 
-    // Check drivers availability
-    // TODO: Change to select multiple platforms
+    // choose platform
+    const cl_uint num_platform_entries = DEVICE_PLATFORM_ID + 1;
+    
     cl_uint num_platforms;
     cl_int platform_error;
-    platform_error = clGetPlatformIDs(1, &platform_id, &num_platforms);
-    switch (platform_error)
+    cl_platform_id platform_entry_ids[num_platform_entries];
+    platform_error = clGetPlatformIDs(num_platform_entries, platform_entry_ids, &num_platforms);
+    
+    if (platform_error) 
     {
-    case CL_PLATFORM_NOT_FOUND_KHR:
-        fprintf(stderr, "No platform found. CL_PLATFORM_NOT_FOUND_KHR %d.\n", CL_PLATFORM_NOT_FOUND_KHR);
-        exit(platform_error);
-    case CL_SUCCESS:
-        break;
-    default:
-        fprintf(stderr, "Unexepected error.");
+        switch (platform_error)
+        {
+        case CL_PLATFORM_NOT_FOUND_KHR:
+            fprintf(stderr, "No platform found. CL_PLATFORM_NOT_FOUND_KHR %d.\n", platform_error);
+        default:
+            fprintf(stderr, "Unexepected error %d.\n", platform_error);
+        }
         exit(platform_error);
     }
-    
-    CHECK(error);
 
+    platform_id = platform_entry_ids[DEVICE_PLATFORM_ID];
+
+    // List available platforms    
     cl_platform_id* platform_ids = NULL;
     if (num_platforms > 1)
         platform_ids = malloc(num_platforms*sizeof(cl_platform_id));
@@ -85,6 +89,8 @@ int main(int argc, char** argv) {
         free(version);
     }
 
+    // Print info of selected platform
+
     size_t param_value_size_ret;
     clGetPlatformInfo(platform_id, CL_PLATFORM_NAME, 0, NULL, &param_value_size_ret);
     char* name = malloc(param_value_size_ret);
@@ -109,8 +115,14 @@ int main(int argc, char** argv) {
     free(version);
     free(extensions);
 
-    error = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &device_id, NULL);
+    // Choose device
+    const cl_uint num_device_entries = DEVICE_DEVICE_ID + 1;
+    
+    cl_device_id device_entry_ids[num_device_entries];
+    error = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_GPU, num_device_entries, device_entry_ids, NULL);
     CHECK(error);
+
+    device_id = device_entry_ids[DEVICE_DEVICE_ID];
 
     context = clCreateContext(NULL, 1, &device_id, NULL, NULL,  &error);
     CHECK(error);

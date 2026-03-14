@@ -1,6 +1,15 @@
 #ifndef CONFIG_DEVICE_H
 #define CONFIG_DEVICE_H
 
+//
+// OpenCL
+//
+
+// TODO: support heteregeneous computing
+#define DEVICE_PLATFORM_ID 0
+
+#define DEVICE_DEVICE_ID 0
+
 // -----------
 // DEVICE ARCH
 // -----------

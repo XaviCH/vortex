@@ -23,62 +23,12 @@ inline uint     ugetLo           (ulong a)              { return a & 0x00000000F
 inline int      getLo            (long a)               { return a & 0x00000000FFFFFFFF; }
 inline uint     ugetHi           (ulong a)              { return a >> 32; }
 inline int      getHi            (long a)               { return a >> 32; }
-inline ulong    ucombineLoHi     (uint lo, uint hi)     { return ((ulong)hi << 32) | (ulong)lo; }
-inline long     combineLoHi      (int lo, int hi)       { return ((long)hi << 32) | (long)lo; }
+static inline ulong    ucombineLoHi     (uint lo, uint hi)     { return upsample(hi,lo); }
+static inline long     combineLoHi      (int lo, int hi)       { return upsample(hi,lo); }
 inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = ucombineLoHi(alo, ahi) + ucombineLoHi(blo, bhi); *rlo = ugetLo(r); *rhi = ugetHi(r); }
 
-// ISA dependancy
-//#define CUDA
-#ifdef CUDA
-inline int      findLeadingOne      (uint v)                    { int r; asm("bfind.u32 %0, %1;" : "=r"(r) : "r"(v)); return r; }
-inline uint     getLaneMaskLt       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_lt;" : "=r"(r)); return r; }
-inline uint     getLaneMaskLe       (void)                      { uint r; asm("mov.u32 %0, %%lanemask_le;" : "=r"(r)); return r; }
+static inline int findLeadingOne (uint v) { return 31 - clz(v); }
 
-inline int      f32_to_s32_sat          (float a)                 { int v; asm("cvt.rni.sat.s32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
-inline uint     f32_to_u32_sat          (float a)                 { uint v; asm("cvt.rni.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
-inline uint     f32_to_u32_sat_rmi  (float a)                   { uint v; asm("cvt.rmi.sat.u32.f32 %0, %1;" : "=r"(v) : "f"(a)); return v; }
-inline long   f32_to_s64              (float a)                 { long v; asm("cvt.rni.s64.f32 %0, %1;" : "=l"(v) : "f"(a)); return v; }
-inline int      add_s16lo_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      add_s16hi_s16lo     (int a, int b)              { int v; asm("vadd.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16lo_s16lo     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h0, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { int v; asm("vsub.s32.s32.s32 %0, %1.h1, %2.h0;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      sub_s16hi_s16hi     (int a, int b)              { int v; asm("vsub.s32.s32.s32 %0, %1.h1, %2.h1;" : "=r"(v) : "r"(a), "r"(b)); return v; }
-inline int      max_max             (int a, int b, int c)       { int v; asm("vmax.s32.s32.s32.max %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline int      min_min             (int a, int b, int c)       { int v; asm("vmin.s32.s32.s32.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline uint     add_sub             (uint a, uint b, uint c)    { uint v; asm("vsub.u32.u32.u32.add %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(c), "r"(b)); return v; }
-inline uint     add_add				(uint a, uint b, uint c)	{ uint v; asm("vadd.u32.u32.u32.add %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline int      add_clamp_0_x       (int a, int b, int c)       { int v; asm("vadd.u32.s32.s32.sat.min %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline uint     prmt				(uint a, uint b, uint c)    { uint v; asm("prmt.b32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline uint     slct_ui             (uint a, uint b, int c)   { uint v; asm("slct.u32.s32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline int      slct_i              (int a, int b, int c)   { int v; asm("slct.s32.s32 %0, %1, %2, %3;" : "=r"(v) : "r"(a), "r"(b), "r"(c)); return v; }
-inline float    slct_f              (float a, float b, int c)   { float v; asm("slct.f32.s32 %0, %1, %2, %3;" : "=f"(v) : "f"(a), "f"(b), "r"(c)); return v; }
-
-inline uint     get_max_sub_group_size(void) { return 32; }
-inline uint     sub_group_activemask()    { uint r; asm volatile("activemask.b32 %0;" : "=r"(r)); return r; }
-// inline uint     sub_group_ballot(int p) { 
-//     uint r; asm volatile(
-//         "{"
-//         ".reg .pred p;"
-//         "setp.ne.u32 p, %1, 0;"
-//         ".reg .b32 mask;"
-//         "activemask.b32 mask;"
-//         "vote.sync.ballot.b32 %0, p, mask;"
-//         "}"
-//         : "=r"(r) : "r"(p)
-//     ); 
-//     return r; }
-inline uint     sub_group_masked_ballot(int p, uint mask) { uint r; asm volatile("{ .reg .pred p; setp.ne.u32 p, %1, 0; vote.sync.ballot.b32 %0, p, %2; }" : "=r"(r) : "r"(p), "r"(mask)); return r; }
-inline uint     sub_group_any(int p)                        { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.any.pred  pi, pi, 0xffffffff; selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p)); return r; }
-inline uint     sub_group_masked_any(int p, uint mask)      { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.any.pred  pi, pi, %2;         selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p), "r"(mask)); return r; }
-inline uint     sub_group_all(int p)                        { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.all.pred  pi, pi, 0xffffffff; selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p)); return r; }
-inline uint     sub_group_masked_all(int p, uint mask)      { uint r; asm volatile("{ .reg .pred pi; setp.ne.u32 pi, %1, 0; vote.sync.all.pred  pi, pi, %2;         selp.u32 %0, 1, 0, pi; }" : "=r"(r) : "r"(p), "r"(mask)); return r; }
-#else
-inline int      findLeadingOne      (uint v)                    { 
-    for (int bit = 31; bit >= 0; --bit) {
-        if (v >= (1 << bit)) return bit;
-    }
-    return -1;
-}
 inline uint     getLaneMaskLt       (void)                      { return (1 << get_local_id(0)) - 1; }
 inline uint     getLaneMaskLe       (void)                      { return (2 << get_local_id(0)) - 1; }
 
@@ -118,169 +68,10 @@ inline uint     slct_ui             (uint a, uint b, int c)   { return (c >= 0) 
 inline int      slct_i              (int a, int b, int c)   { return (c >= 0) ? a : b; }
 inline float    slct_f              (float a, float b, int c)   { return (c >= 0) ? a : b; }
 
-#endif 
-
-/*
-    The multiple dimensions is mapped to sub groups and work groups on the base OpenCL language.
-*/
-
-
-
-// TODO add asm extension as attachable header file at compile time
-#ifdef cl_khr_subgroups
-    #pragma OPENCL EXTENSION cl_khr_subgroups : enable
+#if __OPENCL_VERSION__ < 200
+static inline size_t get_local_linear_id() { return get_local_id(1) * get_local_size(0) + get_local_id(0); }
 #endif
-#ifdef __opencl_c_subgroups
-    #pragma OPENCL EXTENSION __opencl_c_subgroups : enable
-#else
-    #ifdef CUDA
-    
-
-    inline uint sub_group_scan_inclusive_add_ui (uint x) {
-        uint r;
-        asm volatile(
-            "{"
-            ".reg .pred p;"
-            ".reg .b32 dst;"
-            "mov.b32 %0, %1;"
-            "shfl.sync.up.b32  dst|p, %0, 0x1, 0x0, 0xffffffff;"
-            "@p add.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x2, 0x0, 0xffffffff;"
-            "@p add.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x4, 0x0, 0xffffffff;"
-            "@p add.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x8, 0x0, 0xffffffff;"
-            "@p add.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x10,0x0, 0xffffffff;"
-            "@p add.u32        %0, dst, %0;"
-            "}"
-            : "=r"(r) : "r"(x));
-        return r;
-    }
-
-    inline uint sub_group_scan_inclusive_min_ui (uint x) {
-        uint r;
-        asm volatile(
-            "{"
-            ".reg .pred p;"
-            ".reg .b32 dst;"
-            "mov.b32 %0, %1;"
-            "shfl.sync.up.b32  dst|p, %0, 0x1, 0x0, 0xffffffff;"
-            "@p min.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x2, 0x0, 0xffffffff;"
-            "@p min.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x4, 0x0, 0xffffffff;"
-            "@p min.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x8, 0x0, 0xffffffff;"
-            "@p min.u32        %0, dst, %0;"
-            "shfl.sync.up.b32  dst|p, %0, 0x10,0x0, 0xffffffff;"
-            "@p min.u32        %0, dst, %0;"
-            "}"
-            : "=r"(r) : "r"(x));
-        return r;
-    }
-
-    inline uint sub_group_scan_inclusive_max_ui (uint x) {
-        uint r;
-        asm volatile(
-            "{"
-            ".reg .b32 Ry, Rx;"
-            "shfl.sync.up.b32  Ry, %1, 0x1, 0x0, 0xffffffff;"
-            "max.u32             Rx, Ry, %1;"
-            "shfl.sync.up.b32  Ry, Rx, 0x2, 0x0, 0xffffffff;"
-            "max.u32             Rx, Ry, Rx;"
-            "shfl.sync.up.b32  Ry, Rx, 0x4, 0x0, 0xffffffff;"
-            "max.u32             Rx, Ry, Rx;"
-            "shfl.sync.up.b32  Ry, Rx, 0x8, 0x0, 0xffffffff;"
-            "max.u32             Rx, Ry, Rx;"
-            "shfl.sync.up.b32  Ry, Rx, 0x10,0x0, 0xffffffff;"
-            "max.u32             %0, Ry, Rx;"
-            "}"
-            : "=r"(r) : "r"(x));
-        return r;
-    }
-
-    
-
-    inline uint sub_group_broadcast_ui (uint x, uint sub_group_local_id) {
-        uint r;
-        asm volatile(
-            "shfl.sync.idx.b32  %0, %1, %2, 0x1f, 0xffffffff;"
-            : "=r"(r) : "r"(x), "r"(sub_group_local_id));
-        return r;
-    }
-
-    inline uint sub_group_non_uniform_broadcast_ui (uint x, uint sub_group_local_id) {
-        uint r;
-        asm volatile(
-            ".reg .b32 mask;"
-            "activemask.b32 mask;"
-            "shfl.sync.idx.b32  %0, %1, %2, 0x1f, mask;"
-            : "=r"(r) : "r"(x), "r"(sub_group_local_id));
-        return r;
-    }
-
-    inline uint sub_group_masked_broadcast_ui (uint x, uint sub_group_local_id, uint mask) {
-        uint r;
-        asm volatile(
-            "shfl.sync.idx.b32  %0, %1, %2, 0x1f, %3;"
-            : "=r"(r) : "r"(x), "r"(sub_group_local_id), "r"(mask));
-        return r;
-    }
-
-    inline void sub_group_barrier() {
-        asm volatile("bar.warp.sync 0xffffffff;");
-    }
-
-    inline uint sub_group_reduce_max_ui (uint x) {
-        uint r;
-        asm volatile(
-            "redux.sync.max.u32 %0, %1, 0xffffffff;"
-            : "=r"(r) : "r"(x));
-        return r;
-    }
-
-    inline uint sub_group_reduce_min_ui (uint x) {
-        uint r;
-        asm volatile(
-            "redux.sync.min.u32 %0, %1, 0xffffffff;"
-            : "=r"(r) : "r"(x));
-        return r;
-    }
-
-    inline uint sub_group_reduce_or_ui (uint x) {
-        uint r;
-        asm volatile(
-            "redux.sync.or.b32 %0, %1, 0xffffffff;"
-            : "=r"(r) : "r"(x));
-        return r;
-    }
-
-    inline uint sub_group_broadcast_first_ui (uint x) {
-        uint r;
-        uint mask = sub_group_activemask();
-        uint sub_group_local_id = findLeadingOne(mask & -mask);
-        asm volatile(
-            "shfl.sync.idx.b32  %0, %1, %2, 0x1f, %3;"
-            : "=r"(r) : "r"(x), "r"(sub_group_local_id), "r"(mask));
-        return r;
-    }
-    #endif
-#endif
-#ifdef cl_khr_subgroup_ballot
-#pragma OPENCL EXTENSION cl_khr_subgroup_ballot : enable
-#endif
-
-
 inline size_t get_local_linear_size() { return get_local_size(0) * get_local_size(1) * get_local_size(2); }
-
-
-// #define CONF_DEBUG_KERNEL
-#ifdef CONF_DEBUG_KERNEL
-#define DEBUG(...) __VA_ARGS__
-#else
-#define DEBUG(...)
-#endif 
 
 // UTILS
 
@@ -424,6 +215,8 @@ inline uint idiv_fast(uint a, uint b)
 
 //------------------------------------------------------------------------
 // v0 = subpixels relative to the bottom-left sampling point
+
+inline int __float_as_int(float value) { return *(int*) &value; }
 
 inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, int samplesLog2)
 {

@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <config.device.h>
 
 static int read_file(const char* filename, uint8_t** data, size_t* size) {
     if (NULL == filename || NULL == data || 0 == size)

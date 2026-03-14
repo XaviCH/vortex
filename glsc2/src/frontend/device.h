@@ -669,8 +669,16 @@ static cl_int   ZERO = 0;
 static void device_init(device_t* shared) 
 {
     // OpenCL setup
-    CL_CHECK(clGetPlatformIDs(1, &shared->platform_id, NULL));
-    CL_CHECK(clGetDeviceIDs(shared->platform_id, CL_DEVICE_TYPE_DEFAULT, 1, &shared->device_id, NULL));
+    const cl_uint num_platforms = DEVICE_PLATFORM_ID + 1; 
+    cl_platform_id platforms[num_platforms];
+    CL_CHECK(clGetPlatformIDs(num_platforms, platforms, NULL));
+    shared->platform_id = platforms[DEVICE_PLATFORM_ID];
+
+    const cl_uint num_devices = DEVICE_DEVICE_ID + 1;
+    cl_device_id devices[num_devices];
+    CL_CHECK(clGetDeviceIDs(shared->platform_id, CL_DEVICE_TYPE_GPU, num_devices, devices, NULL));
+    shared->device_id = devices[DEVICE_DEVICE_ID];
+
     CL_ASSIGN_CHECK(shared->context, clCreateContext(NULL, 1, &shared->device_id, NULL, NULL,  &error));
 
     // Load programs
