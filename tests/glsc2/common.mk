@@ -58,7 +58,7 @@ driver ?= opencl
 # Driver assigment
 ifeq ($(driver), opencl)
 	CXXFLAGS += -DC_OPENCL_HOST
-	LDFLAGS += -lOpenCL $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so 
+	LDFLAGS += $(GLSC2_PATH)/src/frontend/libGLSC2.so $(EGL_PATH)/libEGL.so 
 else
 ifeq ($(driver), gles)
 	CXXFLAGS += -DC_OPENGL_HOST

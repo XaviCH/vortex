@@ -2,13 +2,15 @@
 #define CONFIG_DEVICE_H
 
 //
-// OpenCL
+// OpenCL Compiler
 //
 
 // TODO: support heteregeneous computing
 #define DEVICE_PLATFORM_ID 0
 
 #define DEVICE_DEVICE_ID 0
+
+#define DEVICE_UNROLL_SUPPORT 0
 
 // -----------
 // DEVICE ARCH

@@ -3,6 +3,10 @@
 
 #include "config.device.h"
 
+#if DEVICE_UNROLL_SUPPORT == 1
+#define DEVICE_UNROLL_ENABLED
+#endif
+
 // -----------
 // DEVICE CONSTANTS
 // -----------

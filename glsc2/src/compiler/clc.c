@@ -110,6 +110,16 @@ int main(int argc, char** argv) {
 
     device_id = device_entry_ids[DEVICE_DEVICE_ID];
 
+    clGetDeviceInfo(device_id, CL_DEVICE_NAME, 0, NULL, &param_value_size_ret);
+    name = malloc(param_value_size_ret);
+    clGetDeviceInfo(device_id, CL_DEVICE_NAME, param_value_size_ret, name, NULL);
+
+    clGetDeviceInfo(device_id, CL_DEVICE_VENDOR, 0, NULL, &param_value_size_ret);
+    vendor = malloc(param_value_size_ret);
+    clGetDeviceInfo(device_id, CL_DEVICE_VENDOR, param_value_size_ret, vendor, NULL);
+
+    printf("Compiling in device %s %s.\n", name, vendor);
+    
     context = clCreateContext(NULL, 1, &device_id, NULL, NULL,  &error);
     CHECK(error);
 

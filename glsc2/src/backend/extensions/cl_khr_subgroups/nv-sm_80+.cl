@@ -13,10 +13,12 @@ static inline void __attribute__((overloadable)) sub_group_barrier(cl_mem_fence_
     __asm__ volatile("bar.warp.sync 0xffffffff;");
 }
 
+#if __OPENCL_VERSION__ >= 200
 static inline void __attribute__((overloadable)) sub_group_barrier(cl_mem_fence_flags flags, memory_scope scope)
 {
     sub_group_barrier(flags);
 }
+#endif
 
 // Built-in Sub-Group Collective Functions
 

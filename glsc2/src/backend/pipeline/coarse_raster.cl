@@ -472,8 +472,8 @@ __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_COARSE_SUB_
     #error This kernel requires DEVICE_SUB_GROUP_ENABLED
 #endif
 void coarse_raster(
-    global int* a_coarse_counter,
-    global int* a_num_active_tiles,
+    volatile global int* a_coarse_counter,
+    volatile global int* a_num_active_tiles,
     global const int* a_num_bin_segs,
     global int* a_num_tile_segs,
     global const int* a_num_subtris,
@@ -863,7 +863,7 @@ void coarse_raster(
                 }
 
                 int warp_in_tile = (warp_ptr - warp_base) >> (CR_BIN_LOG2 * 2);
-                uint emit_mask = *(warp_ptr + warp_step + ((uint*)s_warp_emit_mask - (uint*)s_warp_emit_prefix_sum));
+                uint emit_mask = *(warp_ptr + warp_step + ((local uint*)s_warp_emit_mask - (local uint*)s_warp_emit_prefix_sum));
                 int emit_in_warp = emit_in_tile - *(warp_ptr + warp_step) + popcount(emit_mask);
 
                 // Find thread in warp.
