@@ -473,12 +473,12 @@ static size_t __device_get_max_number_triangles()
 
 static size_t __device_get_max_number_bin_segments() 
 {
-    return CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE*(DEVICE_MAX_NUMBER_TRIANGLES/CR_BIN_SEG_SIZE)/2; // At least one segment x bin
+    return CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE*(DEVICE_MAX_NUMBER_TRIANGLES/CR_BIN_SEG_SIZE)/4; // At least one segment x bin
 }
 
 static size_t __device_get_max_number_tile_segments() 
 {
-    return CR_MAXTILES_SQR*(DEVICE_MAX_NUMBER_TRIANGLES/CR_TILE_SEG_SIZE)/2; // At least one segment x tile
+    return CR_MAXTILES_SQR*(DEVICE_MAX_NUMBER_TRIANGLES/CR_TILE_SEG_SIZE)/4; // At least one segment x tile
 }
 
 static size_t __device_get_bin_batch_size() 

@@ -21,6 +21,10 @@ Once the stack is built now we can research on:
 
 ---
 
+## Add pre fragment processing and post fragment processing, maybe reduce sync
+
+---
+
 ## Backend Extensions
 
 Application was firstly created for triangle rasterization based on OpenGL Safety Critical 2.0 pipeline. This is far from what

@@ -9,11 +9,14 @@
 #define BACKEND_UTILS_SYNC_CL
 
 #ifdef __COMPILER_RELATIVE_PATH__
-    #include <backend/utils/sub_group_mask.cl>
-    #include <backend/utils/common.cl>
-
+    #include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
+    #include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
+    #include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
     #include <backend/extensions/cl_khr_subgroups/include.cl>
     #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
+
+    #include <backend/utils/sub_group_mask.cl>
+    #include <backend/utils/common.cl>
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     #endif
 
@@ -27,7 +30,9 @@
 inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add(uint value, local volatile uint* sg_temp) {
     local volatile uint* ptr = &sg_temp[get_sub_group_local_id()];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int target=1; target < get_sub_group_size(); target *= 2) {
         if (get_sub_group_local_id() >= target) {
             value += ptr[-target];    
@@ -40,7 +45,9 @@ inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add(uint valu
 inline uint __attribute__((overloadable)) sub_group_scan_inclusive_min(uint value, local volatile uint* sg_temp) {
     local volatile uint* ptr = &sg_temp[get_sub_group_local_id()];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int target=1; target < get_sub_group_size(); target *= 2) {
         if (get_sub_group_local_id() >= target) {
             value = min(value, ptr[-target]);    
@@ -70,7 +77,9 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
         uint local_id = get_sub_group_local_id();
         (*sg_temp)[local_id] = value;
 
+        #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
+        #endif
         for(int target=1; target < get_sub_group_size(); target *= 2) {
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -101,7 +110,9 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
         local volatile uint* ptr = &l_temp[get_local_linear_id()];
         *ptr = value;
 
+        #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
+        #endif
         for(int target=1; target < get_local_size(0); target *= 2) {
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -127,7 +138,9 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
     {
         *ptr = value;
 
+        #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
+        #endif
         for(uint i=1; i<get_local_size(0); i=i*2) {
             #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
@@ -138,7 +151,9 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
             }
         }
 
+        #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
+        #endif
         for(uint i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
             barrier(CLK_LOCAL_MEM_FENCE);
             if (id >= i) {
@@ -157,7 +172,9 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -170,18 +187,27 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
 */
 
 
-inline uint __attribute__((overloadable)) local_scan_inclusive_min(uint value, local volatile uint* l_temp) {
+inline uint __attribute__((overloadable)) local_scan_inclusive_min(uint value, local volatile uint* l_temp) 
+{
     uint local_id = get_local_linear_id();
+    
     local volatile uint* ptr = &l_temp[local_id];
+
     *ptr = value;
+    
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
-    for(int i=1; i<get_local_linear_size(); i=i*2) {
+    #endif
+    for(int i=1; i<get_local_linear_size(); i=i*2) 
+    {
         barrier(CLK_LOCAL_MEM_FENCE);
+        
         if (local_id >= i) {
             value = min(value, ptr[-i]);    
             *ptr = value;
         }
     }
+    
     return value;
 }
 
@@ -201,7 +227,9 @@ inline uint local_sized_reduce_min_sized_ui(uint value, local volatile uint* l_t
 
     #endif
 
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(uint i=1; i<num_ids; i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (id >= i) {
@@ -228,7 +256,9 @@ inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
             barrier(CLK_LOCAL_MEM_FENCE);
         }
 
+        #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
+        #endif
         for(uint i=1; i<get_num_sub_groups(); i=i*get_sub_group_size()) {
             l_temp[get_sub_group_id()] = sub_group_min;
             barrier(CLK_LOCAL_MEM_FENCE);
@@ -282,7 +312,9 @@ inline uint local_scan_inclusive_and_2dim_ui(uint value, local volatile uint* l_
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -304,7 +336,9 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
     uint local_id = get_sub_group_local_id();
     local volatile uint* ptr = &(*sg_temp)[local_id];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_sub_group_size(); i=i*2) {
         #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
             barrier(CLK_LOCAL_MEM_FENCE);
@@ -322,7 +356,9 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_local_size(0); i=i*2) {
         #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
         barrier(CLK_LOCAL_MEM_FENCE);
@@ -379,7 +415,9 @@ static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive(void 
     
     *ptr = value;
 
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(uint i=1; i<get_local_size(0); i=i*2) {
         local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -397,7 +435,9 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive(void (func
     
     local_1dim_scan_inclusive(func, value, l_temp);
 
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(uint i=get_local_size(0); i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -481,7 +521,9 @@ inline uint local_scan_inclusive_max_1dim_ui(uint value, local volatile uint* l_
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_local_size(0); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -496,7 +538,9 @@ inline uint local_1dim_scan_inclusive_min_ui(uint value, local volatile uint* l_
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_local_size(0); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -523,7 +567,9 @@ inline uint local_scan_inclusive_or_ui(uint value, local volatile uint* l_temp) 
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {
@@ -544,7 +590,9 @@ inline uint local_scan_inclusive_and_ui(uint value, local volatile uint* l_temp)
     uint local_id = get_local_linear_id();
     local volatile uint* ptr = &l_temp[local_id];
     *ptr = value;
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(int i=1; i<get_local_linear_size(); i=i*2) {
         barrier(CLK_LOCAL_MEM_FENCE);
         if (local_id >= i) {

@@ -4,7 +4,9 @@
 #ifdef __COMPILER_RELATIVE_PATH__
     #include <backend/types.cl>
     #include <backend/utils/common.cl>
-
+    #include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
+    #include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
+    #include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>

@@ -216,18 +216,18 @@ inline uint idiv_fast(uint a, uint b)
 //------------------------------------------------------------------------
 // v0 = subpixels relative to the bottom-left sampling point
 
-inline int __float_as_int(float value) { return *(int*) &value; }
+static inline int float_to_bits(float value) { return *(int*) &value; }
 
 inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, int samplesLog2)
 {
     float mx = fmax(fmax(values.x, values.y), values.z);
-    int sh = min(max((__float_as_int(mx) >> 23) - (127 + 22), 0), 8);
+    int sh = min(max((float_to_bits(mx) >> 23) - (127 + 22), 0), 8);
     int t0 = (uint)values.x >> sh;
     int t1 = ((uint)values.y >> sh) - t0;
     int t2 = ((uint)values.z >> sh) - t0;
     
-    uint rcpMant = (__float_as_int(areaRcp) & 0x007FFFFF) | 0x00800000;
-    int rcpShift = (23 + 127) - (__float_as_int(areaRcp) >> 23);
+    uint rcpMant = (float_to_bits(areaRcp) & 0x007FFFFF) | 0x00800000;
+    int rcpShift = (23 + 127) - (float_to_bits(areaRcp) >> 23);
 
     uint3 pleq;
     long xc = ((long)t1 * d2.y - (long)t2 * d1.y) * rcpMant;

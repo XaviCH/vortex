@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
     char* extensions = malloc(param_value_size_ret);
     clGetPlatformInfo(platform_id, CL_PLATFORM_EXTENSIONS, param_value_size_ret, extensions, NULL);
 
-    printf("Compiling in platform %s %s with %s.\nExtensions available: %s.\n", name, vendor, version, extensions);
+    printf("Compiling on platform %s %s with %s.\nPlatform extensions available: %s.\n", name, vendor, version, extensions);
 
     free(name);
     free(vendor);
@@ -118,7 +118,20 @@ int main(int argc, char** argv) {
     vendor = malloc(param_value_size_ret);
     clGetDeviceInfo(device_id, CL_DEVICE_VENDOR, param_value_size_ret, vendor, NULL);
 
-    printf("Compiling in device %s %s.\n", name, vendor);
+    clGetDeviceInfo(device_id, CL_DEVICE_VERSION, 0, NULL, &param_value_size_ret);
+    version = malloc(param_value_size_ret);
+    clGetDeviceInfo(device_id, CL_DEVICE_VERSION, param_value_size_ret, version, NULL);
+    
+    clGetDeviceInfo(device_id, CL_DEVICE_EXTENSIONS, 0, NULL, &param_value_size_ret);
+    extensions = malloc(param_value_size_ret);
+    clGetDeviceInfo(device_id, CL_DEVICE_EXTENSIONS, param_value_size_ret, extensions, NULL);
+
+    printf("Compiling for device %s %s with %s.\nDevice extension available: %s.\n", name, vendor, version, extensions);
+
+    free(name);
+    free(vendor);
+    free(version);
+    free(extensions);
     
     context = clCreateContext(NULL, 1, &device_id, NULL, NULL,  &error);
     CHECK(error);
@@ -156,7 +169,7 @@ int main(int argc, char** argv) {
     }
 
     error = clBuildProgram(program, 1, &device_id, options, NULL, NULL);
-    if (error == CL_BUILD_PROGRAM_FAILURE) {
+    if (error == CL_BUILD_PROGRAM_FAILURE || error) {
     // Determine the size of the log
         size_t log_size;
         clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
