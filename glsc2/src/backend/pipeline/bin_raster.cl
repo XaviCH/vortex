@@ -8,6 +8,70 @@
 #include "glsc2/src/backend/utils/sync.cl"
 #endif
 
+const size_t triangle_buffer_elements = DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4;
+
+static inline void local_fill_triangle_buffer(
+    global const uchar* restrict g_tri_subtris,
+    local volatile int* restrict s_tri_buf,
+    local volatile uint* restrict s_batch_pos,
+    local volatile uint* restrict s_buf_count,
+    local volatile uint* restrict l_temp,
+    private int* restrict batch_pos,
+    private int* restrict buf_count,
+    private int* restrict buf_index,
+    const int batch_end
+) {
+    while (*buf_count < get_local_linear_size() && *batch_pos < batch_end) {
+    
+        // get subtriangle count
+        int tri_idx = *batch_pos + get_local_linear_id();
+        int num = 0;
+        if (tri_idx < batch_end)
+            num = g_tri_subtris[tri_idx];
+
+        // cumulative sum of subtriangles within each subgroup
+        uint scan_exc_num = local_scan_inclusive_add(num, l_temp) - num;
+
+        if (get_local_linear_id() == get_local_linear_size()-1)
+        {
+            *s_batch_pos = *batch_pos + get_local_linear_size();
+            *s_buf_count = *buf_count + scan_exc_num + num;
+        }
+        
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        // skip if no subtriangles
+        if (num) {
+            uint pos = *buf_count + scan_exc_num;
+
+            // only write if entire triangle fits
+            if (pos + num <= triangle_buffer_elements)
+            {
+                pos += *buf_index; // adjust for current start position
+                pos &= triangle_buffer_elements-1; // does the ring operation
+                if (num == 1)
+                    s_tri_buf[pos] = (tri_idx << 3) | 0x7u; // single triangle
+                else {
+                    for (int i=0; i < num; i++) {
+                        s_tri_buf[pos] = (tri_idx << 3) | i;
+                        pos++;
+                        pos &= triangle_buffer_elements-1;
+                    }
+                }
+            } else if (pos <= triangle_buffer_elements)
+            {
+                // this triangle is the first that failed, overwrite total count and triangle count
+                *s_batch_pos = *batch_pos + get_local_linear_id();
+                *s_buf_count = pos;
+            }
+        }
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+        *batch_pos = *s_batch_pos;
+        *buf_count = *s_buf_count;
+    }
+}
+
 /**
     Processed triangles are going to be stored in bins, depending if they fall inside.
     Each CTA has their full set of bins. Each CTA would batch a different set of triangles
@@ -54,14 +118,12 @@ void bin_raster(
 
     local volatile sub_group_mask_t     s_out_mask    [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];          // +1 to avoid bank collisions
     local volatile int                  s_out_count   [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];          // +1 to avoid bank collisions
-    local volatile int                  s_tri_buf     [DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4];   // triangle ring buffer
+    local volatile int                  s_tri_buf     [triangle_buffer_elements];   // triangle ring buffer
 
     local volatile uint s_batch_pos;
     local volatile uint s_buf_count;
     local volatile uint s_over_total;
     local volatile uint s_alloc_base;
-
-
 
     // #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     // local volatile uint l_temp [DEVICE_BIN_SUB_GROUPS];
@@ -105,60 +167,25 @@ void bin_raster(
         // loop over batch
         do {
             
-            // fill the s_tri_buf with tri_idx[31:3] + sub_tri_idx[2:0]  
-            while (buf_count < local_size && batch_pos < batch_end) {
-                
-                // get subtriangle count
-                int tri_idx = batch_pos + local_id;
-                int num = 0;
-                if (tri_idx < batch_end)
-                    num = g_tri_subtris[tri_idx];
-
-                // cumulative sum of subtriangles within each subgroup
-                uint scan_exc_num = local_scan_inclusive_add(num, l_temp) - num;
-
-                s_batch_pos = batch_pos + local_size;
-                if (local_id == local_size-1)
-                    s_buf_count = buf_count + scan_exc_num + num;
-                barrier(CLK_LOCAL_MEM_FENCE);
-
-                // skip if no subtriangles
-                if (num) {
-                    uint pos = buf_count + scan_exc_num;
-
-                    // only write if entire triangle fits
-                    if (pos + num <= FW_ARRAY_SIZE(s_tri_buf))
-                    {
-                        pos += buf_index; // adjust for current start position
-                        pos &= FW_ARRAY_SIZE(s_tri_buf)-1; // does the ring operation
-                        if (num == 1)
-                            s_tri_buf[pos] = (tri_idx << 3) | 0x7u; // single triangle
-                        else {
-                            for (int i=0; i < num; i++) {
-                                s_tri_buf[pos] = (tri_idx << 3) | i;
-                                pos++;
-                                pos &= FW_ARRAY_SIZE(s_tri_buf)-1;
-                            }
-                        }
-                    } else if (pos <= FW_ARRAY_SIZE(s_tri_buf))
-                    {
-                        // this triangle is the first that failed, overwrite total count and triangle count
-                        s_batch_pos = batch_pos + local_id;
-                        s_buf_count = pos;
-                    }
-                }
-
-                barrier(CLK_LOCAL_MEM_FENCE);
-                batch_pos = s_batch_pos;
-                buf_count = s_buf_count;
-            }
+            // fill the s_tri_buf with tri_idx[31:3] + sub_tri_idx[2:0]
+            local_fill_triangle_buffer(
+                g_tri_subtris,
+                s_tri_buf,
+                &s_batch_pos,
+                &s_buf_count,
+                l_temp,
+                &batch_pos,
+                &buf_count,
+                &buf_index,
+                batch_end
+            );
 
             // choose our triangle
             uint4 tri_data = (uint4){0, 0, 0, 0};
             if (local_id < buf_count)
             {
                 uint tri_pos = buf_index + local_id;
-                tri_pos &= FW_ARRAY_SIZE(s_tri_buf)-1;
+                tri_pos &= triangle_buffer_elements - 1;
 
                 // find triangle
                 int tri_idx = s_tri_buf[tri_pos];
@@ -293,7 +320,7 @@ void bin_raster(
                     if (get_sub_group_local_id() == get_sub_group_size()-1)
                         l_temp[get_local_linear_id()] = atomic_add(&s_over_total, exc_scan_over_index + overflow);
 
-                    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+                    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
                         barrier(CLK_LOCAL_MEM_FENCE);
                     #endif
 

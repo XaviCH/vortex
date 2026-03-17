@@ -168,8 +168,7 @@ inline void sub_group_emit_triangle_mask(
 }
 #endif
 
-#ifdef DEVICE_SUB_GROUP_ENABLED
-inline void local_emit_triangle_mask(
+static inline void local_emit_triangle_mask(
     uint4 tri_data, 
     local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1],
     local volatile sub_group_mask_t* l_temp, 
@@ -262,7 +261,6 @@ inline void local_emit_triangle_mask(
 
 
 }
-#endif
 
 #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
 inline void sub_group_emit_prefix_sum(
@@ -322,8 +320,7 @@ inline void sub_group_emit_prefix_sum(
 }
 #endif
 
-#ifdef DEVICE_SUB_GROUP_ENABLED
-inline void local_emit_prefix_sum(
+static inline void local_emit_prefix_sum(
     local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1],
     local uint (*s_warp_emit_prefix_sum)[CR_BIN_SQR + 1],
     local uint* s_tile_stream_curr_ofs,
@@ -367,7 +364,6 @@ inline void local_emit_prefix_sum(
             s_tile_emit_prefix_sum[tile_in_bin + 1] = scan_sum;
     }
 }
-#endif
 
 inline void sort_shared(local volatile uint* ptr, int num_items)
 {
@@ -623,7 +619,7 @@ void coarse_raster(
 
                 // TODO: Optimize for sub groups when bin streams > sub group
                 // Find the stream with the lowest triangle index.
-                #if (CR_BIN_STREAMS_SIZE <= DEVICE_SUB_GROUP_THREADS && (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW))
+                #if (CR_BIN_STREAMS_SIZE <= DEVICE_SUB_GROUP_THREADS && (DEVICE_SUB_GROUP_INTRINSICTS_ENABLED || DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED))
                 {
                     bool thread_condition;
                     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
@@ -779,7 +775,7 @@ void coarse_raster(
             #if (CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS <= DEVICE_SUB_GROUP_THREADS)
             {
                 bool thread_condition = true;
-                #ifdef DEVICE_SUB_GROUP_RAW_ENABLED
+                #ifdef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
                     thread_condition = thread_local_id < CR_BIN_SQR / 32;
                 #endif
                 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED

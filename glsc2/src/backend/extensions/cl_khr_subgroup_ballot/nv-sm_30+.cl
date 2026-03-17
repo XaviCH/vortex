@@ -11,9 +11,11 @@ static inline uint __attribute__((overloadable)) sub_group_non_uniform_broadcast
 {
     uint r;
     __asm__ volatile(
+        "{"
         ".reg .b32 mask;"
         "activemask.b32 mask;"
         "shfl.sync.idx.b32  %0, %1, %2, 0x1f, mask;"
+        "}"
         : "=r"(r) : "r"(value), "r"(index));
     return r;
 }
@@ -22,12 +24,14 @@ static inline uint __attribute__((overloadable)) sub_group_broadcast_first (uint
 {
     uint r;
     __asm__ volatile(
+        "{"
         ".reg .b32 mask, rmask;"
         ".reg .u32 id;"
         "activemask.b32 mask;"
         "brev.b32  rmask, mask;"
         "bfind.u32 id, rmask;"
         "shfl.sync.idx.b32  %0, %1, id, 0x1f, mask;"
+        "}"
         : "=r"(r) : "r"(value));
     return r;
 }
