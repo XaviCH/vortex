@@ -130,13 +130,17 @@ inline uint popcount_sub_group_mask(sub_group_mask_t sub_group_mask) {
 }
 
 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-inline sub_group_mask_t ballot_sub_group_mask(bool condition) {
+inline sub_group_mask_t ballot_sub_group_mask(bool condition) 
+{
     sub_group_mask_t sub_group_mask;
 
     #if (DEVICE_SUB_GROUP_THREADS <= 32)
         sub_group_mask.mask = sub_group_ballot(condition).x;
     #elif (DEVICE_SUB_GROUP_THREADS <= 64)
-        sub_group_mask.mask = *((ulong*)(&sub_group_ballot(condition).xy));
+    {
+        uint2 result = sub_group_ballot(condition).xy;
+        sub_group_mask.mask = *((ulong*)(&result));
+    }
     #else
         sub_group_mask.mask = sub_group_ballot(condition);
     #endif
