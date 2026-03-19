@@ -619,7 +619,7 @@ void coarse_raster(
 
                 // TODO: Optimize for sub groups when bin streams > sub group
                 // Find the stream with the lowest triangle index.
-                #if (CR_BIN_STREAMS_SIZE <= DEVICE_SUB_GROUP_THREADS && (DEVICE_SUB_GROUP_INTRINSICTS_ENABLED || DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED))
+                #if (CR_BIN_STREAMS_SIZE <= DEVICE_SUB_GROUP_THREADS && (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT))
                 {
                     bool thread_condition;
                     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED

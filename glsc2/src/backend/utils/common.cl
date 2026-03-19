@@ -89,7 +89,7 @@ inline uint cover8x8_selectFlips(int dx, int dy) // 10 instr
     return flips;
 }
 
-inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile const ulong* lut)
+inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, local volatile const ulong* lut)
 {
     // First half.
 
@@ -112,7 +112,7 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, volatile co
     return (flips >= (1 << CR_FLIPBIT_COMPL)) ? ~mask : mask;
 }
 
-inline void cover8x8_setupLUT(volatile ulong* lut)
+inline void cover8x8_setupLUT(local volatile ulong* lut)
 {
     for (int lutIdx = get_local_linear_id(); lutIdx < CR_COVER8X8_LUT_SIZE; lutIdx += get_local_linear_size())
     {
@@ -144,7 +144,7 @@ inline void cover8x8_setupLUT(volatile ulong* lut)
     }
 }
 
-inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint flips, volatile const ulong* lut) // 54 instr
+inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint flips, local volatile const ulong* lut) // 54 instr
 {
     float  halfPixel  = (float)(1 << (CR_SUBPIXEL_LOG2 - 1));
     float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
@@ -179,7 +179,7 @@ inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint fli
     return cover8x8_lookup_mask(yinit, yinc, flips, lut);
 }
 
-inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, volatile const ulong* lut) // 52 instr
+inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, local volatile const ulong* lut) // 52 instr
 {
     float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
     float  yinitScale = (float)(1 << (32 - CR_SUBPIXEL_LOG2));

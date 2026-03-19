@@ -25,9 +25,7 @@ typedef ulong   cl_ulong;
 typedef ulong2   cl_ulong2;
 #else
 #include <CL/opencl.h>
-
-// float mod(float x, float y) { return x - y * floor(x/y); }
-// static float fmod(float a, float b) { return (float)((int)a % (int)b); }
+#include <math.h>
 #endif
 
 #ifdef DEVICE_SUB_GROUP_ENABLED

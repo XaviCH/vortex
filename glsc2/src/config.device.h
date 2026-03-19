@@ -34,18 +34,14 @@
 #define DEVICE_SUB_GROUP_THREADS_LOG2 5
 
 // if disable the threads are executed as each local thread is independant of each other
+// otherwise local threads operates on sub-groups work
 #ifndef DEVICE_SUB_GROUP_SUPPORT
 #define DEVICE_SUB_GROUP_SUPPORT 1
 #endif
 
-// if enabled, sub group threads are executed in locksteps.
-#ifndef DEVICE_SUB_GROUP_LOCKSTEP
-#define DEVICE_SUB_GROUP_LOCKSTEP 0
-#endif
-
-// if enabled, sub group threads read and writes instructions are visible to all threads. 
-#ifndef DEVICE_SUB_GROUP_RAW_COHERENCE
-#define DEVICE_SUB_GROUP_RAW_COHERENCE 0
+// if enabled, sub group threads are executed in locksteps and sub-groups have raw at local memory / global memory.
+#ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT
+#define DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT 0
 #endif
 
 // if enabled the device supports sub group intra-register operations as ballot, all, any, scan or reduce. 

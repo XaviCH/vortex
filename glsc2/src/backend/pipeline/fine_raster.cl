@@ -519,8 +519,8 @@ static inline void local_1dim_execute_rop(
         
         if (active_rop_lane) {
             
-            if (!any_sub_group_mask(and_sub_group_mask(l1_temp->tile[pixel_in_tile], lt_mask))) {
-                
+            if (!any_sub_group_mask(and_sub_group_mask(l1_temp->tile[pixel_in_tile], lt_mask))) 
+            {
                 execute_ROP_single_sample(
                     fs_output, pre_depth,
                     &l1_color[pixel_in_tile], &l1_depth[pixel_in_tile], &l1_stencil[pixel_in_tile],
@@ -545,10 +545,7 @@ kernel
 #ifdef DEVICE_SUB_GROUP_ENABLED
     __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_FINE_SUB_GROUPS, 1)))
 #else
-    #if DEVICE_FINE_SUB_GROUPS != 1
-        #error DEVICE_FINE_SUB_GROUPS has to be 1
-    #endif
-    __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS*DEVICE_FINE_SUB_GROUPS, 1, 1)))
+    #error This kernel requires DEVICE_SUB_GROUP_ENABLED
 #endif
 void fine_raster_single_sample(
     global const void* gl_uniforms,
@@ -813,7 +810,7 @@ void fine_raster_single_sample(
                     #ifdef DEVICE_IMAGE_ENABLED
                     zdata = read_imageui(t_tri_data, data_idx * 4);
                     #else
-                    zdata = *((uint4*) &g_tri_data[data_idx]);
+                    zdata = *((global uint4*) &g_tri_data[data_idx]);
                     #endif
                     depth = (zdata.x * pixel_x + zdata.y * pixel_y + zdata.z) >> 16;
                     ushort old_depth = w_tile_depth[pixel_in_tile];

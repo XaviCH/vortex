@@ -294,7 +294,7 @@ inline int prepareTriangle(
 //------------------------------------------------------------------------
 
 inline void setupTriangle(
-    triangle_header_t* th, triangle_data_t* td, int3 vidx,
+    global triangle_header_t* restrict th, global triangle_data_t* restrict td, int3 vidx,
     float4 v0, float4 v1, float4 v2,
     float2 b0, float2 b1, float2 b2,
     int2 p0, int2 p1, int2 p2, float3 rcpW,
@@ -366,16 +366,16 @@ inline void setupTriangle(
     // Write triangle_data_t.
 
     if (is_render_mode_flag_enable_depth(c_render_mode)) {
-        *(uint4*)&td->zx = (uint4)(zpleq.x, zpleq.y, zpleq.z, zslope);
+        *(global uint4*)&td->zx = (uint4)(zpleq.x, zpleq.y, zpleq.z, zslope);
     }
     if (is_render_mode_flag_enable_lerp(c_render_mode)) {
-        *(uint4*)&td->wx = (uint4)(wpleq.x, wpleq.y, wpleq.z, upleq.x);
-        *(uint4*)&td->uy = (uint4)(upleq.y, upleq.z, vpleq.x, vpleq.y);
-        *(uint4*)&td->vb = (uint4)(vpleq.z, vidx.x, vidx.y, vidx.z);
+        *(global uint4*)&td->wx = (uint4)(wpleq.x, wpleq.y, wpleq.z, upleq.x);
+        *(global uint4*)&td->uy = (uint4)(upleq.y, upleq.z, vpleq.x, vpleq.y);
+        *(global uint4*)&td->vb = (uint4)(vpleq.z, vidx.x, vidx.y, vidx.z);
     }
     else
     {
-        *(uint4*)&td->vb = (uint4)(0, vidx.x, vidx.y, vidx.z);
+        *(global uint4*)&td->vb = (uint4)(0, vidx.x, vidx.y, vidx.z);
     }
 
     // Determine flipbits.
@@ -385,7 +385,7 @@ inline void setupTriangle(
     uint f20 = cover8x8_selectFlips(-d2.x, -d2.y);
 
     // Write triangle_header_t.
-    *(uint4*)th = (uint4)(
+    *(global uint4*)th = (uint4)(
         prmt(p0.x, p0.y, 0x5410),
         prmt(p1.x, p1.y, 0x5410),
         prmt(p2.x, p2.y, 0x5410),

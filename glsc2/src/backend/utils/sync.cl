@@ -25,7 +25,8 @@
     #include "glsc2/src/backend/utils/common.cl"
 #endif
 
-#ifdef DEVICE_SUB_GROUP_RAW_ENABLED
+
+#ifdef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
 
 inline uint __attribute__((overloadable)) sub_group_scan_inclusive_add(uint value, local volatile uint* sg_temp) {
     local volatile uint* ptr = &sg_temp[get_sub_group_local_id()];
@@ -81,7 +82,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
         #pragma unroll
         #endif
         for(int target=1; target < get_sub_group_size(); target *= 2) {
-            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+            #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             if (local_id >= target) {
@@ -114,7 +115,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
         #pragma unroll
         #endif
         for(int target=1; target < get_local_size(0); target *= 2) {
-            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+            #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             if (get_local_id(0) >= target) {
@@ -142,7 +143,7 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
         #pragma unroll
         #endif
         for(uint i=1; i<get_local_size(0); i=i*2) {
-            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+            #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
                 barrier(CLK_LOCAL_MEM_FENCE);
             #endif
             if (id >= i) {
@@ -281,7 +282,7 @@ inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
 */
 
 
-inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint id, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+static inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint id, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
     uint result;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
@@ -292,10 +293,10 @@ inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint 
     #else
     {
         (*sg_temp)[get_local_id(0)] = value;
-        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
             barrier(CLK_LOCAL_MEM_FENCE);
         #endif
-        result = (*sg_temp)[0];
+        result = (*sg_temp)[id];
     }
     #endif
 
@@ -340,7 +341,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
     #pragma unroll
     #endif
     for(int i=1; i<get_sub_group_size(); i=i*2) {
-        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
             barrier(CLK_LOCAL_MEM_FENCE);
         #endif
         if (local_id >= i) {
@@ -360,7 +361,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
     #pragma unroll
     #endif
     for(int i=1; i<get_local_size(0); i=i*2) {
-        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
         barrier(CLK_LOCAL_MEM_FENCE);
         #endif
         if (local_id >= i) {
@@ -376,7 +377,7 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
 
     local_1dim_scan_inclusive_or(value, sg_temp);
     
-    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
         barrier(CLK_LOCAL_MEM_FENCE);
     #endif
 
@@ -388,7 +389,7 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
 
     local_1dim_scan_inclusive_or(value, l_temp);
     
-    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
         barrier(CLK_LOCAL_MEM_FENCE);
     #endif
 
@@ -399,7 +400,7 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
  * @brief Ensure memory syncronization at least for 1st dimension threads on work group.
  */
 inline void local_1dim_barrier(cl_mem_fence_flags flags) {
-    #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
         #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
             sub_group_barrier(flags);
         #else
@@ -469,7 +470,7 @@ inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool val
 
         clear_sub_group_mask(&(*sg_temp)[0]);
         atomic_or_sub_group_mask(&(*sg_temp)[0], tmp);
-        #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
+        #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
             barrier(CLK_LOCAL_MEM_FENCE);
         #endif
         mask = (*sg_temp)[0];

@@ -48,7 +48,16 @@ static inline void set_bit_sub_group_mask(sub_group_mask_t* sub_group_mask, uint
     #endif
 }
 
-inline sub_group_mask_t get_thread_bit_sub_group_mask() 
+static inline sub_group_mask_t get_sub_group_mask_zero()
+{
+    sub_group_mask_t mask;
+
+    mask.mask = 0;
+
+    return mask;
+}
+
+static inline sub_group_mask_t get_thread_bit_sub_group_mask() 
 {
     sub_group_mask_t mask;
 
@@ -153,7 +162,7 @@ inline bool get_bit_sub_group_mask(sub_group_mask_t sub_group_mask, uint positio
 
 
 
-inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group_mask_t* address, const sub_group_mask_t mask) 
+static inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group_mask_t* address, const sub_group_mask_t mask) 
 {
     sub_group_mask_t atomic_mask;
 
