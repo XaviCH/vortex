@@ -1,6 +1,9 @@
 #ifdef __COMPILER_RELATIVE_PATH__
-#include <backend/types.cl>
-#include <backend/utils/common.cl>
+    #include <backend/types.cl>
+    #include <backend/utils/common.cl>
+    #include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
+    #include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
+    #include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
 #else
 #include "glsc2/src/backend/types.cl"
 #include "glsc2/src/backend/utils/common.cl"
@@ -391,8 +394,10 @@ inline void setupTriangle(
         prmt(p2.x, p2.y, 0x5410),
         (zmin & 0xfffff000u) | (f01 << 6) | (f12 << 2) | (f20 >> 2));
 
-    set_th_misc_face(&th->misc, face);
-    set_th_misc_primitive_config(&th->misc, c_primitive_config);
+    triangle_header_misc_t th_misc = th->misc; 
+    set_th_misc_face(&th_misc, face);
+    set_th_misc_primitive_config(&th_misc, c_primitive_config);
+    th->misc = th_misc;
 }
 
 //------------------------------------------------------------------------

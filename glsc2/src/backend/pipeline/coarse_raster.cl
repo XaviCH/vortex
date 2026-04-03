@@ -32,142 +32,10 @@ inline void compute_tile_aabb(
     *hiy = add_clamp_0_x((v0y + max_max(d01y, 0, d02y)) >> tile_log, 0, max_tile_y_in_bin);
 }
 
-#if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
-inline void sub_group_emit_triangle_mask(
-    uint4 tri_data, 
-    local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1], 
-    local volatile sub_group_mask_t* l_temp, 
-    int tri_idx,
-    int origin_x, int origin_y,
-    int max_tile_x_in_bin, int max_tile_y_in_bin,
-    int tile_log
-) {
-
-    bool emit = tri_idx != -1;
-
-    if (!any_sub_group_mask(local_1dim_ballot(emit, l_temp))) return;
-
-    int v0x, v0y, d01x, d01y, d02x, d02y;
-    if (emit)
-        extract_tri_data(tri_data, origin_x, origin_y, &v0x, &v0y, &d01x, &d01y, &d02x, &d02y);
-
-    int lox, loy, hix, hiy;
-    if (emit)
-        compute_tile_aabb(
-            v0x, v0y, d01x, d01y, d02x, d02y, 
-            tile_log, max_tile_x_in_bin, max_tile_y_in_bin, 
-            &lox, &loy, &hix, &hiy);
-
-    int sizex, sizey, area;
-    if (emit)
-    {
-        sizex = add_sub(hix, 1, lox);
-        sizey = add_sub(hiy, 1, loy);
-        area = sizex * sizey;
-    }
-
-    local sub_group_mask_t* curr_ptr;
-    int ptr_y_inc;
-    sub_group_mask_t mask_bit;
-    if (emit)
-    {
-        clear_sub_group_mask(&mask_bit);
-        curr_ptr = &s_warp_emit_mask[get_local_id(1)][lox + (loy << CR_BIN_LOG2)];
-        ptr_y_inc = CR_BIN_SIZE - sizex;
-        set_bit_sub_group_mask(&mask_bit, get_local_id(0));
-    }
-
-    /* TODO: fix optimization
-    sub_group_mask_t small_tile = local_1dim_ballot(sizex <= 2 && sizey <= 2, l_temp);
-
-    if (all_sub_group_mask(small_tile)) {
-        atomic_or_sub_group_mask(curr_ptr, mask_bit);
-        if (sizex == 2) atomic_or_sub_group_mask(curr_ptr + 1, mask_bit);
-        if (sizey == 2) atomic_or_sub_group_mask(curr_ptr + CR_BIN_SIZE, mask_bit);
-        if (sizex == 2 && sizey == 2) atomic_or_sub_group_mask(curr_ptr + 1 + CR_BIN_SIZE, mask_bit);
-        return;
-    }
-    */
-
-    // Initialize edge functions.
-    int d12x, d12y, b01, b02, b12;
-    if (emit) {
-        d12x = d02x - d01x;
-        d12y = d02y - d01y;
-        v0x -= lox << tile_log;
-        v0y -= loy << tile_log;
-
-        int t01 = v0x * d01y - v0y * d01x;
-        int t02 = v0y * d02x - v0x * d02y;
-        int t12 = d01x * d12y - d01y * d12x - t01 - t02;
-        b01 = add_sub(t01 >> tile_log, max(d01x, 0), min(d01y, 0));
-        b02 = add_sub(t02 >> tile_log, max(d02y, 0), min(d02x, 0));
-        b12 = add_sub(t12 >> tile_log, max(d12x, 0), min(d12y, 0));
-
-        d01x += sizex * d01y;
-        d02x += sizex * d02y;
-        d12x += sizex * d12y;
-    }
-
-    // TODO: Checkout this
-    /*
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    {
-        uint aabb_mask, mask_x, mask_y;
-        int wloy, wlox, whix, whiy, warea;
-
-        aabb_mask = add_sub(2 << hix, 0x20000 << hiy, 1 << lox) - (0x10000 << loy);
-        aabb_mask = sub_group_reduce_or(aabb_mask, l_temp);
-
-        mask_x = aabb_mask & 0xFFFF;
-        mask_y = aabb_mask >> 16;
-        wlox = findLeadingOne(mask_x ^ (mask_x - 1));
-        wloy = findLeadingOne(mask_y ^ (mask_y - 1));
-        whix = findLeadingOne(mask_x);
-        whiy = findLeadingOne(mask_y);
-        warea = (add_sub(whix, 1, wlox)) * (add_sub(whiy, 1, wloy));
-
-        if (sub_group_ballot(warea * 4 <= area * 8))
-        {
-            for (int y = wloy; y <= hiy; y++)
-            {
-                if (y < loy) continue;
-
-                for (int x = wlox; x <= hix; x++)
-                {
-                    if (x < lox) continue;
-
-                    *curr_ptr = sub_group_ballot(b01 >= 0 && b02 >= 0 && b12 >= 0);
-                    curr_ptr += 1, b01 -= d01y, b02 += d02y, b12 -= d12y;
-                }
-                curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x;
-            }
-
-            return;
-        }
-    }
-    #endif
-    */
-
-    if (emit)
-    {
-        local sub_group_mask_t* skip_ptr = curr_ptr + (sizex);
-        local sub_group_mask_t* end_ptr  = curr_ptr + (sizey << CR_BIN_LOG2);
-        do
-        {
-            if (b01 >= 0 && b02 >= 0 && b12 >= 0)
-                atomic_or_sub_group_mask(curr_ptr, mask_bit);
-            curr_ptr += 1, b01 -= d01y, b02 += d02y, b12 -= d12y;
-            if (curr_ptr == skip_ptr)
-                curr_ptr += ptr_y_inc, b01 += d01x, b02 -= d02x, b12 += d12x, skip_ptr += CR_BIN_SIZE;
-        }
-        while (curr_ptr != end_ptr);
-    }
-
-
-}
-#endif
-
+/**
+ * @brief emit mask for each 1 dim thread that needs to write into tile 
+ * @param s_warp_emit_mask
+ */
 static inline void local_emit_triangle_mask(
     uint4 tri_data, 
     local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1],
@@ -177,14 +45,6 @@ static inline void local_emit_triangle_mask(
     int max_tile_x_in_bin, int max_tile_y_in_bin,
     int tile_log
 ) {
-
-    #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
-    {
-        sub_group_emit_triangle_mask(tri_data, s_warp_emit_mask, l_temp, tri_idx, origin_x, origin_y, max_tile_x_in_bin, max_tile_y_in_bin, tile_log);
-        return;
-    }
-    #endif
-
     if (tri_idx == -1) return;
 
     int v0x, v0y, d01x, d01y, d02x, d02y;
@@ -259,10 +119,9 @@ static inline void local_emit_triangle_mask(
         while (curr_ptr != end_ptr);
     }
 
-
 }
 
-#if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
+#if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT)
 inline void sub_group_emit_prefix_sum(
     local sub_group_mask_t (*s_warp_emit_mask)[CR_BIN_SQR + 1],
     local uint (*s_warp_emit_prefix_sum)[CR_BIN_SQR + 1],
@@ -329,18 +188,23 @@ static inline void local_emit_prefix_sum(
     int emit_shift
 ) {
 
-    #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_RAW)
+    /*
+    #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT)
     {
         sub_group_emit_prefix_sum(s_warp_emit_mask, s_warp_emit_prefix_sum, s_tile_stream_curr_ofs, s_tile_emit_prefix_sum, l_temp, emit_shift);
         return;
     }
     #endif
+    */
 
-    for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size()) {
+    for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size()) 
+    {
         int tile_in_bin = tile_in_bin_chunk + get_local_linear_id();
 
         int tile_emits, tile_allocs;
+
         uint sum = 0;
+        
         if (tile_in_bin < CR_BIN_SQR)
         {
             tile_emits = 0;
@@ -365,7 +229,7 @@ static inline void local_emit_prefix_sum(
     }
 }
 
-inline void sort_shared(local volatile uint* ptr, int num_items)
+static inline void sort_shared(local volatile uint* ptr, int num_items)
 {
     int thread_local_id = get_local_linear_id(); // get_local_id(0) + get_local_id(1) * get_local_size(0);
     int range = 16;
@@ -461,6 +325,60 @@ inline int global_tile_idx(int tile_in_bin, int c_width_tiles)
 
 //----------------------------------------------------------------------------------------
 
+static inline void local_find_first_stream(
+    global const int* restrict g_bin_seg_count,
+    global const int* restrict g_bin_seg_next,
+    global const int* restrict g_bin_seg_data,
+    local volatile int* restrict s_bin_stream_first_tri,
+    local volatile int* restrict s_bin_stream_curr_seg,
+    local volatile uint* restrict s_bin_stream_selected_ofs,
+    local volatile uint* restrict s_bin_stream_selected_size,
+    local volatile int* restrict s_tri_queue_write_pos,
+    local volatile uint* restrict l_temp,
+    const uint tri_queue_write_pos
+) {
+    uint thread_local_id = get_local_linear_id();
+
+    uint first_tri = UINT_MAX;
+    
+    if (thread_local_id < CR_BIN_STREAMS_SIZE)
+        first_tri = s_bin_stream_first_tri[thread_local_id];
+
+    // TODO: impl this inside a local_1dim, maybe local_reduce_min_scoped(value, l_array, threads)
+    uint min_first_tri;
+
+    #if (CR_BIN_STREAMS_SIZE <= DEVICE_SUB_GROUP_THREADS)
+    {
+        // #if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT)
+        // {
+        //     if (thread_local_id >= CR_BIN_STREAMS_SIZE) return;
+        // }
+        // #endif
+        min_first_tri = local_1dim_reduce_min(first_tri, l_temp);
+    }
+    #else
+    {
+        min_first_tri = local_reduce_min(first_tri, l_temp);
+    }
+    #endif
+
+    if (min_first_tri == first_tri && thread_local_id < CR_BIN_STREAMS_SIZE)
+    {
+        int seg_idx = s_bin_stream_curr_seg[thread_local_id];
+        *s_bin_stream_selected_ofs = seg_idx << CR_BIN_SEG_LOG2;
+        if (seg_idx != -1)
+        {
+            int seg_size = g_bin_seg_count[seg_idx];
+            int seg_next = g_bin_seg_next[seg_idx];
+            *s_bin_stream_selected_size = seg_size;
+            *s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
+            s_bin_stream_curr_seg[thread_local_id] = seg_next;
+            s_bin_stream_first_tri[thread_local_id] = (seg_next == -1) ? ~0u : g_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
+        }
+    }
+}
+
+//----------------------------------------------------------------------------------------
 kernel
 #ifdef DEVICE_SUB_GROUP_ENABLED
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_COARSE_SUB_GROUPS, 1)))
@@ -503,7 +421,7 @@ void coarse_raster(
 ) {
     
     local volatile uint s_work_counter;
-    local volatile uint s_scan_temp          [DEVICE_COARSE_SUB_GROUPS][48];              // 3KB
+    local volatile uint s_scan_temp          [DEVICE_COARSE_SUB_GROUPS][DEVICE_SUB_GROUP_THREADS + DEVICE_SUB_GROUP_THREADS/2];              // 3KB
 
     local volatile uint s_bin_order           [CR_MAXBINS_SQR];                   // 1KB
     local volatile int s_bin_stream_curr_seg  [CR_BIN_STREAMS_SIZE];              // 0KB
@@ -526,7 +444,7 @@ void coarse_raster(
     // Private
     int tile_log         = CR_TILE_LOG2 + CR_SUBPIXEL_LOG2;
     int thread_local_id  = get_local_linear_id();
-    int emit_shift       = CR_BIN_LOG2 * 2 + 5; // We scan ((num_emits << emit_shift) | num_allocs) over tiles.
+    int emit_shift       = CR_BIN_LOG2 * 2 + DEVICE_SUB_GROUP_THREADS_LOG2; // We scan ((num_emits << emit_shift) | num_allocs) over tiles.
 
     if (*a_num_subtris > c_max_subtris || *a_num_bin_segs > c_max_bin_segs)
         return;
@@ -543,7 +461,11 @@ void coarse_raster(
     {
         int count = 0;
         for (int i = 0; i < CR_BIN_STREAMS_SIZE; i++)
-            count += g_bin_total[(bin_idx << CR_BIN_STREAMS_LOG2) + i];
+            count += g_bin_total[(bin_idx * CR_BIN_STREAMS_SIZE) + i];
+        // n = used_bins, k = num_bits_to_fit_bin_idx 
+        // bin_order[k:0] = bin_idx
+        // count = num_triangles_in_total_for_bin_idx
+        // bin_order[n:k] = negate-1 the number of triangles
         s_bin_order[bin_idx] = (~count << (CR_MAXBINS_LOG2 * 2)) | bin_idx;
     }
 
@@ -582,7 +504,7 @@ void coarse_raster(
 
         if (thread_local_id < CR_BIN_STREAMS_SIZE)
         {
-            int seg_idx = g_bin_first_seg[(bin_idx << CR_BIN_STREAMS_LOG2) + thread_local_id];
+            int seg_idx = g_bin_first_seg[(bin_idx * CR_BIN_STREAMS_SIZE) + thread_local_id];
             s_bin_stream_curr_seg[thread_local_id] = seg_idx;
             s_bin_stream_first_tri[thread_local_id] = (seg_idx == -1) ? ~0u : g_bin_seg_data[seg_idx << CR_BIN_SEG_LOG2];
         }
@@ -602,7 +524,6 @@ void coarse_raster(
 
 
         // Entire block: Merge input streams and process triangles.
-
         if (!bin_empty)
         do
         {
@@ -616,89 +537,31 @@ void coarse_raster(
             while (tri_queue_write_pos - tri_queue_read_pos <= get_local_linear_size())
             {
                 // First warp: Choose the segment with the lowest initial triangle index.
-
-                // TODO: Optimize for sub groups when bin streams > sub group
                 // Find the stream with the lowest triangle index.
-                #if (CR_BIN_STREAMS_SIZE <= DEVICE_SUB_GROUP_THREADS && (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT || DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT))
-                {
-                    bool thread_condition;
-                    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-                        thread_condition = get_sub_group_id() == 0;
-                    #else
-                        thread_condition = thread_local_id < CR_BIN_STREAMS_SIZE;
-                    #endif
 
-                    if (thread_condition)
-                    {
-                        
-                        uint id, first_tri, min_first_tri;
-                        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-                        {
-                            id = get_sub_group_local_id();
-                            first_tri = id < CR_BIN_STREAMS_SIZE ? s_bin_stream_first_tri[id] : UINT_MAX;
-                            min_first_tri = sub_group_reduce_min(first_tri);
-                        }
-                        #else
-                        {
-                            id = thread_local_id;
-                            first_tri = s_bin_stream_first_tri[id];
-                            sub_group_scan_inclusive_min(first_tri, l_temp);
-                            min_first_tri = l_temp[CR_BIN_STREAMS_SIZE-1];
-                        }
-                        #endif
-                        
-                        if (min_first_tri == first_tri)
-                        {
-                            int seg_idx = s_bin_stream_curr_seg[id];
-                            s_bin_stream_selected_ofs = seg_idx << CR_BIN_SEG_LOG2;
-                            if (seg_idx != -1)
-                            {
-                                int seg_size = g_bin_seg_count[seg_idx];
-                                int seg_next = g_bin_seg_next[seg_idx];
-                                s_bin_stream_selected_size = seg_size;
-                                s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
-                                s_bin_stream_curr_seg[id] = seg_next;
-                                s_bin_stream_first_tri[id] = (seg_next == -1) ? ~0u : g_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
-                            }
-                        }
-                        
-                    }
-                }
-                #else
-                {
-                    uint first_tri = UINT_MAX; 
-                    if (thread_local_id < CR_BIN_STREAMS_SIZE)
-                        first_tri = s_bin_stream_first_tri[thread_local_id];
+                local_find_first_stream(
+                    g_bin_seg_count,
+                    g_bin_seg_next,
+                    g_bin_seg_data,
+                    s_bin_stream_first_tri,
+                    s_bin_stream_curr_seg,
+                    &s_bin_stream_selected_ofs,
+                    &s_bin_stream_selected_size,
+                    &s_tri_queue_write_pos,
+                    l_temp,
+                    tri_queue_write_pos
+                );
 
-                    // TODO: reduce the scope of the reduce depending on bin streams
-                    uint min_first_tri = local_reduce_min(first_tri, l_temp);
-
-                    if (min_first_tri == first_tri && thread_local_id < CR_BIN_STREAMS_SIZE)
-                    {
-                        int seg_idx = s_bin_stream_curr_seg[thread_local_id];
-                        s_bin_stream_selected_ofs = seg_idx << CR_BIN_SEG_LOG2;
-                        if (seg_idx != -1)
-                        {
-                            int seg_size = g_bin_seg_count[seg_idx];
-                            int seg_next = g_bin_seg_next[seg_idx];
-                            s_bin_stream_selected_size = seg_size;
-                            s_tri_queue_write_pos = tri_queue_write_pos + seg_size;
-                            s_bin_stream_curr_seg[thread_local_id] = seg_next;
-                            s_bin_stream_first_tri[thread_local_id] = (seg_next == -1) ? ~0u : g_bin_seg_data[seg_next << CR_BIN_SEG_LOG2];
-                        }
-                    }
-                }
-                #endif
                 // No more segments => break.
 
                 barrier(CLK_LOCAL_MEM_FENCE);
                 tri_queue_write_pos = s_tri_queue_write_pos;
                 int seg_ofs = s_bin_stream_selected_ofs;
-                if (seg_ofs < 0)
-                    break;
+
+                if (seg_ofs < 0) break;
 
                 int seg_size = s_bin_stream_selected_size;
-                barrier(CLK_LOCAL_MEM_FENCE);
+                barrier(CLK_LOCAL_MEM_FENCE); // ensure reads from local mem
 
                 // Fetch triangles into the queue.
                 for (int idx_in_seg = thread_local_id; idx_in_seg < seg_size; idx_in_seg += get_local_linear_size())
@@ -708,7 +571,6 @@ void coarse_raster(
                 }
 
             }
-
             // All threads: Clear emit masks.
 
             for (int mask_idx = thread_local_id; mask_idx < get_local_size(1) * CR_BIN_SQR; mask_idx += get_local_linear_size())
@@ -776,7 +638,7 @@ void coarse_raster(
             {
                 bool thread_condition = true;
                 #ifdef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
-                    thread_condition = thread_local_id < CR_BIN_SQR / 32;
+                    thread_condition = thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS;
                 #endif
                 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
                     thread_condition = thread_local_id < get_sub_group_size();
@@ -784,13 +646,13 @@ void coarse_raster(
 
                 if (thread_condition){
                     int sum = 0;
-                    if (thread_local_id < CR_BIN_SQR / 32)
-                        sum = s_tile_emit_prefix_sum[(thread_local_id << 5) + 32];
+                    if (thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS)
+                        sum = s_tile_emit_prefix_sum[(thread_local_id << DEVICE_SUB_GROUP_THREADS_LOG2) + DEVICE_SUB_GROUP_THREADS];
                     
                     int scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
 
-                    if (thread_local_id < CR_BIN_SQR / 32)
-                        s_scan_temp[0][thread_local_id + 16] = scan_sum;
+                    if (thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS)
+                        s_scan_temp[0][thread_local_id + DEVICE_SUB_GROUP_THREADS/2] = scan_sum;
                 }
             }
             #else 
@@ -804,7 +666,7 @@ void coarse_raster(
 
             for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += get_local_linear_size())
             {
-                int sum = s_tile_emit_prefix_sum[tile_in_bin + 1] + s_scan_temp[0][(tile_in_bin >> 5) + 15];
+                int sum = s_tile_emit_prefix_sum[tile_in_bin + 1] + s_scan_temp[0][(tile_in_bin >> DEVICE_SUB_GROUP_THREADS_LOG2) + (DEVICE_SUB_GROUP_THREADS/2 - 1)];
                 int num_emits = sum >> emit_shift;
                 int num_allocs = sum & ((1 << emit_shift) - 1);
                 s_tile_emit_prefix_sum[tile_in_bin + 1] = num_emits;
@@ -834,50 +696,58 @@ void coarse_raster(
                 // Find tile in bin.
 
                 local uint* tile_base = (local uint*) &s_tile_emit_prefix_sum[0];
-                local uint* tile_ptr = tile_base;
-                local uint* ptr;
+                int tile_in_bin = 0;
 
                 #pragma unroll
                 for (int i=CR_BIN_SQR; i>0; i /=2) {
-                    ptr = tile_ptr + i/2;
-                    if (emit_in_bin >= *ptr) tile_ptr = ptr;
+                    int tile_tmp = tile_in_bin + i/2;
+                    // ptr = tile_ptr + i/2;
+                    if (emit_in_bin >= tile_base[tile_tmp]) {
+                        tile_in_bin = tile_tmp;
+                        // tile_ptr = ptr;
+                    }
                 }
 
-                int tile_in_bin = (tile_ptr - tile_base);
-                int emit_in_tile = emit_in_bin - *tile_ptr;
+                int emit_in_tile = emit_in_bin - tile_base[tile_in_bin];
 
                 // Find warp in tile.
 
                 int warp_step = (CR_BIN_SQR + 1);
                 local uint* warp_base = (local uint*)&s_warp_emit_prefix_sum[0][tile_in_bin] - warp_step;
-                local uint* warp_ptr = warp_base;
+                int warp_in_bin = 0;
 
                 #pragma unroll
                 for (int i=DEVICE_COARSE_SUB_GROUPS; i>0; i /=2) {
-                    ptr = warp_ptr + i/2 * warp_step;
-                    if (emit_in_tile >= *ptr) warp_ptr = ptr;
+                    int warp_tmp = warp_in_bin + i/2 * warp_step; 
+                    // ptr = warp_ptr + i/2 * warp_step;
+                    if (emit_in_tile >= warp_base[warp_tmp]) {
+                        // warp_ptr = ptr;
+                        warp_in_bin = warp_tmp;
+                    }
                 }
 
-                int warp_in_tile = (warp_ptr - warp_base) >> (CR_BIN_LOG2 * 2);
-                uint emit_mask = *(warp_ptr + warp_step + ((local uint*)s_warp_emit_mask - (local uint*)s_warp_emit_prefix_sum));
-                int emit_in_warp = emit_in_tile - *(warp_ptr + warp_step) + popcount(emit_mask);
-
+                int warp_in_tile = warp_in_bin >> (CR_BIN_LOG2 * 2);
+                sub_group_mask_t emit_mask = s_warp_emit_mask[0][tile_in_bin + warp_in_bin];
+                int emit_in_warp = emit_in_tile - warp_base[warp_in_bin + warp_step] + popcount_sub_group_mask(emit_mask);
                 // Find thread in warp.
 
                 int thread_in_warp = 0;
                 int pop;
                 #pragma unroll
-                for(int bits = DEVICE_SUB_GROUP_THREADS/2; bits > 1; bits/=2) {
-                    uint mask = (1u << bits) - 1; 
-                    pop = popcount(emit_mask & mask);
+                for(int bits = DEVICE_SUB_GROUP_THREADS/2; bits > 1; bits/=2) 
+                {
+                    // uint mask = (1u << bits) - 1;
+                    sub_group_mask_t mask = get_sub_group_mask_ones_lt(bits);
+                    pop = popcount_sub_group_mask(and_sub_group_mask(emit_mask, mask));
                     if (emit_in_warp >= pop) {
                         emit_in_warp -= pop;
-                        emit_mask >>= bits;
+                        // emit_mask >>= bits;
+                        emit_mask = shift_right_sub_group_mask(emit_mask, bits);
                         thread_in_warp += bits;
                     }
                 }
                 
-                if (emit_in_warp >= (emit_mask & 1))
+                if (emit_in_warp >= get_bit_sub_group_mask(emit_mask, 0))
                     thread_in_warp++;
 
                 // Figure out where to write.
@@ -896,7 +766,7 @@ void coarse_raster(
 
                 // Write.
 
-                int queue_idx = warp_in_tile * 32 + thread_in_warp;
+                int queue_idx = warp_in_tile * DEVICE_SUB_GROUP_THREADS + thread_in_warp;
                 int tri_idx = s_tri_queue[(tri_queue_read_pos + queue_idx) & (CR_COARSE_QUEUE_SIZE - 1)];
 
                 g_tile_seg_data[outOfs] = tri_idx;
@@ -976,7 +846,7 @@ void coarse_raster(
             if (pass)
                 break;
 
-            s_scan_temp[0][(tile_in_bin >> 5) + 16] = popcount_sub_group_mask(bitmask);
+            s_scan_temp[0][(tile_in_bin >> DEVICE_SUB_GROUP_THREADS_LOG2) + DEVICE_SUB_GROUP_THREADS/2] = popcount_sub_group_mask(bitmask);
 
             int seg_idx = (ofs - 1) >> CR_TILE_SEG_LOG2;
             int seg_count = ofs & (CR_TILE_SEG_SIZE - 1);
@@ -1008,12 +878,12 @@ void coarse_raster(
 
             uint sum = 0;
             if (active_thread) 
-                sum = s_scan_temp[0][thread_local_id + 16];
+                sum = s_scan_temp[0][thread_local_id + DEVICE_SUB_GROUP_THREADS/2];
 
             sum = local_1dim_scan_inclusive_add(sum, l_temp);
 
             if (active_thread)
-                s_scan_temp[0][thread_local_id + 16] = sum;
+                s_scan_temp[0][thread_local_id + DEVICE_SUB_GROUP_THREADS/2] = sum;
 
             if (thread_local_id == CR_BIN_SQR / get_sub_group_size() - 1)
                 s_first_active_idx = atomic_add(a_num_active_tiles, sum);
@@ -1057,7 +927,7 @@ void coarse_raster(
                 continue;
 
             int active_idx = s_first_active_idx;
-            active_idx += s_scan_temp[0][(tile_in_bin / DEVICE_SUB_GROUP_THREADS) + 15];
+            active_idx += s_scan_temp[0][(tile_in_bin / DEVICE_SUB_GROUP_THREADS) + (DEVICE_SUB_GROUP_THREADS/2) - 1];
             sub_group_mask_t cummulative = and_sub_group_mask(ballot, get_lane_sub_group_mask_lt()); 
             active_idx += popcount_sub_group_mask(cummulative);
 

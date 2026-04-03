@@ -8,7 +8,7 @@ HEADER_FILES = $(wildcard ../../*.h)
 KERNELS_CL = $(wildcard *.cl)
 KERNELS_O_C = $(KERNELS_CL:.cl=.o.c)
 
-CL_FLAGS += -Werror -D__COMPILER_RELATIVE_PATH__ -I$(SRC_PATH) -cl-nv-verbose
+CL_FLAGS += -Werror -D__COMPILER_RELATIVE_PATH__ -I$(SRC_PATH) # -cl-nv-verbose
 # OPT_FLAGS = -D'DEVICE_SUB_GROUP_SUPPORT=0' -D'DEVICE_IMAGE_SUPPORT=0'
 
 .PHONY: all clean clean-all

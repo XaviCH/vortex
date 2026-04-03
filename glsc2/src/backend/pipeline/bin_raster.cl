@@ -8,7 +8,7 @@
 #include "glsc2/src/backend/utils/sync.cl"
 #endif
 
-const size_t triangle_buffer_elements = DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4;
+#define TRIANGLE_BUFFER_ELEMS (DEVICE_BIN_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS*4)
 
 static inline void local_fill_triangle_buffer(
     global const uchar* restrict g_tri_subtris,
@@ -45,20 +45,18 @@ static inline void local_fill_triangle_buffer(
             uint pos = *buf_count + scan_exc_num;
 
             // only write if entire triangle fits
-            if (pos + num <= triangle_buffer_elements)
+            if (pos + num <= TRIANGLE_BUFFER_ELEMS)
             {
-                pos += *buf_index; // adjust for current start position
-                pos &= triangle_buffer_elements-1; // does the ring operation
+                pos = (pos + *buf_index) % TRIANGLE_BUFFER_ELEMS; // adjust for current start position
                 if (num == 1)
                     s_tri_buf[pos] = (tri_idx << 3) | 0x7u; // single triangle
                 else {
                     for (int i=0; i < num; i++) {
                         s_tri_buf[pos] = (tri_idx << 3) | i;
-                        pos++;
-                        pos &= triangle_buffer_elements-1;
+                        pos = (pos + 1) % TRIANGLE_BUFFER_ELEMS;
                     }
                 }
-            } else if (pos <= triangle_buffer_elements)
+            } else if (pos <= TRIANGLE_BUFFER_ELEMS)
             {
                 // this triangle is the first that failed, overwrite total count and triangle count
                 *s_batch_pos = *batch_pos + get_local_linear_id();
@@ -110,7 +108,6 @@ void bin_raster(
     private const int c_viewport_width,
     private const int c_width_bins
 ) {
-
     // Local space
     local volatile int  s_out_ofs     [CR_MAXBINS_SQR];
     local volatile int  s_out_total   [CR_MAXBINS_SQR];
@@ -118,7 +115,7 @@ void bin_raster(
 
     local volatile sub_group_mask_t     s_out_mask    [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];          // +1 to avoid bank collisions
     local volatile int                  s_out_count   [DEVICE_BIN_SUB_GROUPS][CR_MAXBINS_SQR + 1];          // +1 to avoid bank collisions
-    local volatile int                  s_tri_buf     [triangle_buffer_elements];   // triangle ring buffer
+    local volatile int                  s_tri_buf     [TRIANGLE_BUFFER_ELEMS];   // triangle ring buffer
 
     local volatile uint s_batch_pos;
     local volatile uint s_buf_count;
@@ -142,7 +139,7 @@ void bin_raster(
     // initialize output linked lists and offsets
     if (local_id < c_num_bins)
     {
-        g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_group_id(0)] = -1;
+        g_bin_first_seg[(local_id * CR_BIN_STREAMS_SIZE) + get_group_id(0)] = -1;
         s_out_ofs[local_id] = -CR_BIN_SEG_SIZE;
         s_out_total[local_id] = 0;
     }
@@ -185,7 +182,7 @@ void bin_raster(
             if (local_id < buf_count)
             {
                 uint tri_pos = buf_index + local_id;
-                tri_pos &= triangle_buffer_elements - 1;
+                tri_pos %= TRIANGLE_BUFFER_ELEMS;
 
                 // find triangle
                 int tri_idx = s_tri_buf[tri_pos];
@@ -359,9 +356,13 @@ void bin_raster(
 
                     // add to linked list
                     if (s_out_ofs[local_id] < 0)
-                        g_bin_first_seg[(local_id << CR_BIN_STREAMS_LOG2) + get_group_id(0)] = seg_idx;
+                    {
+                        g_bin_first_seg[(local_id * CR_BIN_STREAMS_SIZE) + get_group_id(0)] = seg_idx;
+                    }
                     else
+                    {
                         g_bin_seg_next[(s_out_ofs[local_id] - 1) >> CR_BIN_SEG_LOG2] = seg_idx;
+                    }
 
                     // defaults
                     g_bin_seg_next [seg_idx] = -1;
@@ -424,7 +425,7 @@ void bin_raster(
             }
 
             // these triangles are now done
-            int count = min(buf_count, DEVICE_BIN_SUB_GROUPS * 32);
+            int count = min(buf_count, DEVICE_BIN_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS);
             buf_count -= count;
             buf_index += count;
             buf_index &= FW_ARRAY_SIZE(s_tri_buf)-1;
@@ -444,6 +445,8 @@ void bin_raster(
 
     // output totals
     if (local_id < c_num_bins)
-        g_bin_total[(local_id << CR_BIN_STREAMS_LOG2) + get_group_id(0)] = s_out_total[local_id];
+    {
+        g_bin_total[(local_id * CR_BIN_STREAMS_SIZE) + get_group_id(0)] = s_out_total[local_id];
+    }
 
 }

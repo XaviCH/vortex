@@ -245,7 +245,7 @@ inline sub_group_mask_t determine_ROP_lane_mask(uint c_render_mode_flags) //, lo
     return reverse_lanes ? get_lane_sub_group_mask_lt() : not_sub_group_mask(get_lane_sub_group_mask_le());
 }
 
-inline int find_bit(ulong mask, int idx)
+static inline int find_bit(ulong mask, int idx)
 {
     uint x = ugetLo(mask);
     int  pop = popcount(x);
@@ -400,8 +400,9 @@ static inline void local_1dim_load_and_clean_framebuffer_to_local_mem(
         is_framebuffer_data_stencilbuffer_enabled(framebuffer_data) &&
         !is_enabled_data_all_stencil_bits(clear_enabled_data);
 
-    
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
         
         int2 surf = get_2d_surface_from_tile(tile, pixel);
@@ -460,7 +461,9 @@ static inline void local_1dim_store_local_mem_to_framebuffer(
 
     store_stencilbuffer = is_framebuffer_data_stencilbuffer_enabled(framebuffer_data);
 
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
         
         int2 surf = get_2d_surface_from_tile(tile, pixel);
@@ -535,6 +538,9 @@ static inline void local_1dim_execute_rop(
 }
 
 
+
+#define TRIANGLE_BUFFER_ELEMS (DEVICE_SUB_GROUP_THREADS * 2)
+
 /**
  * Single-sample rasterization kernel.
  *
@@ -593,11 +599,11 @@ void fine_raster_single_sample(
     local volatile uint     s_tile_color        [DEVICE_FINE_SUB_GROUPS][CR_TILE_SQR]; // 5KB
     local volatile ushort   s_tile_depth        [DEVICE_FINE_SUB_GROUPS][CR_TILE_SQR]; // 2.5KB
     local volatile uchar    s_tile_stencil      [DEVICE_FINE_SUB_GROUPS][CR_TILE_SQR]; // 1.25KB
-    local volatile uint     s_triangle_idx      [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  original triangle index
-    local volatile uint     s_tri_data_idx      [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  CRTriangleData index
-    local volatile ulong    s_triangle_cov      [DEVICE_FINE_SUB_GROUPS][64];          // 10KB coverage mask
-    local volatile uint     s_triangle_frag     [DEVICE_FINE_SUB_GROUPS][64];          // 5KB  fragment index
-    local volatile uchar    l_triangle_conf    [DEVICE_FINE_SUB_GROUPS][64];          // 0.25KB  per-triangle configuration
+    local volatile uint     s_triangle_idx      [DEVICE_FINE_SUB_GROUPS][TRIANGLE_BUFFER_ELEMS];          // 5KB  original triangle index
+    local volatile uint     s_tri_data_idx      [DEVICE_FINE_SUB_GROUPS][TRIANGLE_BUFFER_ELEMS];          // 5KB  CRTriangleData index
+    local volatile ulong    s_triangle_cov      [DEVICE_FINE_SUB_GROUPS][TRIANGLE_BUFFER_ELEMS];          // 10KB coverage mask
+    local volatile uint     s_triangle_frag     [DEVICE_FINE_SUB_GROUPS][TRIANGLE_BUFFER_ELEMS];          // 5KB  fragment index
+    local volatile uchar    l_triangle_conf    [DEVICE_FINE_SUB_GROUPS][TRIANGLE_BUFFER_ELEMS];          // 0.25KB  per-triangle configuration
 
     // The required local mem for specific sub-group communications.
 
@@ -659,7 +665,7 @@ void fine_raster_single_sample(
         // initialize per-tile state
         int tri_read = 0, tri_write = 0;
         int frag_read = 0, frag_write = 0;
-        w_triangle_frag[63] = 0; // "previous triangle"
+        w_triangle_frag[TRIANGLE_BUFFER_ELEMS-1] = 0; // "previous triangle"
 
         // load tile
         local_1dim_load_and_clean_framebuffer_to_local_mem(
@@ -735,7 +741,7 @@ void fine_raster_single_sample(
                     {
                         sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
                         int idx = popcount_sub_group_mask(and_sub_group_mask(good_mask, lt_mask));
-                        idx = (tri_write + idx) & 63; // wrap index
+                        idx = (tri_write + idx) & (TRIANGLE_BUFFER_ELEMS-1); // wrap index
                         w_triangle_idx  [idx] = tri_idx;
                         w_tri_data_idx  [idx] = data_idx;
                         w_triangle_frag [idx] = frag;
@@ -847,10 +853,8 @@ void fine_raster_single_sample(
 
             }
 
-
             // TODO: Optimize, ordering on primitive is not always required.
             // loop while multiple threads access to same pixel and run ROP
-            
             
             local_1dim_execute_rop(
                 w_tile_color, w_tile_depth, w_tile_stencil, sg_temp,

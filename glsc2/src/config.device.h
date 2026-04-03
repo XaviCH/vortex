@@ -10,7 +10,7 @@
 
 #define DEVICE_DEVICE_ID 0
 
-#define DEVICE_UNROLL_SUPPORT 0
+#define DEVICE_UNROLL_SUPPORT 1
 
 // -----------
 // DEVICE ARCH
@@ -46,7 +46,7 @@
 
 // if enabled the device supports sub group intra-register operations as ballot, all, any, scan or reduce. 
 #ifndef DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT
-#define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 1
+#define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 0
 #endif
 
 // ------
@@ -77,13 +77,17 @@
 // ------
 
 // Triangle Setup Configuration
-#define DEVICE_SETUP_SUB_GROUPS 2
+#define DEVICE_SETUP_THREADS (32 * 2)
+#define DEVICE_SETUP_SUB_GROUPS ((DEVICE_SETUP_THREADS) / (1 << DEVICE_SUB_GROUP_THREADS_LOG2))
 // Bin Raster Configuration
-#define DEVICE_BIN_SUB_GROUPS 16
+#define DEVICE_BIN_THREADS (32 * 16)
+#define DEVICE_BIN_SUB_GROUPS ((DEVICE_BIN_THREADS) / (1 << DEVICE_SUB_GROUP_THREADS_LOG2))
 // Coarse Raster Configuration
-#define DEVICE_COARSE_SUB_GROUPS 16
-
-#define DEVICE_FINE_SUB_GROUPS 20
+#define DEVICE_COARSE_THREADS (32 * 16)
+#define DEVICE_COARSE_SUB_GROUPS ((DEVICE_COARSE_THREADS) / (1 << DEVICE_SUB_GROUP_THREADS_LOG2)) 
+// Fine Raster Configuration
+#define DEVICE_FINE_THREADS ((1 << DEVICE_SUB_GROUP_THREADS_LOG2) * 1)
+#define DEVICE_FINE_SUB_GROUPS ((DEVICE_FINE_THREADS) / (1 << DEVICE_SUB_GROUP_THREADS_LOG2))
 
 // ------
 // FRONTEND CONFIG
