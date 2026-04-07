@@ -70,6 +70,7 @@ inline float    slct_f              (float a, float b, int c)   { return (c >= 0
 
 #if __OPENCL_VERSION__ < 200
 static inline size_t get_local_linear_id() { return get_local_id(1) * get_local_size(0) + get_local_id(0); }
+static inline size_t get_global_linear_id() { return (get_global_id(1) - get_global_offset(1)) * get_global_size(0) + (get_global_id(0) - get_global_offset(0)); }
 #endif
 inline size_t get_local_linear_size() { return get_local_size(0) * get_local_size(1) * get_local_size(2); }
 
@@ -99,7 +100,7 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, local volat
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     int oct = flips & ((1 << CR_FLIPBIT_FLIP_X) | (1 << CR_FLIPBIT_SWAP_XY));
-    ulong mask = *(ulong*)((uchar*)lut + oct + (shape << 5));
+    ulong mask = *(local ulong*)((local uchar*)lut + oct + (shape << 5));
 
     // Second half.
 
@@ -108,7 +109,7 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, local volat
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
     add_add_carry(&yfrac, yfrac, yinc, &shape, shape, shape);
-    mask |= *(ulong*)((uchar*)lut + oct + (shape << 5) + (12 << 8));
+    mask |= *(local ulong*)((local uchar*)lut + oct + (shape << 5) + (12 << 8));
     return (flips >= (1 << CR_FLIPBIT_COMPL)) ? ~mask : mask;
 }
 

@@ -161,7 +161,9 @@ static inline void gl_fill_vertex_buffer(
     uint output_size = sizeof(vertex_shader_output_t)/sizeof(float4);
     float4* f4_output = (float4*)output;
 
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(uint attrib = 0; attrib < output_size; ++attrib) {
         uint offset = id*output_size + attrib;
         float4 value = *(f4_output + attrib);
@@ -180,7 +182,7 @@ static inline void gl_fill_vertex_buffer(
     kernel void gl_vertex_shader( \
         global const float4* vertex_attributes, \
         global const vertex_attribute_data_t* vertex_attribute_datas, \
-        global const void* gl_uniforms, \
+        global void* gl_uniforms, \
         VS_KERNEL_PARAMS \
         wo_vertex_buffer_t vertex_buffer \
     ) { \

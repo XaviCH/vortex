@@ -206,7 +206,9 @@ static inline float4 read_2d_bufferf(
     // apply GL wrap and filtering
     float4 color = {0,0,0,0};
     
+    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
+    #endif
     for(uint x=0; x<2; ++x) for(uint y=0; y<2; ++y)
     {
         int2 icoord = {

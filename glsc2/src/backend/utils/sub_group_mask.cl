@@ -7,7 +7,7 @@
     #include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
     #include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
     #include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
-
+    
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
     #include <backend/extensions/cl_khr_subgroups/include.cl>
@@ -91,6 +91,32 @@ inline bool all_sub_group_mask(sub_group_mask_t sub_group_mask) {
 
 inline bool any_sub_group_mask(sub_group_mask_t sub_group_mask) {
     return popcount(sub_group_mask.mask) != 0;
+}
+
+static inline sub_group_mask_t shift_right_sub_group_mask(sub_group_mask_t sub_group_mask, uint value) 
+{
+    sub_group_mask_t shifted_mask;
+
+    shifted_mask.mask = sub_group_mask.mask >> value;
+
+    return shifted_mask;
+}
+
+
+static inline sub_group_mask_t get_sub_group_mask_ones_lt(uint position) {
+    sub_group_mask_t sub_group_mask;
+
+    #if (DEVICE_SUB_GROUP_THREADS <= 64)
+        sub_group_mask.mask = (1ul << position) - 1; 
+    #else
+    {
+        ulong* pointer = &sub_group_mask.mask;
+        pointer[0] = position > 63 ? ULONG_MAX : (1ul << position) - 1;
+        pointer[1] = position > 63 ? (1ul << (position - 64)) - 1 : 0;
+    }
+    #endif
+
+    return sub_group_mask;
 }
 
 inline sub_group_mask_t get_lane_sub_group_mask_lt() {

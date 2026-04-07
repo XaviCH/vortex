@@ -507,9 +507,12 @@ static inline void local_1dim_execute_rop(
 ) {
     sub_group_mask_t thread_bit = get_thread_bit_sub_group_mask();
     sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
+    sub_group_mask_t empty_mask;
+    clear_sub_group_mask(&empty_mask);
 
     do
     {
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
         if (active_rop_lane) 
             clear_sub_group_mask(&l1_temp->tile[pixel_in_tile]);
 
@@ -519,10 +522,11 @@ static inline void local_1dim_execute_rop(
             atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], thread_bit);
 
         local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-        
+        sub_group_mask_t thread_pixel_mask = atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], empty_mask);
+
         if (active_rop_lane) {
             
-            if (!any_sub_group_mask(and_sub_group_mask(l1_temp->tile[pixel_in_tile], lt_mask))) 
+            if (!any_sub_group_mask(and_sub_group_mask(thread_pixel_mask, lt_mask))) 
             {
                 execute_ROP_single_sample(
                     fs_output, pre_depth,
@@ -533,10 +537,60 @@ static inline void local_1dim_execute_rop(
             }
             
         }
-            
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
     } while(any_sub_group_mask(local_1dim_ballot(active_rop_lane, &l1_temp->mask)));
 }
 
+/*
+static inline void local_1dim_execute_rop(
+    local volatile uint*                restrict l1_color, 
+    local volatile ushort*              restrict l1_depth, 
+    local volatile uchar*               restrict l1_stencil,
+    local volatile sg_tmp_mem_t*        restrict l_temp,
+    const rop_config_t rop_config,
+    const uint pixel_in_tile,
+    const fragment_shader_output_t fs_output,
+    const ushort pre_depth,
+    bool active_rop_lane
+) {
+    sub_group_mask_t thread_bit = get_thread_bit_sub_group_mask();
+    sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
+    sub_group_mask_t empty_mask;
+    clear_sub_group_mask(&empty_mask);
+
+    uint my_turn, max_turns;
+
+    local volatile sg_tmp_mem_t* l1_temp = l_temp + get_sub_group_id();
+
+    // maybe optimize this clear
+    if (active_rop_lane) clear_sub_group_mask(&l1_temp->tile[pixel_in_tile]);
+
+    local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (active_rop_lane) atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], thread_bit);
+
+    local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+    
+    sub_group_mask_t thread_pixel_mask = atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], empty_mask);
+
+    my_turn = popcount_sub_group_mask(and_sub_group_mask(thread_pixel_mask, lt_mask));
+
+    max_turns = local_1dim_reduce_max(my_turn, l_temp->integer);
+
+    for(uint turn=0; turn < max_turns; ++turn)
+    {
+        if (my_turn == turn && active_rop_lane)
+        {
+            execute_ROP_single_sample(
+                fs_output, pre_depth,
+                &l1_color[pixel_in_tile], &l1_depth[pixel_in_tile], &l1_stencil[pixel_in_tile],
+                rop_config 
+            );
+        }
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+    }
+}
+*/
 
 
 #define TRIANGLE_BUFFER_ELEMS (DEVICE_SUB_GROUP_THREADS * 2)
@@ -652,7 +706,7 @@ void fine_raster_single_sample(
         if (get_local_id(0) == 0)
             active_idx = atomic_add(a_fine_counter, 1);
 
-        active_idx = local_1dim_broadcast(active_idx, 0, &sg_temp->integer);
+        active_idx = local_1dim_broadcast(active_idx, 0, l_temp->integer);
         
         if (active_idx >= *a_num_active_tiles)
             break;
@@ -732,16 +786,16 @@ void fine_raster_single_sample(
                     uint frag = local_1dim_scan_inclusive_add(pop, &sg_temp->integer);
                     uint tmp_frag = frag;
                     frag += frag_write; // frag now holds cumulative fragment count
-                    frag_write += local_1dim_broadcast(tmp_frag, get_sub_group_size() - 1, &sg_temp->integer);
+                    frag_write += local_1dim_broadcast(tmp_frag, get_sub_group_size() - 1, l_temp->integer);
 
                     // queue non-empty triangles
-                    sub_group_mask_t good_mask = local_1dim_ballot(pop != 0, &sg_temp->mask);
+                    sub_group_mask_t good_mask = local_1dim_ballot(pop != 0, l_temp->mask);
 
                     if (pop != 0)
                     {
                         sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
                         int idx = popcount_sub_group_mask(and_sub_group_mask(good_mask, lt_mask));
-                        idx = (tri_write + idx) & (TRIANGLE_BUFFER_ELEMS-1); // wrap index
+                        idx = (tri_write + idx) % TRIANGLE_BUFFER_ELEMS; // wrap index
                         w_triangle_idx  [idx] = tri_idx;
                         w_tri_data_idx  [idx] = data_idx;
                         w_triangle_frag [idx] = frag;
@@ -762,12 +816,13 @@ void fine_raster_single_sample(
             
             // TODO: refactor this section
             // tag triangle boundaries
+
             sg_temp->integer[get_sub_group_local_id()] = 0;
             local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
 
             if (tri_read + get_sub_group_local_id() < tri_write)
             {
-                int idx = w_triangle_frag[(tri_read + get_sub_group_local_id()) & 63] - frag_read;
+                int idx = w_triangle_frag[(tri_read + get_sub_group_local_id()) % TRIANGLE_BUFFER_ELEMS] - frag_read;
                 if (idx <= get_sub_group_size())
                     sg_temp->integer[idx - 1] = 1;
             }
@@ -776,7 +831,28 @@ void fine_raster_single_sample(
             // distribute fragments
             int rop_lane_idx = popcount_sub_group_mask(rop_lane_mask);
             bool tagged = sg_temp->integer[rop_lane_idx];
-            sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, &sg_temp->mask);
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, &l_temp->mask);
+
+            /* TODO: Check why does not work
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            int rop_lane_idx = popcount_sub_group_mask(rop_lane_mask);
+            if (tri_read + get_sub_group_local_id() < tri_write)
+            {
+                int idx = w_triangle_frag[(tri_read + get_sub_group_local_id()) % TRIANGLE_BUFFER_ELEMS] - frag_read;
+                
+                if (idx <= get_sub_group_size()) {
+                    sub_group_mask_t mask;
+                    clear_sub_group_mask(&mask);
+                    set_bit_sub_group_mask(&mask, idx-1);
+                    atomic_or_sub_group_mask(sg_temp->mask, mask);
+                }
+            }
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            sub_group_mask_t boundary_mask = atomic_or_sub_group_mask(sg_temp->mask, (sub_group_mask_t){0L});
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            */
+
 
             bool active_rop_lane = rop_lane_idx < frag_write - frag_read; 
             int pixel_in_tile = 0;
@@ -787,8 +863,8 @@ void fine_raster_single_sample(
 
             if (active_rop_lane)
             {
-                int tri_buf_idx = (tri_read + popcount_sub_group_mask(and_sub_group_mask(boundary_mask,rop_lane_mask))) & 63;
-                int frag_idx = add_sub(frag_read, rop_lane_idx, w_triangle_frag[(tri_buf_idx - 1) & 63]);
+                int tri_buf_idx = (tri_read + popcount_sub_group_mask(and_sub_group_mask(boundary_mask,rop_lane_mask))) % TRIANGLE_BUFFER_ELEMS;
+                int frag_idx = add_sub(frag_read, rop_lane_idx, w_triangle_frag[(tri_buf_idx - 1 + TRIANGLE_BUFFER_ELEMS) % TRIANGLE_BUFFER_ELEMS]);
                 ulong coverage = w_triangle_cov[tri_buf_idx];
                 pixel_in_tile = find_fragment(coverage, frag_idx);
                 int tri_idx = w_triangle_idx[tri_buf_idx];

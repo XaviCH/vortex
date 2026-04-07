@@ -25,6 +25,19 @@
     #include "glsc2/src/backend/utils/common.cl"
 #endif
 
+/**
+ * @brief Ensure memory syncronization at least for 1st dimension threads on work group.
+ */
+inline void local_1dim_barrier(cl_mem_fence_flags flags) {
+    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
+        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+            sub_group_barrier(flags);
+        #else
+            barrier(flags);
+        #endif
+    #endif
+}
+
 
 #ifdef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
 
@@ -66,7 +79,8 @@ inline uint __attribute__((overloadable)) sub_group_reduce_min(uint value, local
 #endif
 
 #ifdef DEVICE_SUB_GROUP_ENABLED
-inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) 
+{
     uint result;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
@@ -77,7 +91,6 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
     {
         uint local_id = get_sub_group_local_id();
         (*sg_temp)[local_id] = value;
-
         #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
         #endif
@@ -98,26 +111,25 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
     return result;
 }
 #endif
+/*
+static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint* l_temp) 
+{
+    uint result;
 
-inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint value, local volatile uint* l_temp) {
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     {
-        return sub_group_scan_inclusive_add(value);
+        result = sub_group_scan_inclusive_add(value);
     }
     #else
     {
-        uint result;
-
         local volatile uint* ptr = &l_temp[get_local_linear_id()];
         *ptr = value;
 
-        #ifdef DEVICE_UNROLL_ENABLED
         #pragma unroll
-        #endif
-        for(int target=1; target < get_local_size(0); target *= 2) {
-            #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
-                barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
+        for(int target=1; target < DEVICE_SUB_GROUP_THREADS; target *= 2) 
+        {
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
             if (get_local_id(0) >= target) {
                 value += ptr[-target];
                 *ptr = value;
@@ -125,11 +137,13 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(uint val
         }
         result = value;
 
-        return result;
+        barrier(CLK_LOCAL_MEM_FENCE); // make sure that all threads have the correct result before any thread can read it
     }
     #endif
+    
+    return result;
 }
-
+*/
 static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
     uint result;
 
@@ -143,9 +157,7 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
         #pragma unroll
         #endif
         for(uint i=1; i<get_local_size(0); i=i*2) {
-            #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
-                barrier(CLK_LOCAL_MEM_FENCE);
-            #endif
+            barrier(CLK_LOCAL_MEM_FENCE);
             if (id >= i) {
                 value += ptr[-i];
                 *ptr = value;
@@ -162,6 +174,8 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
                 *ptr = value;
             }
         }
+        
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
     // #endif
 
@@ -281,13 +295,12 @@ inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
 }
 */
 
-
+/*
 static inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint id, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
     uint result;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
     {
-        sub_group_barrier(CLK_LOCAL_MEM_FENCE);
         result = sub_group_broadcast(value, id);
     }
     #else
@@ -302,8 +315,147 @@ static inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value
 
     return result;
 }
+*/
+static inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint id, local volatile uint *l_temp) 
+{
+    uint result;
 
-inline uint __attribute__((overloadable)) local_reduce_min(uint value, local volatile uint* l_temp) {
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        result = sub_group_broadcast(value, id);
+    }
+    #else
+    {
+        local volatile uint *ptr = &l_temp[get_local_id(1)*get_local_size(0)];
+
+        ptr[get_local_id(0)] = value;
+        
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+        
+        result = ptr[id];
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    #endif
+
+    return result;
+}
+
+// --------------
+// FUNCTIONS
+// --------------
+
+static inline uint __attribute__((overloadable)) add(uint a, uint b) {
+    return a + b;
+}
+
+static inline ulong __attribute__((overloadable)) or(ulong a, ulong b) {
+    return a | b;
+}
+
+// --------------
+// SCAN INCLUSIVE
+// --------------
+
+#ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    #define GEN_LOCAL_1DIM_SCAN_INCLUSIVE_IMPL(_FUNC, _TYPE) \
+        static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_##_FUNC(_TYPE value, local volatile _TYPE* l_temp) \
+        { \
+            return sub_group_scan_inclusive_##_FUNC(value); \
+        }
+#else
+    #define GEN_LOCAL_1DIM_SCAN_INCLUSIVE_IMPL(_FUNC, _TYPE) \
+        static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_##_FUNC(_TYPE value, local volatile _TYPE* l_temp) \
+        { \
+            uint local_id = get_local_id(0); \
+            local volatile _TYPE* ptr = &l_temp[get_local_linear_id()]; \
+            *ptr = value; \
+            for(int i=1; i<get_local_size(0); i=i*2) { \
+                local_1dim_barrier(CLK_LOCAL_MEM_FENCE); \
+                if (local_id >= i) { \
+                    value = _FUNC(value, ptr[-i]); \
+                    *ptr = value; \
+                } \
+            } \
+            barrier(CLK_LOCAL_MEM_FENCE); \
+            return value; \
+        }
+#endif
+
+GEN_LOCAL_1DIM_SCAN_INCLUSIVE_IMPL(min, uint)
+GEN_LOCAL_1DIM_SCAN_INCLUSIVE_IMPL(max, uint)
+GEN_LOCAL_1DIM_SCAN_INCLUSIVE_IMPL(add, uint)
+// GEN_LOCAL_1DIM_SCAN_INCLUSIVE_IMPL(or, ulong)
+
+static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add_bool(bool value, local volatile uint* l_temp)
+{
+    uint result;
+
+    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    {
+        sub_group_barrier(CLK_LOCAL_MEM_FENCE); // ballot does not guarantee that all threads are active, so we need to make sure that all threads have reached this point before calling ballot
+        sub_group_mask_t mask = ballot_sub_group_mask(value);
+        sub_group_mask_t scan = and_sub_group_mask(mask, get_lane_sub_group_mask_le());
+        result = popcount_sub_group_mask(scan);
+    }
+    #else
+    {
+        result = local_1dim_scan_inclusive_add(value ? 1u : 0u, l_temp);
+    }
+    #endif
+
+    return result;
+}
+
+static inline uint __attribute__((overloadable)) local_scan_inclusive_add_bool(bool value, local volatile uint* l_temp)
+{
+    uint result_1dim = local_1dim_scan_inclusive_add_bool(value, l_temp);
+    
+    l_temp[get_local_linear_id()] = result_1dim; // ensure result;
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uint accumulated = 0;
+    
+    if (get_local_id(0) < get_local_size(1)) 
+    {
+        accumulated = l_temp[(get_local_id(0)+1)*DEVICE_SUB_GROUP_THREADS - 1];
+    }
+    
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    accumulated = local_1dim_scan_inclusive_add(accumulated, l_temp) - accumulated; // scan exclusive
+
+    uint result_2dim = local_1dim_broadcast(accumulated, get_local_id(1), l_temp);
+
+    return result_2dim + result_1dim;
+}
+
+// --------------
+// REDUCE
+// --------------
+
+#ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+    #define GEN_LOCAL_1DIM_REDUCE_IMPL(_FUNC, _TYPE) \
+        static inline _TYPE __attribute__((overloadable)) local_1dim_reduce_##_FUNC(_TYPE value, local volatile _TYPE* l_temp) \
+        { \
+            return sub_group_reduce_##_FUNC(value); \
+        }
+#else
+    #define GEN_LOCAL_1DIM_REDUCE_IMPL(_FUNC, _TYPE) \
+        static inline _TYPE __attribute__((overloadable)) local_1dim_reduce_##_FUNC(_TYPE value, local volatile _TYPE* l_temp) \
+        { \
+            uint result = local_1dim_scan_inclusive_##_FUNC(value, l_temp); \
+            return local_1dim_broadcast(result, get_local_size(0) - 1, l_temp); \
+        }
+#endif
+
+GEN_LOCAL_1DIM_REDUCE_IMPL(min, uint)
+GEN_LOCAL_1DIM_REDUCE_IMPL(max, uint)
+// GEN_LOCAL_1DIM_REDUCE_IMPL(or, ulong)
+
+static inline uint __attribute__((overloadable)) local_reduce_min(uint value, local volatile uint* l_temp) 
+{
     local_scan_inclusive_min(value, l_temp);
     barrier(CLK_LOCAL_MEM_FENCE);
     return l_temp[get_local_linear_size()-1];
@@ -333,7 +485,8 @@ inline uint local_reduce_and_2dim_ui(uint value, local volatile uint* l_temp) {
 }
 
 #ifdef DEVICE_SUB_GROUP_ENABLED
-inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
+static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) 
+{
     uint local_id = get_sub_group_local_id();
     local volatile uint* ptr = &(*sg_temp)[local_id];
     *ptr = value;
@@ -353,7 +506,7 @@ inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint valu
 }
 #endif
 
-inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint* l_temp) {
+static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_or(uint value, local volatile uint* l_temp) {
     uint local_id = get_local_id(0);
     local volatile uint* ptr = &l_temp[get_local_linear_id()];
     *ptr = value;
@@ -396,18 +549,7 @@ inline uint __attribute__((overloadable)) local_1dim_reduce_or(uint value, local
     return l_temp[get_local_linear_id() - get_local_id(0) + get_local_size(0) - 1];
 }
 
-/**
- * @brief Ensure memory syncronization at least for 1st dimension threads on work group.
- */
-inline void local_1dim_barrier(cl_mem_fence_flags flags) {
-    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
-        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-            sub_group_barrier(flags);
-        #else
-            barrier(flags);
-        #endif
-    #endif
-}
+
 
 // TODO: wrap all sync function using this generics
 static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive(void (func)(uint*,uint), uint value, local volatile uint* l_temp) {
@@ -499,18 +641,32 @@ inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool val
     return mask;
 }
 
-inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) {
+static inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) 
+{
     sub_group_mask_t mask;
 
     #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-        sub_group_barrier(CLK_LOCAL_MEM_FENCE);
+    {
+        sub_group_barrier(CLK_LOCAL_MEM_FENCE); // ensure sync ballot
         mask = ballot_sub_group_mask(value);
+    }
     #else
     {
         sub_group_mask_t tmp;
         clear_sub_group_mask(&tmp);
         if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
-        mask.mask = local_1dim_reduce_or(tmp.mask, (local volatile uint*) l_temp);
+
+        clear_sub_group_mask(&l_temp[get_local_id(1)]);
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+        atomic_or_sub_group_mask(&l_temp[get_local_id(1)], tmp);
+        
+        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+        
+        mask = l_temp[get_local_id(1)];
+        
+        barrier(CLK_LOCAL_MEM_FENCE);
+        // mask.mask = local_1dim_reduce_or(tmp.mask, &l_temp->mask);
     }
     #endif
     
