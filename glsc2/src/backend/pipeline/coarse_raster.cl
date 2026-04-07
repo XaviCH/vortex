@@ -32,6 +32,7 @@ inline void compute_tile_aabb(
     *hiy = add_clamp_0_x((v0y + max_max(d01y, 0, d02y)) >> tile_log, 0, max_tile_y_in_bin);
 }
 
+// maybe rm local, function do not require sync
 /**
  * @brief emit mask for each 1 dim thread that needs to write into tile 
  * @param s_warp_emit_mask
@@ -196,6 +197,9 @@ static inline void local_emit_prefix_sum(
     }
     #endif
     */
+    // 
+    // int emit_shift       = CR_BIN_LOG2 * 2 + DEVICE_SUB_GROUP_THREADS_LOG2; // We scan ((num_emits << emit_shift) | num_allocs) over tiles.
+
 
     for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size()) 
     {
@@ -218,11 +222,12 @@ static inline void local_emit_prefix_sum(
             // Determine the number of segments to allocate.
 
             int space_left = -s_tile_stream_curr_ofs[tile_in_bin] & (CR_TILE_SEG_SIZE - 1);
-            tile_allocs = (tile_emits - space_left + CR_TILE_SEG_SIZE - 1) >> CR_TILE_SEG_LOG2;
+            tile_allocs = (tile_emits - space_left + CR_TILE_SEG_SIZE - 1) / CR_TILE_SEG_SIZE;
             sum = (tile_emits << emit_shift) | tile_allocs;
         }
 
-        uint scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
+        // do it range to avoid unnecessary scan when tile_in_bin >= CR_BIN_SQR
+        uint scan_sum = local_scan_inclusive_add(sum, l_temp);
         
         if (tile_in_bin < CR_BIN_SQR)
             s_tile_emit_prefix_sum[tile_in_bin + 1] = scan_sum;
@@ -421,7 +426,6 @@ void coarse_raster(
 ) {
     
     local volatile uint s_work_counter;
-    local volatile uint s_scan_temp          [DEVICE_COARSE_SUB_GROUPS][DEVICE_SUB_GROUP_THREADS + DEVICE_SUB_GROUP_THREADS/2];              // 3KB
 
     local volatile uint s_bin_order           [CR_MAXBINS_SQR];                   // 1KB
     local volatile int s_bin_stream_curr_seg  [CR_BIN_STREAMS_SIZE];              // 0KB
@@ -453,7 +457,6 @@ void coarse_raster(
 
     s_tile_emit_prefix_sum[0] = 0;
     s_tile_alloc_prefix_sum[0] = 0;
-    s_scan_temp[get_local_id(1)][get_local_id(0)] = 0;
 
     // Sort bins in descending order of triangle count.
 
@@ -633,40 +636,11 @@ void coarse_raster(
 
             barrier(CLK_LOCAL_MEM_FENCE);
 
-            // TODO: this is only valid if CR_BIN_SQR / 32 < sub_group_size()
-            #if (CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS <= DEVICE_SUB_GROUP_THREADS)
-            {
-                bool thread_condition = true;
-                #ifdef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
-                    thread_condition = thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS;
-                #endif
-                #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-                    thread_condition = thread_local_id < get_sub_group_size();
-                #endif
-
-                if (thread_condition){
-                    int sum = 0;
-                    if (thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS)
-                        sum = s_tile_emit_prefix_sum[(thread_local_id << DEVICE_SUB_GROUP_THREADS_LOG2) + DEVICE_SUB_GROUP_THREADS];
-                    
-                    int scan_sum = local_1dim_scan_inclusive_add(sum, l_temp);
-
-                    if (thread_local_id < CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS)
-                        s_scan_temp[0][thread_local_id + DEVICE_SUB_GROUP_THREADS/2] = scan_sum;
-                }
-            }
-            #else 
-                #error CR_BIN_SQR is to large.
-            #endif
-
-            barrier(CLK_LOCAL_MEM_FENCE);
-
             // Tile per thread: Finalize prefix sums.
             // Single thread: Allocate segments.
-
-            for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += get_local_linear_size())
+            for (int tile_in_bin = thread_local_id; tile_in_bin < CR_BIN_SQR; tile_in_bin += DEVICE_COARSE_THREADS)
             {
-                int sum = s_tile_emit_prefix_sum[tile_in_bin + 1] + s_scan_temp[0][(tile_in_bin >> DEVICE_SUB_GROUP_THREADS_LOG2) + (DEVICE_SUB_GROUP_THREADS/2 - 1)];
+                int sum = s_tile_emit_prefix_sum[tile_in_bin + 1];
                 int num_emits = sum >> emit_shift;
                 int num_allocs = sum & ((1 << emit_shift) - 1);
                 s_tile_emit_prefix_sum[tile_in_bin + 1] = num_emits;
@@ -820,33 +794,32 @@ void coarse_raster(
         // 32 tiles per warp: Count active tiles.
 
         barrier(CLK_LOCAL_MEM_FENCE);
-
-        for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
+        
+        // TODO: break dependency
+        #if CR_BIN_SQR > DEVICE_COARSE_THREADS
+            #error CR_BIN_SQR <= DEVICE_COARSE_THREADS
+        #endif
+        for (int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += DEVICE_COARSE_THREADS)
         {
-            bool req_predicate = true;
-
             int tile_in_bin = tile_in_bin_chunk + thread_local_id;
-            bool pass = tile_in_bin >= CR_BIN_SQR;
-
-            if (!req_predicate && pass)
-                break;
+            bool active = tile_in_bin < CR_BIN_SQR;
 
             int ofs, tile_x, tile_y;
             bool force;
+            
+            ofs = s_tile_stream_curr_ofs[tile_in_bin];
+            tile_x = tile_in_bin & (CR_BIN_SIZE - 1);
+            tile_y = tile_in_bin >> CR_BIN_LOG2;
+            force = (c_deferred_clear && tile_x <= max_tile_x_in_bin && tile_y <= max_tile_y_in_bin);
 
-            if (!pass) {
-                tile_x = tile_in_bin & (CR_BIN_SIZE - 1);
-                tile_y = tile_in_bin >> CR_BIN_LOG2;
-                force = (c_deferred_clear && tile_x <= max_tile_x_in_bin && tile_y <= max_tile_y_in_bin); // check this
-                ofs = s_tile_stream_curr_ofs[tile_in_bin];
-            }
+            int active_tiles = local_scan_inclusive_add_bool((ofs >= 0 || force) && active, l_temp);
 
-            sub_group_mask_t bitmask = local_1dim_ballot((ofs >= 0 || force) && !pass, (local volatile sub_group_mask_t*) l_temp);
+            if (thread_local_id == DEVICE_COARSE_THREADS - 1)
+                s_first_active_idx = atomic_add(a_num_active_tiles, active_tiles);
 
-            if (pass)
-                break;
+            barrier(CLK_LOCAL_MEM_FENCE);
 
-            s_scan_temp[0][(tile_in_bin >> DEVICE_SUB_GROUP_THREADS_LOG2) + DEVICE_SUB_GROUP_THREADS/2] = popcount_sub_group_mask(bitmask);
+            if (!active) continue;
 
             int seg_idx = (ofs - 1) >> CR_TILE_SEG_LOG2;
             int seg_count = ofs & (CR_TILE_SEG_SIZE - 1);
@@ -861,77 +834,9 @@ void coarse_raster(
 
             if (seg_count != 0)
                 g_tile_seg_count[seg_idx] = seg_count;
-            
-        }
 
-        // First warp: Scan-8.
-        // One thread: Allocate space for active tiles.
-
-        barrier(CLK_LOCAL_MEM_FENCE);
-
-        // TODO: rm required raw support.
-        #if CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS > DEVICE_SUB_GROUP_THREADS
-            #error CR_BIN_SQR / DEVICE_SUB_GROUP_THREADS <= DEVICE_SUB_GROUP_THREADS
-        #endif
-        {
-            bool active_thread = thread_local_id < CR_BIN_SQR / get_sub_group_size();
-
-            uint sum = 0;
-            if (active_thread) 
-                sum = s_scan_temp[0][thread_local_id + DEVICE_SUB_GROUP_THREADS/2];
-
-            sum = local_1dim_scan_inclusive_add(sum, l_temp);
-
-            if (active_thread)
-                s_scan_temp[0][thread_local_id + DEVICE_SUB_GROUP_THREADS/2] = sum;
-
-            if (thread_local_id == CR_BIN_SQR / get_sub_group_size() - 1)
-                s_first_active_idx = atomic_add(a_num_active_tiles, sum);
-        }
-        /*
-        if (thread_local_id < CR_BIN_SQR / get_sub_group_size())
-        {
-            #ifndef DEVICE_SUB_GROUP_RAW_ENABLED
-                #error Required raw support.
-            #endif
-
-            local volatile uint* p = &s_scan_temp[0][thread_local_id + 16];
-            uint sum = s_scan_temp[0][thread_local_id + 16];
-
-            #pragma unroll
-            for (int i=1; i < CR_BIN_SQR/get_sub_group_size(); i*=2) {
-                sum += p[-i], p[0] = sum;
-            }
-
-            if (thread_local_id == CR_BIN_SQR / get_sub_group_size() - 1)
-                s_first_active_idx = atomic_add(a_num_active_tiles, sum);
-        }
-        */
-        // Tile per thread: Output active tiles.
-
-        barrier(CLK_LOCAL_MEM_FENCE);
-
-        for(int tile_in_bin_chunk = 0; tile_in_bin_chunk < CR_BIN_SQR; tile_in_bin_chunk += get_local_linear_size())
-        {
-            bool req_predicate = true;
-
-            int tile_in_bin = tile_in_bin_chunk + thread_local_id;
-            bool pass = tile_in_bin >= CR_BIN_SQR || s_tile_stream_curr_ofs[tile_in_bin] < 0;
-
-            if (!req_predicate && pass)
-                continue;
-
-            sub_group_mask_t ballot = local_1dim_ballot(!pass, (local volatile sub_group_mask_t*) l_temp);
-
-            if (pass)
-                continue;
-
-            int active_idx = s_first_active_idx;
-            active_idx += s_scan_temp[0][(tile_in_bin / DEVICE_SUB_GROUP_THREADS) + (DEVICE_SUB_GROUP_THREADS/2) - 1];
-            sub_group_mask_t cummulative = and_sub_group_mask(ballot, get_lane_sub_group_mask_lt()); 
-            active_idx += popcount_sub_group_mask(cummulative);
-
-            g_active_tiles[active_idx] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
+            if (ofs >= 0 || force)
+                g_active_tiles[s_first_active_idx + active_tiles - 1] = bin_tile_idx + global_tile_idx(tile_in_bin, c_width_tiles);
         }
 
     }

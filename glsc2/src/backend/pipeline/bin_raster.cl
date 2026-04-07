@@ -300,30 +300,12 @@ void bin_raster(
                 uint over_total=0;
                 uint exc_scan_over_index=0;
                 
-                #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-                {
-                    sub_group_barrier(CLK_LOCAL_MEM_FENCE);
-                    exc_scan_over_index = popcount_sub_group_mask(and_sub_group_mask(ballot_sub_group_mask(overflow),get_lane_sub_group_mask_lt()));
-                    if (get_sub_group_local_id() == get_sub_group_size()-1)
-                    {
-                        over_total = atomic_add(&s_over_total, exc_scan_over_index + overflow);
-                    }
-                    
-                    over_total = sub_group_broadcast(over_total, get_sub_group_size()-1);
-                }
-                #else
-                {
-                    exc_scan_over_index = local_1dim_scan_inclusive_add(overflow, l_temp) - overflow;
-                    if (get_sub_group_local_id() == get_sub_group_size()-1)
-                        l_temp[get_local_linear_id()] = atomic_add(&s_over_total, exc_scan_over_index + overflow);
+                exc_scan_over_index = local_1dim_scan_inclusive_add_bool(overflow, l_temp) - overflow;
 
-                    #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
-                        barrier(CLK_LOCAL_MEM_FENCE);
-                    #endif
+                if (get_local_id(0) == get_local_size(0)-1)
+                    over_total = atomic_add(&s_over_total, exc_scan_over_index + overflow);
 
-                    over_total = l_temp[(get_sub_group_id() + 1)*get_sub_group_size() - 1];
-                }
-                #endif
+                over_total = local_1dim_broadcast(over_total, get_local_size(0)-1, l_temp);
 
                 if (overflow) {
                     over_index = exc_scan_over_index + over_total;
