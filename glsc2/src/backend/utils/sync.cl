@@ -144,6 +144,8 @@ static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add(u
     return result;
 }
 */
+
+/*
 static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
     uint result;
 
@@ -181,6 +183,7 @@ static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint v
 
     return value;
 }
+*/
 
 /*
 static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp) {
@@ -258,42 +261,6 @@ inline uint local_sized_reduce_min_sized_ui(uint value, local volatile uint* l_t
 /**
     PRE: All threads are active when function is called.
  */
-/*
-inline uint local_reduce_min_ui(uint value, local volatile uint* l_temp) {
-    uint result;
-
-    #if DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1
-    {
-        uint sub_group_min = sub_group_reduce_min_ui(value);
-
-        if (get_num_sub_groups() > 1) {
-            l_temp[get_sub_group_local_id()] = UINT_MAX;
-            barrier(CLK_LOCAL_MEM_FENCE);
-        }
-
-        #ifdef DEVICE_UNROLL_ENABLED
-        #pragma unroll
-        #endif
-        for(uint i=1; i<get_num_sub_groups(); i=i*get_sub_group_size()) {
-            l_temp[get_sub_group_id()] = sub_group_min;
-            barrier(CLK_LOCAL_MEM_FENCE);
-            sub_group_min = sub_group_reduce_min_ui(l_temp[get_sub_group_local_id()]);
-        }
-
-        result = sub_group_min;
-    }
-    #else 
-    {
-        local_scan_inclusive_min_ui(value, l_temp);
-        barrier(CLK_LOCAL_MEM_FENCE);
-        result = l_temp[get_local_linear_size()-1];
-    }
-
-    #endif
-
-    return result;
-}
-*/
 
 /*
 static inline uint __attribute__((overloadable)) local_1dim_broadcast(uint value, uint id, local volatile uint (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
@@ -401,6 +368,7 @@ static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add_b
     #else
     {
         result = local_1dim_scan_inclusive_add(value ? 1u : 0u, l_temp);
+        barrier(CLK_LOCAL_MEM_FENCE); // make sure that all threads have the correct result before any thread can read it
     }
     #endif
 
@@ -410,6 +378,31 @@ static inline uint __attribute__((overloadable)) local_1dim_scan_inclusive_add_b
 static inline uint __attribute__((overloadable)) local_scan_inclusive_add_bool(bool value, local volatile uint* l_temp)
 {
     uint result_1dim = local_1dim_scan_inclusive_add_bool(value, l_temp);
+    
+    l_temp[get_local_linear_id()] = result_1dim; // ensure result;
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uint accumulated = 0;
+    
+    if (get_local_id(0) < get_local_size(1)) 
+    {
+        accumulated = l_temp[(get_local_id(0)+1)*DEVICE_SUB_GROUP_THREADS - 1];
+    }
+    
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    accumulated = local_1dim_scan_inclusive_add(accumulated, l_temp) - accumulated; // scan exclusive
+
+    uint result_2dim = local_1dim_broadcast(accumulated, get_local_id(1), l_temp);
+
+    return result_2dim + result_1dim;
+}
+
+
+static inline uint __attribute__((overloadable)) local_scan_inclusive_add(uint value, local volatile uint* l_temp)
+{
+    uint result_1dim = local_1dim_scan_inclusive_add(value, l_temp);
     
     l_temp[get_local_linear_id()] = result_1dim; // ensure result;
 

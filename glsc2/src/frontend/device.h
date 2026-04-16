@@ -34,11 +34,12 @@ EXTERN_KERNEL(readnpixels);
 
 #define CL_ASSIGN_CHECK(_LEFT, ...)                                     \
 {                                                                       \
-    cl_int error;                                                       \
+    cl_int __error;                                                       \
+    cl_int *error = &__error;   \
     _LEFT = __VA_ARGS__;                                                      \
-    if (error != CL_SUCCESS) {                                     \
-    printf("OpenCL error at %s:%d. " #__VA_ARGS__ " returned %d.\n", __FILE__, __LINE__, (int)error);      \
-    exit(error);   \
+    if (__error != CL_SUCCESS) {                                     \
+    printf("OpenCL error at %s:%d. " #__VA_ARGS__ " returned %d.\n", __FILE__, __LINE__, (int)__error);      \
+    exit(__error);   \
     }                                                     \
 }
 
@@ -243,8 +244,8 @@ static void __device_init_mem(
     size_t size,
     void* host_ptr
 ) {
-    CL_ASSIGN_CHECK(mem->queue, clCreateCommandQueue(device->context, device->device_id, 0, &error)); 
-    CL_ASSIGN_CHECK(mem->mem,   clCreateBuffer(device->context, flags, size, host_ptr, &error));
+    CL_ASSIGN_CHECK(mem->queue, clCreateCommandQueue(device->context, device->device_id, 0, error)); 
+    CL_ASSIGN_CHECK(mem->mem,   clCreateBuffer(device->context, flags, size, host_ptr, error));
     mem->write_event = NULL;
 }
 
@@ -256,11 +257,11 @@ static void __device_init_2d_image(
     cl_image_desc* image_desc,
     void* host_ptr
 ) {
-    CL_ASSIGN_CHECK(mem->queue, clCreateCommandQueue(device->context, device->device_id, 0, &error));
+    CL_ASSIGN_CHECK(mem->queue, clCreateCommandQueue(device->context, device->device_id, 0, error));
 
     #ifdef DEVICE_IMAGE_ENABLED
     {
-        CL_ASSIGN_CHECK(mem->mem,   clCreateImage(device->context, flags, image_format, image_desc, host_ptr, &error));
+        CL_ASSIGN_CHECK(mem->mem,   clCreateImage(device->context, flags, image_format, image_desc, host_ptr, error));
     }
     #else
     {
@@ -272,7 +273,7 @@ static void __device_init_2d_image(
             size += last_level / 4;
         }
         
-        CL_ASSIGN_CHECK(mem->mem,   clCreateBuffer(device->context, flags, size, host_ptr, &error));
+        CL_ASSIGN_CHECK(mem->mem,   clCreateBuffer(device->context, flags, size, host_ptr, error));
     }
     #endif
 
@@ -473,12 +474,12 @@ static size_t __device_get_max_number_triangles()
 
 static size_t __device_get_max_number_bin_segments() 
 {
-    return CR_MAXBINS_SQR*CR_BIN_STREAMS_SIZE*(DEVICE_MAX_NUMBER_TRIANGLES/CR_BIN_SEG_SIZE)/4; // At least one segment x bin
+    return CR_MAXBINS_SQR*16; // At least one segment x bin
 }
 
 static size_t __device_get_max_number_tile_segments() 
 {
-    return CR_MAXTILES_SQR*(DEVICE_MAX_NUMBER_TRIANGLES/CR_TILE_SEG_SIZE)/4; // At least one segment x tile
+    return CR_MAXTILES_SQR*4; // At least one segment x tile
 }
 
 static size_t __device_get_bin_batch_size() 
@@ -676,44 +677,44 @@ static void device_init(device_t* shared)
 
     const cl_uint num_devices = DEVICE_DEVICE_ID + 1;
     cl_device_id devices[num_devices];
-    CL_CHECK(clGetDeviceIDs(shared->platform_id, CL_DEVICE_TYPE_GPU, num_devices, devices, NULL));
+    CL_CHECK(clGetDeviceIDs(shared->platform_id, CL_DEVICE_TYPE_ALL, num_devices, devices, NULL));
     shared->device_id = devices[DEVICE_DEVICE_ID];
 
-    CL_ASSIGN_CHECK(shared->context, clCreateContext(NULL, 1, &shared->device_id, NULL, NULL,  &error));
+    CL_ASSIGN_CHECK(shared->context, clCreateContext(NULL, 1, &shared->device_id, NULL, NULL,  error));
 
     // Load programs
     size_t triangle_setup_size = triangle_setup_o_len;
     const unsigned char *triangle_setup_bin = triangle_setup_o;
-    CL_ASSIGN_CHECK(shared->triangle_setup_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &triangle_setup_size, &triangle_setup_bin, NULL, &error));
+    CL_ASSIGN_CHECK(shared->triangle_setup_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &triangle_setup_size, &triangle_setup_bin, NULL, error));
     CL_CHECK(clBuildProgram(shared->triangle_setup_program, 1, &shared->device_id, NULL, NULL, NULL));
 
     size_t bin_raster_size = bin_raster_o_len;
     const unsigned char *bin_raster_bin = bin_raster_o;
-    CL_ASSIGN_CHECK(shared->bin_raster_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &bin_raster_size, &bin_raster_bin, NULL, &error));
+    CL_ASSIGN_CHECK(shared->bin_raster_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &bin_raster_size, &bin_raster_bin, NULL, error));
     CL_CHECK(clBuildProgram(shared->bin_raster_program, 1, &shared->device_id, NULL, NULL, NULL));
 
     size_t coarse_raster_size = coarse_raster_o_len;
     const unsigned char *coarse_raster_bin = coarse_raster_o;
-    CL_ASSIGN_CHECK(shared->coarse_raster_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &coarse_raster_size, &coarse_raster_bin, NULL, &error));
+    CL_ASSIGN_CHECK(shared->coarse_raster_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &coarse_raster_size, &coarse_raster_bin, NULL, error));
     CL_CHECK(clBuildProgram(shared->coarse_raster_program, 1, &shared->device_id, NULL, NULL, NULL));
 
     size_t force_clear_size = force_clear_o_len;
     const unsigned char *force_clear_bin = force_clear_o;
-    CL_ASSIGN_CHECK(shared->clear_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &force_clear_size, &force_clear_bin, NULL, &error));
+    CL_ASSIGN_CHECK(shared->clear_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &force_clear_size, &force_clear_bin, NULL, error));
     CL_CHECK(clBuildProgram(shared->clear_program, 1, &shared->device_id, NULL, NULL, NULL));
 
     size_t read_pixels_size = readnpixels_o_len;
     const unsigned char *read_pixels_bin = readnpixels_o;
-    CL_ASSIGN_CHECK(shared->read_pixels_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &read_pixels_size, &read_pixels_bin, NULL, &error));
+    CL_ASSIGN_CHECK(shared->read_pixels_program, clCreateProgramWithBinary(shared->context, 1, &shared->device_id, &read_pixels_size, &read_pixels_bin, NULL, error));
     CL_CHECK(clBuildProgram(shared->read_pixels_program, 1, &shared->device_id, NULL, NULL, NULL));
 
     // Create kernels
-    CL_ASSIGN_CHECK(shared->triangle_setup_arrays_kernel,   clCreateKernel(shared->triangle_setup_program,  "triangle_setup_arrays",    &error));
-    CL_ASSIGN_CHECK(shared->triangle_setup_range_kernel,    clCreateKernel(shared->triangle_setup_program,  "triangle_setup_range",     &error));
-    CL_ASSIGN_CHECK(shared->bin_raster_kernel,              clCreateKernel(shared->bin_raster_program,      "bin_raster",               &error));
-    CL_ASSIGN_CHECK(shared->coarse_raster_kernel,           clCreateKernel(shared->coarse_raster_program,   "coarse_raster",            &error));
-    CL_ASSIGN_CHECK(shared->clear_kernel,                   clCreateKernel(shared->clear_program,           "force_clear",              &error));
-    CL_ASSIGN_CHECK(shared->read_pixels_kernel,             clCreateKernel(shared->read_pixels_program,     "readnpixels",              &error));
+    CL_ASSIGN_CHECK(shared->triangle_setup_arrays_kernel,   clCreateKernel(shared->triangle_setup_program,  "triangle_setup_arrays",    error));
+    CL_ASSIGN_CHECK(shared->triangle_setup_range_kernel,    clCreateKernel(shared->triangle_setup_program,  "triangle_setup_range",     error));
+    CL_ASSIGN_CHECK(shared->bin_raster_kernel,              clCreateKernel(shared->bin_raster_program,      "bin_raster",               error));
+    CL_ASSIGN_CHECK(shared->coarse_raster_kernel,           clCreateKernel(shared->coarse_raster_program,   "coarse_raster",            error));
+    CL_ASSIGN_CHECK(shared->clear_kernel,                   clCreateKernel(shared->clear_program,           "force_clear",              error));
+    CL_ASSIGN_CHECK(shared->read_pixels_kernel,             clCreateKernel(shared->read_pixels_program,     "readnpixels",              error));
 
     // Mem objects
     shared->textures_size = 1;
@@ -759,10 +760,10 @@ void device_init_context(
     const size_t triangle_data_size         = sizeof(triangle_data_t[max_number_subtriangles]);
     const size_t vertex_buffer_size         = sizeof(cl_float4[DEVICE_VERTICES_SIZE][DEVICE_VARYING_SIZE + 1]);
 
-    CL_ASSIGN_CHECK(context->g_tri_subtris,     clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_uchar[max_number_subtriangles]),   NULL, &error));
-    CL_ASSIGN_CHECK(context->g_tri_header,      clCreateBuffer(device->context, CL_MEM_READ_WRITE, triangle_header_size,                        NULL, &error));
-    CL_ASSIGN_CHECK(context->g_tri_data,        clCreateBuffer(device->context, CL_MEM_READ_WRITE, triangle_data_size,                          NULL, &error));     
-    CL_ASSIGN_CHECK(context->g_vertex_buffer,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, vertex_buffer_size,                          NULL, &error));
+    CL_ASSIGN_CHECK(context->g_tri_subtris,     clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_uchar[max_number_subtriangles]),   NULL, error));
+    CL_ASSIGN_CHECK(context->g_tri_header,      clCreateBuffer(device->context, CL_MEM_READ_WRITE, triangle_header_size,                        NULL, error));
+    CL_ASSIGN_CHECK(context->g_tri_data,        clCreateBuffer(device->context, CL_MEM_READ_WRITE, triangle_data_size,                          NULL, error));     
+    CL_ASSIGN_CHECK(context->g_vertex_buffer,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, vertex_buffer_size,                          NULL, error));
 
     #ifdef DEVICE_IMAGE_ENABLED
     {
@@ -781,7 +782,7 @@ void device_init_context(
             .mem_object = context->g_tri_header, 
         };
         
-        CL_ASSIGN_CHECK(context->t_tri_header, clCreateImage(device->context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, &error));
+        CL_ASSIGN_CHECK(context->t_tri_header, clCreateImage(device->context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, error));
 
         image_desc = (cl_image_desc) {
             .image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER,
@@ -790,7 +791,7 @@ void device_init_context(
             .mem_object = context->g_tri_data, 
         };
 
-        CL_ASSIGN_CHECK(context->t_tri_data, clCreateImage(device->context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, &error));
+        CL_ASSIGN_CHECK(context->t_tri_data, clCreateImage(device->context, CL_MEM_READ_ONLY, &image_format, &image_desc, NULL, error));
 
         image_format = (cl_image_format) {
             .image_channel_order = CL_RGBA,
@@ -803,21 +804,21 @@ void device_init_context(
             .mem_object = context->g_vertex_buffer,
         };
 
-        CL_ASSIGN_CHECK(context->t_vertex_buffer, clCreateImage(device->context, CL_MEM_READ_WRITE, &image_format, &image_desc, NULL, &error));
+        CL_ASSIGN_CHECK(context->t_vertex_buffer, clCreateImage(device->context, CL_MEM_READ_WRITE, &image_format, &image_desc, NULL, error));
     }
     #endif
 
-    CL_ASSIGN_CHECK(context->g_bin_first_seg,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, &error)); 
-    CL_ASSIGN_CHECK(context->g_bin_seg_data,    clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_bin_segments * CR_BIN_SEG_SIZE]), NULL, &error)); 
-    CL_ASSIGN_CHECK(context->g_bin_seg_next,    clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_bin_segments]), NULL, &error));
-    CL_ASSIGN_CHECK(context->g_bin_seg_count,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_bin_segments]), NULL, &error));
-    CL_ASSIGN_CHECK(context->g_bin_total,       clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, &error));
+    CL_ASSIGN_CHECK(context->g_bin_first_seg,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, error)); 
+    CL_ASSIGN_CHECK(context->g_bin_seg_data,    clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_bin_segments * CR_BIN_SEG_SIZE]), NULL, error)); 
+    CL_ASSIGN_CHECK(context->g_bin_seg_next,    clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_bin_segments]), NULL, error));
+    CL_ASSIGN_CHECK(context->g_bin_seg_count,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_bin_segments]), NULL, error));
+    CL_ASSIGN_CHECK(context->g_bin_total,       clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXBINS_SQR * CR_BIN_STREAMS_SIZE]), NULL, error));
 
-    CL_ASSIGN_CHECK(context->g_active_tiles,    clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXTILES_SQR]), NULL, &error));
-    CL_ASSIGN_CHECK(context->g_tile_first_seg,  clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXTILES_SQR]), NULL, &error));
-    CL_ASSIGN_CHECK(context->g_tile_seg_data,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_tile_segments * CR_TILE_SEG_SIZE]), NULL, &error));
-    CL_ASSIGN_CHECK(context->g_tile_seg_next,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_tile_segments]), NULL, &error));
-    CL_ASSIGN_CHECK(context->g_tile_seg_count,  clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_tile_segments]), NULL, &error));
+    CL_ASSIGN_CHECK(context->g_active_tiles,    clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXTILES_SQR]), NULL, error));
+    CL_ASSIGN_CHECK(context->g_tile_first_seg,  clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[CR_MAXTILES_SQR]), NULL, error));
+    CL_ASSIGN_CHECK(context->g_tile_seg_data,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_tile_segments * CR_TILE_SEG_SIZE]), NULL, error));
+    CL_ASSIGN_CHECK(context->g_tile_seg_next,   clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_tile_segments]), NULL, error));
+    CL_ASSIGN_CHECK(context->g_tile_seg_count,  clCreateBuffer(device->context, CL_MEM_READ_WRITE, sizeof(cl_int[max_number_tile_segments]), NULL, error));
 
     // Atomics
     cl_uint ZERO = 0;
@@ -836,7 +837,7 @@ void device_init_context(
     context->vertex_uniform_index = 0;
 
     for (size_t i = 0; i < DEVICE_VERTEX_COMMAND_QUEUE_SIZE; ++i) {
-        CL_ASSIGN_CHECK(context->vertex_command_queues[i],      clCreateCommandQueue(device->context, device->device_id, 0, &error)); 
+        CL_ASSIGN_CHECK(context->vertex_command_queues[i],      clCreateCommandQueue(device->context, device->device_id, 0, error)); 
         
         __device_init_mem(device, &context->vertex_attributes_mem[i],       CL_MEM_READ_ONLY, sizeof(cl_float4[DEVICE_VERTEX_ATTRIBUTE_SIZE]), NULL);
         __device_init_mem(device, &context->vertex_attribute_data_mem[i],   CL_MEM_READ_ONLY, sizeof(vertex_attribute_data_t[DEVICE_VERTEX_ATTRIBUTE_SIZE]), NULL);
@@ -844,7 +845,7 @@ void device_init_context(
     }
 
     // Fragment context objects
-    CL_ASSIGN_CHECK(context->raster_command_queue, clCreateCommandQueue(device->context, device->device_id, 0, &error));
+    CL_ASSIGN_CHECK(context->raster_command_queue, clCreateCommandQueue(device->context, device->device_id, 0, error));
 
     __device_init_mem(context->device, &context->fragment_texture_datas_mem, CL_MEM_READ_ONLY, sizeof(texture_data_t[DEVICE_TEXTURE_UNITS]), NULL);
 
@@ -876,7 +877,8 @@ static void __device_set_vertex_shader_kernel_args(
     cl_mem g_vertex_attribute,
     cl_mem g_vertex_attribute_data,
     cl_mem g_uniforms,
-    cl_mem attribute_pointers[DEVICE_VERTEX_ATTRIBUTE_SIZE]
+    cl_mem attribute_pointers[DEVICE_VERTEX_ATTRIBUTE_SIZE],
+    cl_uint primitive_id
 ) {
     cl_mem t_vertex_buffer = __device_get_texture_vertex_buffer(context);
 
@@ -891,7 +893,13 @@ static void __device_set_vertex_shader_kernel_args(
         CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem), &attribute_pointers[attribute]));
     }
 
-    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem), &t_vertex_buffer)); 
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem), &t_vertex_buffer));
+
+    #ifndef DEVICE_SUBBUFFER_ENABLED
+    {
+        CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(primitive_id), &primitive_id)); 
+    }
+    #endif
 }
 
 static void __device_set_triangle_setup_arrays_kernel_args(
@@ -1200,7 +1208,7 @@ static size_t device_create_bin_queue(
                 device->context,
                 device->device_id,
                 0,
-                &error
+                error
             ));
         }
     }
@@ -1215,18 +1223,18 @@ static size_t device_create_program_from_binary(device_t* device, size_t size, c
     size_t program_id = device->programs_size;
 
     // create program object
-    CL_ASSIGN_CHECK(device->programs[program_id], clCreateProgramWithBinary(device->context, 1, &device->device_id, &size, &binary, NULL, &error));
+    CL_ASSIGN_CHECK(device->programs[program_id], clCreateProgramWithBinary(device->context, 1, &device->device_id, &size, &binary, NULL, error));
     CL_CHECK(clBuildProgram(device->programs[program_id], 1, &device->device_id, NULL, NULL, NULL));
 
     // create program kernels
     cl_program program = device->programs[program_id];
     __device_shader_kernels_t* kernels = &device->shaders[program_id];
 
-    CL_ASSIGN_CHECK(kernels->vertex.kernel,         clCreateKernel(program, "gl_vertex_shader",             &error));
-    CL_ASSIGN_CHECK(kernels->fragment,              clCreateKernel(program, "fine_raster_single_sample",    &error));
-    CL_ASSIGN_CHECK(kernels->uniform_data,          clCreateKernel(program, "gl_uniform_data",              &error));
-    CL_ASSIGN_CHECK(kernels->attribute_data,        clCreateKernel(program, "gl_attribute_data",            &error));
-    CL_ASSIGN_CHECK(kernels->varying_data,          clCreateKernel(program, "gl_varying_data",              &error));
+    CL_ASSIGN_CHECK(kernels->vertex.kernel,         clCreateKernel(program, "gl_vertex_shader",             error));
+    CL_ASSIGN_CHECK(kernels->fragment,              clCreateKernel(program, "fine_raster_single_sample",    error));
+    CL_ASSIGN_CHECK(kernels->uniform_data,          clCreateKernel(program, "gl_uniform_data",              error));
+    CL_ASSIGN_CHECK(kernels->attribute_data,        clCreateKernel(program, "gl_attribute_data",            error));
+    CL_ASSIGN_CHECK(kernels->varying_data,          clCreateKernel(program, "gl_varying_data",              error));
 
     cl_uint kernel_varying_num_args;
     CL_CHECK(clGetKernelInfo(kernels->varying_data, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &kernel_varying_num_args, NULL));
@@ -1384,14 +1392,14 @@ static size_t device_create_renderbuffer(device_t* device, size_t width, size_t 
     {
         cl_image_format image_format = __device_get_image_format_from_texture_mode(texture_mode);
         CL_ASSIGN_CHECK(device->renderbuffers[renderbuffer_id], 
-            clCreateImage2D(device->context, CL_MEM_READ_WRITE, &image_format, width, height, 0, NULL, &error)
+            clCreateImage2D(device->context, CL_MEM_READ_WRITE, &image_format, width, height, 0, NULL, error)
         );
     }
     #else
     {
         size_t buffer_size = width * height * __device_get_bytes_from_texture_mode(texture_mode);
         CL_ASSIGN_CHECK(device->renderbuffers[renderbuffer_id], 
-            clCreateBuffer(device->context, CL_MEM_READ_WRITE, buffer_size, NULL, &error)
+            clCreateBuffer(device->context, CL_MEM_READ_WRITE, buffer_size, NULL, error)
         );
     }
     #endif
@@ -1548,7 +1556,7 @@ static void device_launch_vertex_shader(
                 CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR,
                 num_vertices * attribute_pointer->stride,
                 attribute_pointer->mem.host,
-                &error
+                error
             ));
         }
         else
@@ -1568,14 +1576,23 @@ static void device_launch_vertex_shader(
     {
         __device_acquire_mem(&context->fragment_uniform_mem, queue);
 
-        cl_buffer_region buffer_region = {
+        #ifdef DEVICE_SUBBUFFER_ENABLED
+        {
+
+            cl_buffer_region buffer_region = {
                 .origin = DEVICE_UNIFORM_CAPACITY * primitive_id,
                 .size = DEVICE_UNIFORM_CAPACITY
-        };
-        CL_ASSIGN_CHECK(vertex_uniform_mem, clCreateSubBuffer(
-            context->fragment_uniform_mem.mem, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION,
-            &buffer_region, &error
-        ));
+            };
+            CL_ASSIGN_CHECK(vertex_uniform_mem, clCreateSubBuffer(
+                context->fragment_uniform_mem.mem, CL_MEM_READ_ONLY, CL_BUFFER_CREATE_TYPE_REGION,
+                &buffer_region, error
+            ));
+        }
+        #else
+        {
+            vertex_uniform_mem = context->fragment_uniform_mem.mem;
+        }
+        #endif
     }
     else
     {
@@ -1589,7 +1606,8 @@ static void device_launch_vertex_shader(
         __device_acquire_mem(vertex_attributes,     queue),
         __device_acquire_mem(vertex_attribute_data, queue),
         vertex_uniform_mem,
-        attribute_pointer_mems
+        attribute_pointer_mems,
+        primitive_id
     );
 
     // Launch kernel
@@ -1599,7 +1617,14 @@ static void device_launch_vertex_shader(
 
     cl_event wait_event;
     
+    printf("Launching vertex shader with %ld vertices, offset %ld, primitive_id %ld\n", num_vertices, offset, primitive_id);
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gw_offset, &gw_size, NULL, 0, NULL, &wait_event));
+    #ifndef NDEBUG
+    {
+        CL_CHECK(clFinish(queue));
+    }
+    #endif
+    printf("Vertex shader finished\n"); 
     
     // Release host pointers and synchronize device pointers
 
@@ -1623,7 +1648,11 @@ static void device_launch_vertex_shader(
 
     if (use_fragment_uniform)
     {
-        CL_CHECK(clReleaseMemObject(vertex_uniform_mem));
+        #ifdef DEVICE_SUBBUFFER_ENABLED
+        {
+            CL_CHECK(clReleaseMemObject(vertex_uniform_mem));
+        }
+        #endif
     }
     else
     {
@@ -1649,7 +1678,7 @@ void device_launch_range_triangle_assembly(
 
     cl_mem g_index_buffer;
     CL_ASSIGN_CHECK(g_index_buffer, clCreateBuffer(
-            context->device->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(cl_ushort[size]), (void*) ptr, &error
+            context->device->context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(cl_ushort[size]), (void*) ptr, error
     ));
 
     __device_acquire_mem(&context->a_num_subtris,  queue);
@@ -1672,6 +1701,11 @@ void device_launch_range_triangle_assembly(
     cl_event wait_event;
 
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, &wait_event));
+    #ifndef NDEBUG
+    {
+        CL_CHECK(clFinish(queue));
+    }
+    #endif
 
     CL_CHECK(clReleaseMemObject(g_index_buffer));
 
@@ -1717,6 +1751,11 @@ static void device_launch_arrays_triangle_assembly(
     cl_event wait_event;
 
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, &wait_event));
+    #ifndef NDEBUG
+    {
+        CL_CHECK(clFinish(queue));
+    }
+    #endif
 
     CL_CHECK(clEnqueueBarrierWithWaitList(context->raster_command_queue, 1, &wait_event, NULL));
     CL_CHECK(clReleaseEvent(wait_event));
@@ -1752,6 +1791,34 @@ static void device_launch_bin_dispatch(
     cl_event wait_event;
 
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, NULL, gws, lws, 0, NULL, &wait_event));
+    #ifndef NDEBUG
+    {
+        cl_int bin_segs;
+        cl_int bin_total[CR_MAXBINS_SQR][CR_BIN_STREAMS_SIZE];
+        cl_uchar *tri_subtris = (cl_uchar*) malloc(sizeof(cl_uchar[num_triangles]));
+        CL_CHECK(clEnqueueReadBuffer(queue, context->a_num_bin_segs.mem, CL_TRUE, 0, sizeof(bin_segs), &bin_segs, 0, NULL, NULL));
+        CL_CHECK(clEnqueueReadBuffer(queue, context->g_bin_total, CL_TRUE, 0, sizeof(bin_total), &bin_total, 0, NULL, NULL));
+        // CL_CHECK(clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, 0, sizeof(cl_uchar[num_triangles]), tri_subtris, 0, NULL, NULL));
+        printf("bin_segs=%d, max_bin_segs=%ld\n", bin_segs, __device_get_max_number_bin_segments());
+        int sum_bin_total = 0;
+        for(int bin_idx = 0; bin_idx < CR_MAXBINS_SQR; ++bin_idx) {
+            int total = 0;
+            for(int stream_idx = 1; stream_idx < CR_BIN_STREAMS_SIZE; ++stream_idx) {
+                total += bin_total[bin_idx][stream_idx];
+            }
+            printf("bin_total[%d]=%d\n", bin_idx, total);
+            sum_bin_total += total;
+        }
+        printf("sum(bin_total)=%d\n", sum_bin_total);
+        int sum_tri_subtris = 0;
+        for(size_t i=0; i<num_triangles; ++i) {
+            sum_tri_subtris += tri_subtris[i] & 0x7; // mask out the flag bit
+        }
+        // printf("sum(tri_subtris)=%d\n", sum_tri_subtris);
+
+        if (bin_segs > __device_get_max_number_bin_segments()) exit(1);
+    }
+    #endif
 
     __device_barrier_mem(&context->a_bin_counter,   wait_event);
 
@@ -1805,6 +1872,15 @@ static void device_launch_tile_dispatch(
             cl_event wait_event;
 
             CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, NULL, gws, lws, 0, NULL, &wait_event));
+            #ifndef NDEBUG
+            {
+                cl_int tile_segs, active_tiles;
+                CL_CHECK(clEnqueueReadBuffer(queue, context->a_num_tile_segs.mem, CL_TRUE, 0, sizeof(tile_segs), &tile_segs, 0, NULL, NULL));
+                CL_CHECK(clEnqueueReadBuffer(queue, context->a_num_active_tiles.mem, CL_TRUE, 0, sizeof(active_tiles), &active_tiles, 0, NULL, NULL));
+                printf("tile_segs=%d, max_tile_segs=%ld\n", tile_segs, __device_get_max_number_tile_segments());
+                printf("active_tiles=%d\n", active_tiles);
+            }
+            #endif
 
             __device_barrier_mem(&context->a_coarse_counter, wait_event);
             context->bin_wait_event[w][h] = wait_event;
@@ -1871,9 +1947,14 @@ static void device_launch_fragment_shader(
             cl_event wait_event;
 
             CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, NULL, gws, lws, 1, &bin_wait_event, &wait_event));
+            #ifndef NDEBUG
+            {
+                CL_CHECK(clFinish(queue));
+            }
+            #endif
 
             CL_CHECK(clReleaseEvent(bin_wait_event));
-
+        
             __device_barrier_mem(&context->a_fine_counter,              wait_event);
             __device_barrier_mem(&context->fragment_texture_datas_mem,  wait_event);
             __device_barrier_mem(&context->fragment_uniform_mem,        wait_event);
@@ -1964,7 +2045,7 @@ static void device_launch_read_pixels(
         CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR,
         size,
         ptr,
-        &error
+        error
     ));
     
 
@@ -1986,7 +2067,7 @@ static void device_launch_read_pixels(
     
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, global_work_offset, global_work_size, NULL, 0, NULL, NULL));
     void* map_ptr;
-    CL_ASSIGN_CHECK(map_ptr, clEnqueueMapBuffer(queue, buffer, CL_TRUE, CL_MAP_READ, 0, size, 0, NULL, NULL, &error));
+    CL_ASSIGN_CHECK(map_ptr, clEnqueueMapBuffer(queue, buffer, CL_TRUE, CL_MAP_READ, 0, size, 0, NULL, NULL, error));
     // CL_CHECK(clEnqueueReadBuffer(queue, buffer, CL_TRUE, 0, size, ptr, 0, NULL, NULL));
     CL_CHECK(clReleaseMemObject(buffer));
     /*

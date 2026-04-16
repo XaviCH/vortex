@@ -212,9 +212,23 @@ static inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group
         uint result = atomic_or(aligned_address, aligned_mask);
         atomic_mask.mask = result >> align_offset*16;
     }
-    #elif (DEVICE_SUB_GROUP_THREADS <= 64)
+    #elif (DEVICE_SUB_GROUP_THREADS <= 32)
     {
         atomic_mask.mask = atomic_or(&address->mask, mask.mask);
+    }
+    #elif (DEVICE_SUB_GROUP_THREADS <= 64)
+    {
+        #ifdef cl_khr_int64_extended_atomics
+        {
+            atomic_mask.mask = atomic_or(&address->mask, mask.mask);
+        }
+        #else
+        {
+            atomic_mask.mask = atomic_or((local volatile uint*)&address->mask + 1, (uint)(mask.mask >> 32));
+            atomic_mask.mask <<= 32;
+            atomic_mask.mask |= atomic_or((local volatile uint*)&address->mask, (uint) mask.mask);
+        }
+        #endif
     }
     #else
     {

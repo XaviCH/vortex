@@ -46,6 +46,7 @@ typedef struct {
         /* Define accessible objects from fragment shader */ \
         FS_DEFINES \
         /* Set values from vertex_buffer */ \
+        uint gl_uniform_offset = 0; \
         FS_SETS \
         /* Run vertex shader */ \
         __VA_ARGS__ \

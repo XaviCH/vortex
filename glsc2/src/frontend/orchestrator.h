@@ -3,6 +3,11 @@
 
 #include <frontend/device.h>
 
+/*
+typedef struct {
+    // clock_t init_clock, destroy_clock;
+} __orch_debug_t;
+*/
 typedef struct {
     size_t shader_id;
     size_t assembled_triangles;
@@ -230,6 +235,7 @@ static void __orch_flush_draw_state(orch_handler_t* orch, orch_framebuffer_handl
 
     if (framebuffer->draw_state.assembled_triangles == 0) return;
     
+    // printf("flushed state: assembled_triangles=%d\n", framebuffer->draw_state.assembled_triangles);
     uint32_t deferred_clear = __orch_get_deferred_clear(framebuffer);
 
     device_context_t* context = __orch_get_attached_context(orch, framebuffer);

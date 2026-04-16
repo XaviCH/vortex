@@ -144,11 +144,15 @@ static uint8_t                  _uniform_data_updated;
 static size_t                   _current_program;
 static size_t                   _program_sz;
 static gl_program_t                _programs                [HOST_PROGRAMS_SIZE];
+static gl_program_t*            gl_get_current_program() { return &_programs[_current_program-1]; }
 
 static uint32_t                 _framebuffer_updated;
 static size_t                   _framebuffer_binding;
 static size_t                   _framebuffer_sz;
-static gl_framebuffer_t            _framebuffers   [HOST_FRAMEBUFFER_SIZE];
+static gl_framebuffer_t         _framebuffers   [HOST_FRAMEBUFFER_SIZE];
+static gl_framebuffer_t*        gl_get_binded_framebuffer() { return &_framebuffers[_framebuffer_binding-1]; }
+
+
 
 static size_t                   _buffer_binding;
 static size_t                   _buffer_sz;
@@ -432,7 +436,7 @@ GL_APICALL void GL_APIENTRY glBufferSubData (GLenum target, GLintptr offset, GLs
 
 static attachment_size_t get_any_attachment() 
 {
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
 
     if (framebuffer->color_attachment0.binding) 
     {
@@ -456,7 +460,7 @@ GL_APICALL GLenum GL_APIENTRY glCheckFramebufferStatus (GLenum target)
 
     if (_framebuffer_binding == 0) NOT_IMPLEMENTED;
 
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
     
     uint32_t is_color_attached = framebuffer->color_attachment0.binding;
     uint32_t is_depth_attached = framebuffer->depth_attachment.binding;
@@ -538,7 +542,7 @@ GL_APICALL void GL_APIENTRY glClear (GLbitfield mask)
 
     if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION); // TODO: Not implemented
 
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
     
     clear_data_t clear_data = (clear_data_t) {
         .color.misc = get_clear_color(
@@ -678,7 +682,7 @@ GL_APICALL void GL_APIENTRY glDisableVertexAttribArray (GLuint index)
 
 static void write_gl_state_to_orch(GLenum draw_mode)
 {
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t* framebuffer = gl_get_binded_framebuffer();
 
     if (vertex_attibute_updated)
     {
@@ -790,9 +794,10 @@ GL_APICALL void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei coun
 
     if (mode == GL_POINTS || mode == GL_LINE_STRIP || mode == GL_LINE_LOOP || mode == GL_LINES) NOT_IMPLEMENTED;
 
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
-    gl_program_t* program = &_programs[_current_program-1];
-    render_mode_t render_mode = get_render_mode(mode);
+    gl_framebuffer_t*   framebuffer = gl_get_binded_framebuffer();
+    gl_program_t*       program     = gl_get_current_program();
+    
+    render_mode_t       render_mode = get_render_mode(mode);
 
     write_gl_state_to_orch(mode);
 
@@ -815,8 +820,8 @@ GL_APICALL void GL_APIENTRY glDrawRangeElements (GLenum mode, GLuint start, GLui
     
     if (count == 0) return;
 
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
-    gl_program_t* program = &_programs[_current_program-1];
+    gl_framebuffer_t* framebuffer = gl_get_binded_framebuffer();
+    gl_program_t* program = gl_get_current_program();
     render_mode_t render_mode = get_render_mode(mode);
 
     write_gl_state_to_orch(mode);
@@ -845,7 +850,7 @@ GL_APICALL void GL_APIENTRY glFinish (void)
 {
     if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t* framebuffer = gl_get_binded_framebuffer();
 
     orch_finish(orch, framebuffer->id);
 }
@@ -854,7 +859,7 @@ GL_APICALL void GL_APIENTRY glFlush (void)
 {
     if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    gl_framebuffer_t* framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t* framebuffer = gl_get_binded_framebuffer();
 
     orch_flush(orch, framebuffer->id);
 }
@@ -865,7 +870,7 @@ GL_APICALL void GL_APIENTRY glFramebufferRenderbuffer (GLenum target, GLenum att
 
     if (_framebuffer_binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
 
     attachment_t *attachment_ptr;
 
@@ -926,7 +931,7 @@ GL_APICALL void GL_APIENTRY glFramebufferTexture2D (GLenum target, GLenum attach
 
     if (level != 0) RETURN_ERROR(GL_INVALID_VALUE);
 
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
     
     attachment_t *attachment_ptr;
 
@@ -1352,7 +1357,7 @@ GL_APICALL void GL_APIENTRY glReadnPixels (GLint x, GLint y, GLsizei width, GLsi
 
     if (!_framebuffer_binding) NOT_IMPLEMENTED; // TODO: Context related operation
 
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
     
     if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
@@ -1367,7 +1372,7 @@ GL_APICALL void GL_APIENTRY glEGLReadnPixels (GLint x, GLint y, GLsizei width, G
 
     if (!_framebuffer_binding) NOT_IMPLEMENTED; // TODO: Context related operation
 
-    gl_framebuffer_t *framebuffer = &_framebuffers[_framebuffer_binding-1];
+    gl_framebuffer_t *framebuffer = gl_get_binded_framebuffer();
     
     if (framebuffer->color_attachment0.binding == 0) RETURN_ERROR(GL_INVALID_OPERATION);
 
@@ -2432,7 +2437,7 @@ static GLboolean is_valid_face(GLenum face)
 
 static void set_uniform_data(GLint location, size_t size, const void* data)
 {
-    gl_program_t *program = &_programs[_current_program-1];
+    gl_program_t *program = gl_get_current_program();
     // printf("location=%d offset=%d, size=%ld, data*=%d\n",location, program->uniform_arg_datas[location].offset, size, *((uint32_t*)data));
     memcpy(program->uniform_data + program->uniform_arg_datas[location].offset, data, size);
     _uniform_data_updated = 1;
@@ -2447,7 +2452,7 @@ static GLboolean is_valid_uniform_data(GLint location, size_t size, GLenum type)
 {
     if (_current_program == 0) return GL_FALSE;
 
-    gl_program_t *program = &_programs[_current_program-1];
+    gl_program_t *program = gl_get_current_program();
 
     if (location >= program->uniform_sz) return GL_FALSE;
 

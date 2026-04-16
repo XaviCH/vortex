@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
     const cl_uint num_device_entries = DEVICE_DEVICE_ID + 1;
     
     cl_device_id device_entry_ids[num_device_entries];
-    error = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_GPU, num_device_entries, device_entry_ids, NULL);
+    error = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, num_device_entries, device_entry_ids, NULL);
     CHECK(error);
 
     device_id = device_entry_ids[DEVICE_DEVICE_ID];
@@ -136,7 +136,6 @@ int main(int argc, char** argv) {
     context = clCreateContext(NULL, 1, &device_id, NULL, NULL,  &error);
     CHECK(error);
 
-
     uint8_t* file;
     size_t file_size;
 
@@ -145,32 +144,36 @@ int main(int argc, char** argv) {
     cl_program program = clCreateProgramWithSource(context, 1, (const char**) &file, &file_size, &error);
     CHECK(error);
 
+    // setup compile options
+
     char *options = NULL;
-    if (argc > 3) {
-        int flag = 3;
-        size_t size = 0;
-        while(flag < argc) {
-            size += strlen(argv[flag++]);
-        }
+    
+    size_t flags_init = 3;
+    size_t size = 0;
 
-        options = (char*) malloc(size + argc-3);
-
-        flag = 3;
-        size_t offset = 0;
-        while (flag < argc) {
-            strcpy(options + offset, argv[flag]);
-            offset += strlen(argv[flag]);
-            options[offset] = ' ';
-            ++offset;
-            ++flag;
-        }
-        options[offset-1] = '\0';
-        printf("Compiling with options: %s\n", options);
+    for(size_t flag = flags_init; flag < argc; ++flag)
+    {
+        size += strlen(argv[flag]) + 1; // + null terminator or space
     }
+
+    if (size) options = (char*) malloc(size);
+
+    size_t offset = 0;
+    
+    for(size_t flag = flags_init; flag < argc; ++flag)
+    {
+        options[offset] = ' ';
+        offset += 1;
+        strcpy(&options[offset], argv[flag]);
+        offset += strlen(argv[flag]);
+    }
+
+    if (size) printf("Compiling with options: %s\n", options);
+
+    // build program
 
     error = clBuildProgram(program, 1, &device_id, options, NULL, NULL);
     if (error == CL_BUILD_PROGRAM_FAILURE || error) {
-    // Determine the size of the log
         size_t log_size;
         clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
 
@@ -185,68 +188,84 @@ int main(int argc, char** argv) {
     }
     CHECK(error);
 
-    size_t result = 0;
-    size_t size_result;
-
-    error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_STATUS, sizeof(result), &result, &size_result);
-    CHECK(error);
-
-    // printf("Error at building OpenCL binary: %ld | %lx\n.", result, result);
-
-    error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &size_result);
-    CHECK(error);
-
-    char* log = (char*) malloc(size_result);
-
-    error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, size_result, log, &size_result);
-    CHECK(error);
-
-    printf("%s\n", log);
-    free(log);
-    if (result != CL_BUILD_SUCCESS) {
-        exit(1);
-    } 
+    // retrive build status 
     
-    /*else {
-        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &size_result);
+    cl_build_status build_status;
+    do {
+        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_STATUS, sizeof(build_status), &build_status, NULL);
         CHECK(error);
-        char* log = (char*) malloc(size_result);
+        switch (build_status)
+        {
+        case CL_BUILD_NONE:
+            printf("CL_BUILD_NONE: Unexpected error %s:%d\n", __FILE__, __LINE__);
+            exit(build_status);
+        case CL_BUILD_IN_PROGRESS:
+            printf("CL_BUILD_IN_PROGRESS\n");
+            break;
+        default:
+            break;
+        }
+    } while(build_status == CL_BUILD_IN_PROGRESS);
+    
+    // retrieve build info log
 
-        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, size_result, log, &size_result);
+    size_t build_log_size;
+    error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, 0, NULL, &build_log_size);
+    CHECK(error);
+
+    if (build_log_size) 
+    {
+        char* log = (char*) malloc(build_log_size);
+        error = clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, build_log_size, log, NULL);
         CHECK(error);
-
-        printf("Build log:\n\t%s\n", log);
+        if (build_log_size > 2) printf("%s\n", log); // not print empty string, TODO: improve logic.
         free(log);
-    }*/
+    }
 
-    size_t returned_size;
-    
-    size_t kernel_num;
-    error = clGetProgramInfo(program, CL_PROGRAM_NUM_KERNELS, sizeof(kernel_num), &kernel_num, &returned_size);
+    switch (build_status)
+    {
+        case CL_BUILD_ERROR:
+            printf("CL_BUILD_ERROR.\n");
+            break;
+        case CL_BUILD_SUCCESS:
+            printf("CL_BUILD_SUCCESS.\n");
+            break;
+        default:
+            printf("ERROR: Unexpected build status value. build_status==%d.\n",(int)build_status);
+            exit(build_status);
+    }
+
+    if (build_status != CL_BUILD_SUCCESS) exit(1);
+
+    // post compile checks
+
+    size_t num_kernels;
+    error = clGetProgramInfo(program, CL_PROGRAM_NUM_KERNELS, sizeof(num_kernels), &num_kernels, NULL);
     CHECK(error);
     
-    if (kernel_num == 0) {
-        printf("No kernel on detected on program.\n");
+    if (num_kernels == 0) {
+        printf("ERROR: No kernel detected on program.\n");
         exit(-1);
     }
 
-    uint8_t* binary;
+    // write binary
+
     size_t binary_size;
 
-    error = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(binary_size), &binary_size, &returned_size);
+    error = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(binary_size), &binary_size, NULL);
     CHECK(error);
 
     if (binary_size == 0) {
-        printf("Driver does not support binaries.\n");
+        printf("ERROR: Driver does not support binaries.\n");
         exit(-1);
     }
 
-    binary = (uint8_t*) malloc(binary_size);
-    error = clGetProgramInfo(program, CL_PROGRAM_BINARIES, binary_size, &binary, &returned_size);
+    unsigned char* binary = (unsigned char*) malloc(binary_size);
+    error = clGetProgramInfo(program, CL_PROGRAM_BINARIES, sizeof(binary), &binary, NULL);
     CHECK(error);
 
-    FILE *out = fopen(argv[2], "wb");
+    FILE *output_file = fopen(argv[2], "wb");
+    fwrite(binary, sizeof(binary[0]), binary_size, output_file);
 
-    fwrite(binary,1,binary_size,out);
     free(binary);
 }

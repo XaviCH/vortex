@@ -271,6 +271,19 @@ void bin_raster(
 
             }
 
+            /*
+            // force commit of atomics
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+            sub_group_mask_t empty_mask;
+            clear_sub_group_mask(&empty_mask);
+            
+            #pragma unroll
+            for(int bin_idx = get_local_id(0); bin_idx < CR_MAXBINS_SQR; bin_idx += DEVICE_SUB_GROUP_THREADS) {
+                s_out_mask[get_local_id(1)][bin_idx] = atomic_or_sub_group_mask(&s_out_mask[get_local_id(1)][bin_idx], empty_mask);
+            }
+            */
+            
             // count per-bin contributions
             s_over_total = 0; // overflow counter
 

@@ -143,7 +143,7 @@
 #define CR_TILE_SIZE            (1 << CR_TILE_LOG2)
 #define CR_TILE_SQR             (1 << (CR_TILE_LOG2 * 2))
 
-#define CR_BIN_STREAMS_SIZE     MIN(16, DEVICE_NUM_CORES)
+#define CR_BIN_STREAMS_SIZE     16 // MIN(16, DEVICE_NUM_CORES)
 #define CR_BIN_SEG_SIZE         (1 << CR_BIN_SEG_LOG2)
 #define CR_TILE_SEG_SIZE        (1 << CR_TILE_SEG_LOG2)
 

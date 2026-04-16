@@ -522,9 +522,9 @@ static inline void local_1dim_execute_rop(
             atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], thread_bit);
 
         local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-        sub_group_mask_t thread_pixel_mask = atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], empty_mask);
 
         if (active_rop_lane) {
+            sub_group_mask_t thread_pixel_mask = l1_temp->tile[pixel_in_tile]; // atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], empty_mask);
             
             if (!any_sub_group_mask(and_sub_group_mask(thread_pixel_mask, lt_mask))) 
             {

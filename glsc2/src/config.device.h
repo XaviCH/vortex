@@ -12,13 +12,19 @@
 
 #define DEVICE_UNROLL_SUPPORT 1
 
+#define DEBUG_MODE 1
+#if (DEBUG_MODE == 0)
+    #define NDEBUG
+#endif
+
 // -----------
 // DEVICE ARCH
 // -----------
 // Byte size of local memory available for core
 #define DEVICE_LOCAL_MEM_SIZE 0xc000u
+#define DEVICE_MEM_BASE_ADDR_ALIGN 512
 
-#define DEVICE_NUM_CORES 36
+#define DEVICE_NUM_CORES 11
 
 #define DEVICE_LOCAL_THREADS_LOG2 10
 
@@ -61,7 +67,7 @@
 #define DEVICE_VERTEX_TEXTURE_UNITS 0 // max number of vertex texture units
 #define DEVICE_TEXTURE_UNITS 8 // max number of active texture units
 
-#define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 4
+#define TRIANGLE_PRIMITIVE_CONFIGS_LOG2 5
 #define DEVICE_VERTEX_COMMAND_QUEUE_SIZE 8
 
 // max number of triangles could be rasterized
@@ -109,10 +115,19 @@
 #define DEVICE_MIPMAP_LEVELS
 
 // EXTENSIONS SUPPORT
-// NVIDIA
-#define NVIDIA_SM_VERSION 61
 
 #define USE_CL_KHR_GLOBAL_INT32_BASE_ATOMICS_IMPL 0
 #define USE_CL_KHR_LOCAL_INT32_BASE_ATOMICS_IMPL 0
 #define USE_CL_KHR_LOCAL_INT32_EXTENDED_ATOMICS_IMPL 0
+#define USE_CL_KHR_SUBGROUP_BALLOT_IMPL 0
+#define USE_CL_KHR_SUBGROUPS_IMPL 0
+
+// NVIDIA
+#define NVIDIA_SM_VERSION 61
+
+#define DEVICE_SUBBUFFER_SUPPORT 1 // some nvidia drivers throw mem exception when using subbuffer
+#if (DEVICE_SUBBUFFER_SUPPORT == 1)
+    #define DEVICE_SUBBUFFER_ENABLED
+#endif
+
 #endif

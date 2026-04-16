@@ -197,41 +197,46 @@
 // Uniform definitions
 //--------------------
 
-inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniforms, float* dst, uint* offset) {
-    *dst = *(global float*)&gl_uniforms[*offset];
-    *offset += sizeof(float);
-}
-inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniforms, int* dst, uint* offset) {
-    *dst = *(global int*)&gl_uniforms[*offset];
-    *offset += sizeof(int);
-}
-inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniforms, uint* dst, uint* offset) {
-    *dst = *(global uint*)&gl_uniforms[*offset];
-    *offset += sizeof(uint);
-}
-inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniforms, int2* dst, uint* offset) {
-    *dst = *(global int2*)&gl_uniforms[*offset];
-    *offset += sizeof(int2);
-}
-inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniforms, float4* dst, uint* offset) {
-    *dst = *(global float4*)&gl_uniforms[*offset];
-    *offset += sizeof(float4);
-}
-inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniforms, float16* dst, uint* offset) {
-    *dst = *(global float16*)&gl_uniforms[*offset];
-    *offset += sizeof(float16);
-}
+#define GEN_FETCH_UNIFORM_IMPL(_TYPE) \
+    static inline void __attribute__((overloadable)) fetch_uniform( \
+        global void* gl_uniforms, \
+        private _TYPE* dst, \
+        private uint* offset \
+    ) { \
+        *dst = *(global _TYPE*) &((global uchar*)gl_uniforms)[*offset]; \
+        *offset += sizeof(_TYPE); \
+    }
+
+GEN_FETCH_UNIFORM_IMPL(float)
+GEN_FETCH_UNIFORM_IMPL(float2)
+GEN_FETCH_UNIFORM_IMPL(float3)
+GEN_FETCH_UNIFORM_IMPL(float4)
+GEN_FETCH_UNIFORM_IMPL(float16)
+
+GEN_FETCH_UNIFORM_IMPL(int)
+GEN_FETCH_UNIFORM_IMPL(int2)
+GEN_FETCH_UNIFORM_IMPL(int3)
+GEN_FETCH_UNIFORM_IMPL(int4)
+GEN_FETCH_UNIFORM_IMPL(int16)
+
+GEN_FETCH_UNIFORM_IMPL(uint)
+GEN_FETCH_UNIFORM_IMPL(uint2)
+GEN_FETCH_UNIFORM_IMPL(uint3)
+GEN_FETCH_UNIFORM_IMPL(uint4)
+GEN_FETCH_UNIFORM_IMPL(uint16)
+
+#undef GEN_FETCH_UNIFORM_IMPL
 
 #define SET_UNIFORM_CHAIN(...) GLUE(SET_UNIFORM_CHAIN_,COUNT(__VA_ARGS__))(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_1(a)     gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset);
-#define SET_UNIFORM_CHAIN_2(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_1(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_3(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_2(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_4(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_3(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_5(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_4(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_6(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_5(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_7(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_6(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_8(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_7(__VA_ARGS__)
-#define SET_UNIFORM_CHAIN_9(a,...) gl_get_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_8(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_1(a)     fetch_uniform(gl_uniforms, &a, &gl_uniform_offset);
+#define SET_UNIFORM_CHAIN_2(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_1(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_3(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_2(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_4(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_3(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_5(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_4(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_6(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_5(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_7(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_6(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_8(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_7(__VA_ARGS__)
+#define SET_UNIFORM_CHAIN_9(a,...) fetch_uniform(gl_uniforms, &a, &gl_uniform_offset); SET_UNIFORM_CHAIN_8(__VA_ARGS__)
 
 // ---------------------
 
@@ -422,7 +427,6 @@ inline void __attribute__((overloadable)) gl_get_uniform(global void* gl_uniform
 
 #define SET_UNIFORMS \
     { \
-        uint gl_uniform_offset = 0; \
         SET_UNIFORM_MAT4 \
         SET_UNIFORM_VEC4 \
         SET_UNIFORM_INT2 \

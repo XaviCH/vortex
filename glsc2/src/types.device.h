@@ -895,4 +895,12 @@ cl_uchar is_framebuffer_data_stencilbuffer_enabled(gl_framebuffer_data_t framebu
     return framebuffer_data.misc & (0x1u << 2);
 }
 
+// uniform type
+
+typedef struct {
+    cl_uchar __attribute__((aligned(DEVICE_MEM_BASE_ADDR_ALIGN))) data[DEVICE_UNIFORM_CAPACITY];
+} uniform_buffer_t;
+
+typedef uniform_buffer_t uniform_buffer_array_t[TRIANGLE_PRIMITIVE_CONFIGS] __attribute__((aligned(DEVICE_MEM_BASE_ADDR_ALIGN)));
+
 #endif

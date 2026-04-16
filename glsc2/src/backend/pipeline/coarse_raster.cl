@@ -617,6 +617,18 @@ void coarse_raster(
 
             barrier(CLK_LOCAL_MEM_FENCE);
 
+            /*
+            // atomic do not ensure visibility after barrier
+            sub_group_mask_t empty_mask;
+            clear_sub_group_mask(&empty_mask);
+
+            #pragma unroll
+            for(int tile_in_bin = get_local_id(0); tile_in_bin < CR_BIN_SQR; tile_in_bin += DEVICE_SUB_GROUP_THREADS) {
+                s_warp_emit_mask[get_local_id(1)][tile_in_bin] = atomic_or_sub_group_mask(&s_warp_emit_mask[get_local_id(1)][tile_in_bin], empty_mask);
+            }
+
+            barrier(CLK_LOCAL_MEM_FENCE);
+            */
             //------------------------------------------------------------------------
             // Count.
             //------------------------------------------------------------------------
