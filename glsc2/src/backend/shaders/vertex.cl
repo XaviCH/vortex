@@ -276,16 +276,20 @@ static inline void gl_fill_vertex_buffer(
 #endif
 
 #define VS_MAIN(...) \
-    kernel void gl_vertex_shader( \
+    kernel \
+    __attribute__((reqd_work_group_size(DEVICE_VERTEX_THREADS, 1, 1))) \
+    void gl_vertex_shader( \
         global const float4* vertex_attributes, \
         global const vertex_attribute_data_t* vertex_attribute_datas, \
         global void* gl_uniforms, \
         VS_KERNEL_PARAMS \
-        wo_vertex_buffer_t vertex_buffer \
+        wo_vertex_buffer_t vertex_buffer, \
+        const uint c_num_vertices \
         PRIMITIVE_IDX_PARAM \
     ) { \
         /* Define accessible objects from vertex shader */ \
         VS_DEFINES \
+        if (get_global_linear_id() >= c_num_vertices) return; \
         /* Set values from buffers */ \
         SET_PRIMITIVE_IDX \
         uint gl_uniform_offset = 0 * DEVICE_UNIFORM_CAPACITY; \

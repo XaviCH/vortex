@@ -47,9 +47,8 @@ inline void triangle_setup(
  *
  */
 kernel
-/*
-__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_SETUP_SUB_GROUPS, 1)))
-*/
+//__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_SETUP_SUB_GROUPS, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SETUP_THREADS, 1, 1)))
 void triangle_setup_arrays(
     global int* a_num_subtris,
 
@@ -59,6 +58,7 @@ void triangle_setup_arrays(
 
     ro_vertex_buffer_t t_vertex_buffer, 
 
+    const int c_num_tris,
     const int c_vertex_offset,
     const int c_max_subtris,
     const render_mode_t c_render_mode,
@@ -69,6 +69,7 @@ void triangle_setup_arrays(
     const uint c_primitive_config
 )
 {
+    // TODO: Check register ocupancy to decide if use shared or register
     /*
     local float s_bary[DEVICE_SETUP_SUB_GROUPS * DEVICE_SUB_GROUP_THREADS][18];
 
@@ -81,10 +82,9 @@ void triangle_setup_arrays(
     // int task_idx = get_global_id(0);
     int task_idx = get_global_linear_id();
     
-    /*
     if (task_idx >= c_num_tris)
         return;
-    */
+    
     // Pick vertices
 
     int3 vidx;
@@ -124,9 +124,8 @@ void triangle_setup_arrays(
  *
  */
 kernel
-/*
-__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_SETUP_SUB_GROUPS, 1)))
-*/
+// __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, DEVICE_SETUP_SUB_GROUPS, 1)))
+__attribute__((reqd_work_group_size(DEVICE_SETUP_THREADS, 1, 1)))
 void triangle_setup_range(
     global int* a_num_subtris,
 
@@ -137,6 +136,7 @@ void triangle_setup_range(
 
     ro_vertex_buffer_t t_vertex_buffer,
 
+    const int c_num_tris,
     const int c_vertex_offset,
     const int c_max_subtris,
     const render_mode_t c_render_mode,
@@ -158,10 +158,10 @@ void triangle_setup_range(
 
     int task_idx = get_global_linear_id();
     
-    /*
+    
     if (task_idx >= c_num_tris)
         return;
-    */
+    
     // Pick vertices
 
     int3 vidx;

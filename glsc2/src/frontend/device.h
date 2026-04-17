@@ -878,6 +878,7 @@ static void __device_set_vertex_shader_kernel_args(
     cl_mem g_vertex_attribute_data,
     cl_mem g_uniforms,
     cl_mem attribute_pointers[DEVICE_VERTEX_ATTRIBUTE_SIZE],
+    cl_uint c_num_vertices,
     cl_uint primitive_id
 ) {
     cl_mem t_vertex_buffer = __device_get_texture_vertex_buffer(context);
@@ -894,6 +895,7 @@ static void __device_set_vertex_shader_kernel_args(
     }
 
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem), &t_vertex_buffer));
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_num_vertices), &c_num_vertices));
 
     #ifndef DEVICE_SUBBUFFER_ENABLED
     {
@@ -905,6 +907,7 @@ static void __device_set_vertex_shader_kernel_args(
 static void __device_set_triangle_setup_arrays_kernel_args(
     cl_kernel kernel,
     device_context_t* context, 
+    cl_uint c_num_tris,
     cl_uint c_vertex_offset,
     render_mode_t c_mode,
     cl_uint c_vertex_size,
@@ -923,6 +926,7 @@ static void __device_set_triangle_setup_arrays_kernel_args(
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_data));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_subtris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &t_vertex_buffer));
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_num_tris),             &c_num_tris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_vertex_offset),        &c_vertex_offset));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_max_subtris),          &c_max_subtris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_mode),                 &c_mode));
@@ -937,6 +941,7 @@ static void __device_set_triangle_setup_range_kernel_args(
     cl_kernel kernel,
     device_context_t* context,
     cl_mem g_index_buffer,
+    cl_uint c_num_tris,
     cl_uint c_vertex_offset,
     render_mode_t c_mode,
     cl_uint c_vertex_size,
@@ -956,6 +961,7 @@ static void __device_set_triangle_setup_range_kernel_args(
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_data));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &context->g_tri_subtris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(cl_mem),                 &t_vertex_buffer)); 
+    CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_num_tris),             &c_num_tris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_vertex_offset),        &c_vertex_offset));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_max_subtris),          &c_max_subtris));
     CL_CHECK(clSetKernelArg(kernel, arg_idx++, sizeof(c_mode),                 &c_mode));
@@ -1607,18 +1613,22 @@ static void device_launch_vertex_shader(
         __device_acquire_mem(vertex_attribute_data, queue),
         vertex_uniform_mem,
         attribute_pointer_mems,
+        num_vertices,
         primitive_id
     );
 
     // Launch kernel
 
-    size_t gw_offset = offset;
-    size_t gw_size = num_vertices;
+    // size_t gw_offset = offset;
+    // size_t gw_size = num_vertices;
+    size_t lws[] = {DEVICE_VERTEX_THREADS};
+    size_t gwo[] = {offset};
+    size_t gws[] = {lws[0] * ((num_vertices-1/lws[0]) + 1)};
 
     cl_event wait_event;
     
-    printf("Launching vertex shader with %ld vertices, offset %ld, primitive_id %ld\n", num_vertices, offset, primitive_id);
-    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gw_offset, &gw_size, NULL, 0, NULL, &wait_event));
+    printf("gwo={%zu}, gws={%zu}, lws={%zu}\n", gwo[0], gws[0], lws[0]);
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, gwo, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
         CL_CHECK(clFinish(queue));
@@ -1687,6 +1697,7 @@ void device_launch_range_triangle_assembly(
         kernel,
         context,
         g_index_buffer,
+        num_triangles,
         vertex_offset,
         mode,
         context->device->shaders[shader_id].vertex.vertex_size,
@@ -1695,12 +1706,16 @@ void device_launch_range_triangle_assembly(
         width
     );
 
-    size_t gwo = triangle_offset;
-    size_t gws = num_triangles;
+    // size_t gwo = triangle_offset;
+    // size_t gws = num_triangles;
+    size_t lws[] = {DEVICE_SETUP_THREADS};
+    size_t gwo[] = {triangle_offset};
+    size_t gws[] = {lws[0] * ((num_triangles-1/lws[0]) + 1)};
 
     cl_event wait_event;
 
-    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, &wait_event));
+    printf("gwo={%zu}, gws={%zu}, lws={%zu}\n", gwo[0], gws[0], lws[0]);
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, gwo, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
         CL_CHECK(clFinish(queue));
@@ -1737,6 +1752,7 @@ static void device_launch_arrays_triangle_assembly(
     __device_set_triangle_setup_arrays_kernel_args(
         kernel,
         context,
+        num_triangles,
         vertex_offset,
         mode,
         context->device->shaders[shader_id].vertex.vertex_size,
@@ -1745,12 +1761,13 @@ static void device_launch_arrays_triangle_assembly(
         width
     );
 
-    size_t gwo = triangle_offset;
-    size_t gws = num_triangles;
+    size_t lws[] = {DEVICE_SETUP_THREADS};
+    size_t gwo[] = {triangle_offset};
+    size_t gws[] = {lws[0] * ((num_triangles-1/lws[0]) + 1)};
 
     cl_event wait_event;
-
-    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, &gwo, &gws, NULL, 0, NULL, &wait_event));
+    printf("gwo={%zu}, gws={%zu}, lws={%zu}\n", gwo[0], gws[0], lws[0]);
+    CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, gwo, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
         CL_CHECK(clFinish(queue));
