@@ -791,6 +791,12 @@ static void orch_draw_arrays(
     orch_framebuffer_handler_t* framebuffer = __orch_get_framebuffer_from_id(orch, framebuffer_id);
 
     __orch_draw_vertices(orch, framebuffer, shader_id, mode, init, end);
+
+    #if (DEVICE_ORCHESTRATOR_ENABLED == 0)
+    {
+        __orch_flush_framebuffer(orch, framebuffer);
+    }
+    #endif
 }
 
 static void orch_draw_range(
@@ -834,6 +840,12 @@ static void orch_draw_range(
 
     framebuffer->draw_state.pending_vertices = 0;
     framebuffer->draw_state.assembled_triangles += pending_triangles;
+
+    #if (DEVICE_ORCHESTRATOR_ENABLED == 0)
+    {
+        __orch_flush_framebuffer(orch, framebuffer);
+    }
+    #endif
 }
 
 static void orch_clear(

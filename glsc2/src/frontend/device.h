@@ -1627,14 +1627,17 @@ static void device_launch_vertex_shader(
 
     cl_event wait_event;
     
-    printf("gwo={%zu}, gws={%zu}, lws={%zu}\n", gwo[0], gws[0], lws[0]);
+    #ifndef NDEBUG
+    {
+        printf("%s: gwo={%zu}, gws={%zu}, lws={%zu}\n", __func__, gwo[0], gws[0], lws[0]);
+    }
+    #endif
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, gwo, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
         CL_CHECK(clFinish(queue));
     }
     #endif
-    printf("Vertex shader finished\n"); 
     
     // Release host pointers and synchronize device pointers
 
@@ -1714,7 +1717,11 @@ void device_launch_range_triangle_assembly(
 
     cl_event wait_event;
 
-    printf("gwo={%zu}, gws={%zu}, lws={%zu}\n", gwo[0], gws[0], lws[0]);
+    #ifndef NDEBUG
+    {
+        printf("%s: gwo={%zu}, gws={%zu}, lws={%zu}\n", __func__, gwo[0], gws[0], lws[0]);
+    }
+    #endif
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, gwo, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
@@ -1766,7 +1773,12 @@ static void device_launch_arrays_triangle_assembly(
     size_t gws[] = {lws[0] * ((num_triangles-1/lws[0]) + 1)};
 
     cl_event wait_event;
-    printf("gwo={%zu}, gws={%zu}, lws={%zu}\n", gwo[0], gws[0], lws[0]);
+    
+    #ifndef NDEBUG
+    {
+        printf("%s: gwo={%zu}, gws={%zu}, lws={%zu}\n", __func__, gwo[0], gws[0], lws[0]);
+    }
+    #endif
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 1, gwo, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
