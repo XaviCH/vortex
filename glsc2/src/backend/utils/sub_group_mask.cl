@@ -220,7 +220,7 @@ static inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group
     {
         #ifdef cl_khr_int64_extended_atomics
         {
-            atomic_mask.mask = atomic_or(&address->mask, mask.mask);
+            atomic_mask.mask = atom_or(&address->mask, mask.mask);
         }
         #else
         {

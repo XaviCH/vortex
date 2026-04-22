@@ -122,7 +122,7 @@ inline void local_1dim_update_tile_z_max(uint c_render_mode_flags, ushort* tile_
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
         ushort z = max(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        *tile_z_max = local_reduce_max_1dim_ui(z, l_temp);
+        // *tile_z_max = local_reduce_max_1dim_ui(z, l_temp);
         *tile_z_upd = false;
     }
 }
@@ -131,7 +131,7 @@ inline void local_1dim_update_tile_z_min(uint c_render_mode_flags, ushort* tile_
 {
     if ((c_render_mode_flags & RENDER_MODE_FLAG_ENABLE_DEPTH) != 0) {
         ushort z = min(w_tile_depth[get_local_id(0)], w_tile_depth[get_local_id(0) + 32]);
-        *tile_z_min = local_1dim_reduce_min_ui(z, l_temp);
+        // *tile_z_min = local_1dim_reduce_min_ui(z, l_temp);
         *tile_z_upd = false;
     }
 }

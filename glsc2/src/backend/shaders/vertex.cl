@@ -248,7 +248,7 @@ static inline void gl_fill_vertex_buffer(
 ) {
     const uint output_size = 1 + NUM_VARYING; // +1 for gl_Position
 
-    float4 buffer[output_size]; // +1 for gl_Position
+    float4 buffer[1 + NUM_VARYING]; // +1 for gl_Position
 
     VS_MOVE_OUTPUT_TO_ARRAY(buffer, output);
 

@@ -783,7 +783,7 @@ void fine_raster_single_sample(
                     int pop = (tri_idx == -1) ? 0 : popcount(coverage);
 
                     // fragment count scan
-                    uint frag = local_1dim_scan_inclusive_add(pop, &sg_temp->integer);
+                    uint frag = local_1dim_scan_inclusive_add(pop, l_temp->integer);
                     uint tmp_frag = frag;
                     frag += frag_write; // frag now holds cumulative fragment count
                     frag_write += local_1dim_broadcast(tmp_frag, get_sub_group_size() - 1, l_temp->integer);
