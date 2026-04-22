@@ -1,4 +1,4 @@
-#include <backend/utils/sub_group_mask.cl>
+#include <backend/utils/sync.cl>
 
 #include "config.h"
 

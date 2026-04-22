@@ -20,6 +20,12 @@ cl_mem g_bin_seg_count;
 cl_mem g_bin_seg_data;
 cl_mem g_bin_seg_next;
 cl_mem g_bin_total;
+
+cl_mem g_tile_first_seg;
+cl_mem g_tile_seg_count;
+cl_mem g_tile_seg_data;
+cl_mem g_tile_seg_next;
+
 cl_mem g_tri_header;
 cl_mem g_tri_subtris;
 

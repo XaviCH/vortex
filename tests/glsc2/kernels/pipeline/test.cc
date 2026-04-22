@@ -296,7 +296,7 @@ void create_cl_objects() {
 
     const int LOADED_TEXTURES = 2;
     ppm_image_t *textures[LOADED_TEXTURES];
-    gl_texture_data_t texture_datas[DEVICE_TEXTURE_UNITS];
+    texture_data_t texture_datas[DEVICE_TEXTURE_UNITS];
 
     {
         textures[0] = read_ppm(TEST_PATH "/glsc2/assets/dog.ppm");
@@ -304,7 +304,7 @@ void create_cl_objects() {
 
         for (int texture=0; texture < LOADED_TEXTURES; ++texture) {
             // create sampler object
-            gl_texture_data_t *texture_data = &texture_datas[texture];
+            texture_data_t *texture_data = &texture_datas[texture];
             #ifndef DEVICE_IMAGE_ENABLED
                 texture_data->width = textures[texture]->x,
                 texture_data->height = textures[texture]->y,

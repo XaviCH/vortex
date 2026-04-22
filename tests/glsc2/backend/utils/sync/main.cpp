@@ -34,6 +34,9 @@ void test_local_1dim_reduce_or();
 void test_local_1dim_scan_inclusive_or();
 void test_local_1dim_scan_inclusive_add();
 void test_multiple_sync();
+void test_local_scan_inclusive_add();
+void test_local_1dim_scan_inclusive_add_bool();
+void test_local_scan_inclusive_add_bool();
 
 int main() {
     wrapper = cl_context_factory();
@@ -64,6 +67,10 @@ int main() {
     test_local_1dim_scan_inclusive_or();
     test_local_1dim_reduce_or();
     test_local_1dim_ballot();
+    test_local_scan_inclusive_add_bool();
+    test_local_scan_inclusive_add();
+    test_local_1dim_scan_inclusive_add_bool();
+
     test_multiple_sync();
     
 }
@@ -100,6 +107,7 @@ void test_local_1dim_ballot() {
                 printf("Error mask[0]=%x != mask[%d]=%x\n", tmp.mask, sg_id, outptr[sg_id].mask);
                 TEST_FAIL;
             }
+            // test if mask value is correct
             if (inptr[sg_id] != ((outptr[sg_id].mask >> sg_id) & 0x1u)) {
                 printf("input [%d]=%d\n", sg_id, inptr [sg_id]);
                 printf("output[%d]=%032b\n", sg_id, outptr[sg_id].mask);
@@ -164,11 +172,17 @@ void test_local_1dim_scan_inclusive_or() {
     CL_CHECK(clEnqueueReadBuffer(command_queue, g_output, CL_TRUE, 0, sizeof(output), output, 0, NULL, NULL));
 
     // check
-    for (int n=0; n<num_threads; ++n) {
-        cl_uint expected = ((2 << n%DEVICE_SUB_GROUP_THREADS)-1);
-        if (output[n] != expected) {
-            printf("ERROR: output[%d]=%08x, expected=%08x\n", n, output[n], expected);
-            TEST_FAIL;
+    for (int n=0; n<TEST_NUMBER_SUB_GROUPS; ++n) {
+        cl_uint value = 0;
+        cl_uint *inptr = input + n * DEVICE_SUB_GROUP_THREADS;
+        cl_uint *outptr = output + n * DEVICE_SUB_GROUP_THREADS;
+
+        for (int sg_idx = 0; sg_idx < DEVICE_SUB_GROUP_THREADS; ++sg_idx) {
+            value |= inptr[sg_idx];
+            if (outptr[sg_idx] != value) {
+                printf("ERROR: output[%d]=%08x, expected=%08x\n", n, output[n], value);
+                TEST_FAIL;
+            }
         }
     }
     TEST_PASS;
@@ -201,6 +215,106 @@ void test_local_1dim_scan_inclusive_add() {
         cl_uint expected = ((thread)*(thread+1))/2;
         if (output[n] != expected) {
             printf("ERROR: output[%d]=%d, expected=%d\n", n, output[n], expected);
+            TEST_FAIL;
+        }
+    }
+    TEST_PASS;
+}
+
+void test_local_scan_inclusive_add() {
+    TEST_INIT;
+    cl_kernel kernel = CL_CHECK2(clCreateKernel(program, __func__, &_err));
+
+    // setup
+    cl_uint input[num_threads];
+    cl_uint output[num_threads];
+    for(int thread = 0; thread < num_threads; ++thread) 
+        input[thread] = thread%DEVICE_SUB_GROUP_THREADS;
+        
+    cl_mem g_input = CL_CHECK2(clCreateBuffer(wrapper.context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(input), &input, &_err));
+    cl_mem g_output = CL_CHECK2(clCreateBuffer(wrapper.context, CL_MEM_WRITE_ONLY, sizeof(output), NULL, &_err));
+    CL_CHECK(clSetKernelArg(kernel, 0, sizeof(g_input), &g_input));
+    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_output), &g_output));
+    
+    // run
+    size_t lws[] = {DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS};
+    cl_command_queue command_queue = clCreateCommandQueue(wrapper.context, wrapper.device_id, 0, NULL);
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, lws, lws, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(command_queue, g_output, CL_TRUE, 0, sizeof(output), output, 0, NULL, NULL));
+
+    // check
+    int scan_value = 0;
+    for (int n=0; n<num_threads; ++n) {
+        scan_value += input[n];
+        if (output[n] != scan_value) {
+            printf("ERROR: output[%d]=%d, expected=%d\n", n, output[n], scan_value);
+            TEST_FAIL;
+        }
+    }
+    TEST_PASS;
+}
+
+void test_local_scan_inclusive_add_bool() {
+    TEST_INIT;
+    cl_kernel kernel = CL_CHECK2(clCreateKernel(program, __func__, &_err));
+
+    // setup
+    cl_uint input[num_threads];
+    cl_uint output[num_threads];
+    for(int thread = 0; thread < num_threads; ++thread) 
+        input[thread] = (thread*991) % 2;
+        
+    cl_mem g_input = CL_CHECK2(clCreateBuffer(wrapper.context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(input), &input, &_err));
+    cl_mem g_output = CL_CHECK2(clCreateBuffer(wrapper.context, CL_MEM_WRITE_ONLY, sizeof(output), NULL, &_err));
+    CL_CHECK(clSetKernelArg(kernel, 0, sizeof(g_input), &g_input));
+    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_output), &g_output));
+    
+    // run
+    size_t lws[] = {DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS};
+    cl_command_queue command_queue = clCreateCommandQueue(wrapper.context, wrapper.device_id, 0, NULL);
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, lws, lws, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(command_queue, g_output, CL_TRUE, 0, sizeof(output), output, 0, NULL, NULL));
+    
+    // check
+    int scan_value = 0;
+    for (int n=0; n<num_threads; ++n) {
+        scan_value += input[n];
+        if (output[n] != scan_value) {
+            printf("ERROR: output[%d]=%d, expected=%d\n", n, output[n], scan_value);
+            TEST_FAIL;
+        }
+    }
+    TEST_PASS;
+}
+
+void test_local_1dim_scan_inclusive_add_bool() {
+    TEST_INIT;
+    cl_kernel kernel = CL_CHECK2(clCreateKernel(program, __func__, &_err));
+
+    // setup
+    cl_uint input[num_threads];
+    cl_uint output[num_threads];
+    for(int thread = 0; thread < num_threads; ++thread) 
+        input[thread] = (thread%27) & 1u;
+        
+    cl_mem g_input = CL_CHECK2(clCreateBuffer(wrapper.context, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, sizeof(input), &input, &_err));
+    cl_mem g_output = CL_CHECK2(clCreateBuffer(wrapper.context, CL_MEM_WRITE_ONLY, sizeof(output), NULL, &_err));
+    CL_CHECK(clSetKernelArg(kernel, 0, sizeof(g_input), &g_input));
+    CL_CHECK(clSetKernelArg(kernel, 1, sizeof(g_output), &g_output));
+    
+    // run
+    size_t lws[] = {DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS};
+    cl_command_queue command_queue = clCreateCommandQueue(wrapper.context, wrapper.device_id, 0, NULL);
+    CL_CHECK(clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, lws, lws, 0, NULL, NULL));
+    CL_CHECK(clEnqueueReadBuffer(command_queue, g_output, CL_TRUE, 0, sizeof(output), output, 0, NULL, NULL));
+
+    // check
+    cl_uint expected;
+    for (int n=0; n<num_threads; ++n) {
+        if (n%DEVICE_SUB_GROUP_THREADS == 0) expected = 0;
+        expected += input[n]; 
+        if (output[n] != expected) {
+            printf("ERROR: output[%d]=%08x, expected=%08x\n", n, output[n], expected);
             TEST_FAIL;
         }
     }

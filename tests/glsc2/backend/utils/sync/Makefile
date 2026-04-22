@@ -5,7 +5,9 @@ TESTS_PATH = $(VORTEX_PATH)/tests
 
 PROJECT = sync
 
-SRCS = main.cpp
+SRCS = main.cpp 
+
+KERNELS_CL = kernel.cl
 
 LDFLAGS = -lOpenCL
 
@@ -15,6 +17,11 @@ OPTS ?=
 
 OBJS := $(addsuffix .o, $(notdir $(SRCS)))
 
+# C_OBJS := $($(notdir $(KERNELS)):.cl=.o.c)
+
+KERNELS_CL = $(wildcard *.cl)
+C_OBJS = $(KERNELS_CL:.cl=.o.c)
+
 INCLUDES = -I$(VORTEX_PATH) -I$(GLSC_PATH)/src
 
 %.o: %.cl
@@ -23,11 +30,14 @@ INCLUDES = -I$(VORTEX_PATH) -I$(GLSC_PATH)/src
 %.o.c: %.o
 	xxd -i $< > $@
 
-%.cpp.o: %.cpp
+%.cpp.o: %.cpp $(C_OBJS) 
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(PROJECT): $(OBJS)
+$(PROJECT): $(OBJS) 
 	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) $(LD_PROJECT_FLAGS) -o $@
+
+clean:
+	rm -f *.o *.o.c $(PROJECT)
 
 run: $(PROJECT)
 	./$(PROJECT)

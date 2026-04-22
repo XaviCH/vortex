@@ -262,7 +262,6 @@ int main() {
   
   // Clear scene
 
-  glClearColor(1,0,0,1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   // Draw Fan Stencil
@@ -302,7 +301,7 @@ int main() {
   glUniformMatrix4fv(loc_perspective, 1, GL_FALSE, &perspective[0][0]);
   glUniformMatrix4fv(loc_view, 1, GL_FALSE, &view[0][0]);
 
-  size_t cubes_number = 1;
+  size_t cubes_number = 1000;
 
   auto begin = std::chrono::high_resolution_clock::now();
   for (int cube_id = 0; cube_id < cubes_number; ++cube_id) {

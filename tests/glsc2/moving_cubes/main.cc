@@ -108,7 +108,6 @@ typedef struct {
 
 cube_world_data_t* cube_world_data;
 
-
 GLint program;
 GLint location_position, location_color;
 GLint location_model, location_view, location_perspective;
@@ -283,7 +282,6 @@ int main()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     draw_cubes();
-
     tests::swap_buffers_if_needed(display, surface);
     
     frame_count += 1;
@@ -300,6 +298,7 @@ int main()
     }
 
     begin = end;
+    // break;
   }
   // clean out line
   glFinish();

@@ -79,16 +79,15 @@ int main() {
 
     size_t texture_id = orch_create_2d_texture(&orch, image->x, image->y, TEX_RGBA8);
     orch_write_2d_texture(&orch, texture_id, 0, 0, image->x, image->y, TEX_RGBA8, data);
-    gl_texture_data_t texture_data[DEVICE_TEXTURE_UNITS];
+    texture_data_t texture_data[DEVICE_TEXTURE_UNITS];
     texture_data[0] = {
-        .width = (unsigned short) image->x,
-        .height = (unsigned short) image->y,
+        .size = {(unsigned short)image->x, (unsigned short)image->y}
     };
-    set_sampler2D_internalformat(&texture_data[0].sampler2D, TEX_RGBA8);
-    set_sampler2D_wrap_s(&texture_data[0].sampler2D, TEXTURE_WRAP_REPEAT);
-    set_sampler2D_wrap_t(&texture_data[0].sampler2D, TEXTURE_WRAP_REPEAT);
-    set_sampler2D_min_filter(&texture_data[0].sampler2D, TEXTURE_FILTER_NEAREST);
-    set_sampler2D_mag_filter(&texture_data[0].sampler2D, TEXTURE_FILTER_NEAREST);
+    set_texture_data_mode(&texture_data[0], TEX_RGBA8);
+    set_texture_data_wrap_s(&texture_data[0], TEXTURE_WRAP_REPEAT);
+    set_texture_data_wrap_t(&texture_data[0], TEXTURE_WRAP_REPEAT);
+    set_texture_data_min_filter(&texture_data[0], TEXTURE_FILTER_NEAREST);
+    set_texture_data_mag_filter(&texture_data[0], TEXTURE_FILTER_NEAREST);
     // fragment shader data
 
     uint8_t uniform[DEVICE_UNIFORM_CAPACITY];
@@ -112,7 +111,7 @@ int main() {
     };
 
     clear_data_t clear_data = {
-        .color = get_rgba8(0, 0, 0, 255),
+        .color = get_rgba8(255, 0, 0, 255),
         .depth = {0xFFFFu},
         .stencil = {0},
     };
@@ -122,7 +121,7 @@ int main() {
 
     auto begin = std::chrono::high_resolution_clock::now();
 
-    int samples = 1000;
+    int samples = 1;
     for(int i=0; i<samples; ++i)
     {
         size_t framebuffer_id = i % 2 ? framebuffer_id_0 : framebuffer_id_1;
@@ -134,6 +133,7 @@ int main() {
         orch_write_fragment_texture_data(&orch, framebuffer_id, texture_data);
 
         orch_attach_vertex_attribute_ptr(&orch, framebuffer_id, 0, position_buffer_id);
+        // orch_attach_vertex_attribute_ptr(&orch, framebuffer_id, 1, position_buffer_id);
         orch_attach_vertex_attribute_host_ptr(&orch, framebuffer_id, 1, triangle_colors_stride, triangle_colors);
 
         set_vertex_attribute(&vertex_attribute_data[0], 0, triangle_positions_stride, VERTEX_ATTRIBUTE_TYPE_FLOAT, VERTEX_ATTRIBUTE_SIZE_3, 0, 1);
@@ -141,10 +141,12 @@ int main() {
         
         orch_write_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
         
-        orch_draw_arrays(&orch, framebuffer_id, shader_id, mode, 0, 3);
-
+        for(int j=0; j<2000; ++j) {
+            orch_draw_arrays(&orch, framebuffer_id, shader_id, mode, 0, 3);
+        }
         //-------------------------------
         
+        /*
         uint16_t index[3] = {0, 1, 2};
         *(cl_uint*)uniform = 0;
 
@@ -158,9 +160,10 @@ int main() {
         orch_write_vertex_attribute_data(&orch, framebuffer_id, vertex_attribute_data);
         
         orch_draw_range(&orch, framebuffer_id, shader_id2, mode, 0, 3, 3, index);
+        */
     }
 
-    orch_readnpixels(&orch, framebuffer_id_0, 0, 0, WIDTH, HEIGHT, TEX_RGBA8, host_colorbuffers);
+    // orch_readnpixels(&orch, framebuffer_id_0, 0, 0, WIDTH, HEIGHT, TEX_RGBA8, host_colorbuffers);
     orch_readnpixels(&orch, framebuffer_id_1, 0, 0, WIDTH, HEIGHT, TEX_RGBA8, host_colorbuffers + sizeof(rgba8_t[WIDTH][HEIGHT]));
     
     auto end = std::chrono::high_resolution_clock::now();

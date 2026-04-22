@@ -69,6 +69,51 @@ void test_local_1dim_broadcast(
     g_output[get_local_linear_id()] = result;
 }
 
+kernel 
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS, 1)))
+void test_local_scan_inclusive_add(
+    global uint* g_input,
+    global uint* g_output
+) {
+    local uint l_temp[TEST_NUMBER_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS];
+
+    uint input = g_input[get_local_linear_id()];
+    uint result = local_scan_inclusive_add(input, l_temp);
+    g_output[get_local_linear_id()] = result;
+}
+
+
+kernel 
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS, 1)))
+void test_local_scan_inclusive_add_bool(
+    global uint* g_input,
+    global uint* g_output
+) {
+    local volatile uint l_temp[TEST_NUMBER_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS];
+
+    if ((get_local_linear_id() * 997) % 2 == 0) {
+        l_temp[get_local_linear_id()] = 0xffffffffu;
+    }
+    
+    uint input = g_input[get_local_linear_id()];
+    uint result = local_scan_inclusive_add_bool(input ? 1 : 0, l_temp);
+    g_output[get_local_linear_id()] = result;
+}
+
+
+kernel 
+__attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS, 1)))
+void test_local_1dim_scan_inclusive_add_bool(
+    global uint* g_input,
+    global uint* g_output
+) {
+    local uint l_temp[TEST_NUMBER_SUB_GROUPS*DEVICE_SUB_GROUP_THREADS];
+
+    uint input = g_input[get_local_linear_id()];
+    uint result = local_1dim_scan_inclusive_add_bool(input, l_temp);
+    g_output[get_local_linear_id()] = result;
+}
+
 kernel
 __attribute__((reqd_work_group_size(DEVICE_SUB_GROUP_THREADS, TEST_NUMBER_SUB_GROUPS, 1)))
 void test_multiple_sync(
