@@ -224,6 +224,7 @@ static inline uint __attribute__((overloadable)) local_reduce_min(uint value, lo
 
 // TODO: fix / revisit those functions
 #ifdef DEVICE_SUB_GROUP_ENABLED
+/*
 inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
     sub_group_mask_t mask;
 
@@ -247,6 +248,7 @@ inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool val
     
     return mask;
 }
+*/
 
 static inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) 
 {
@@ -264,6 +266,7 @@ static inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(b
         if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
 
         clear_sub_group_mask(&l_temp[get_local_id(1)]);
+
         local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
 
         atomic_or_sub_group_mask(&l_temp[get_local_id(1)], tmp);

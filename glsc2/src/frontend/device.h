@@ -1623,7 +1623,7 @@ static void device_launch_vertex_shader(
     // size_t gw_size = num_vertices;
     size_t lws[] = {DEVICE_VERTEX_THREADS};
     size_t gwo[] = {offset};
-    size_t gws[] = {lws[0] * ((num_vertices-1/lws[0]) + 1)};
+    size_t gws[] = {lws[0] * ((num_vertices-1)/lws[0] + 1)};
 
     cl_event wait_event;
     
@@ -1713,7 +1713,7 @@ void device_launch_range_triangle_assembly(
     // size_t gws = num_triangles;
     size_t lws[] = {DEVICE_SETUP_THREADS};
     size_t gwo[] = {triangle_offset};
-    size_t gws[] = {lws[0] * ((num_triangles-1/lws[0]) + 1)};
+    size_t gws[] = {lws[0] * ((num_triangles-1)/lws[0] + 1)};
 
     cl_event wait_event;
 
@@ -1770,7 +1770,7 @@ static void device_launch_arrays_triangle_assembly(
 
     size_t lws[] = {DEVICE_SETUP_THREADS};
     size_t gwo[] = {triangle_offset};
-    size_t gws[] = {lws[0] * ((num_triangles-1/lws[0]) + 1)};
+    size_t gws[] = {lws[0] * ((num_triangles-1)/lws[0] + 1)};
 
     cl_event wait_event;
     
@@ -1822,13 +1822,14 @@ static void device_launch_bin_dispatch(
     CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, NULL, gws, lws, 0, NULL, &wait_event));
     #ifndef NDEBUG
     {
-        cl_int bin_segs;
+        cl_int bin_segs = 0;
         cl_int bin_total[CR_MAXBINS_SQR][CR_BIN_STREAMS_SIZE];
         cl_uchar *tri_subtris = (cl_uchar*) malloc(sizeof(cl_uchar[num_triangles]));
         CL_CHECK(clEnqueueReadBuffer(queue, context->a_num_bin_segs.mem, CL_TRUE, 0, sizeof(bin_segs), &bin_segs, 0, NULL, NULL));
         CL_CHECK(clEnqueueReadBuffer(queue, context->g_bin_total, CL_TRUE, 0, sizeof(bin_total), &bin_total, 0, NULL, NULL));
         // CL_CHECK(clEnqueueReadBuffer(queue, context->g_tri_subtris, CL_TRUE, 0, sizeof(cl_uchar[num_triangles]), tri_subtris, 0, NULL, NULL));
         printf("bin_segs=%d, max_bin_segs=%ld\n", bin_segs, __device_get_max_number_bin_segments());
+
         int sum_bin_total = 0;
         for(int bin_idx = 0; bin_idx < CR_MAXBINS_SQR; ++bin_idx) {
             int total = 0;
@@ -1844,8 +1845,12 @@ static void device_launch_bin_dispatch(
             sum_tri_subtris += tri_subtris[i] & 0x7; // mask out the flag bit
         }
         // printf("sum(tri_subtris)=%d\n", sum_tri_subtris);
+        if (bin_segs > __device_get_max_number_bin_segments()) 
+        {
+            printf("ERROR: bin segs > max_bin_segs\n");
+            exit(1);
+        }
 
-        if (bin_segs > __device_get_max_number_bin_segments()) exit(1);
     }
     #endif
 
@@ -1903,7 +1908,7 @@ static void device_launch_tile_dispatch(
             CL_CHECK(clEnqueueNDRangeKernel(queue, kernel, 2, NULL, gws, lws, 0, NULL, &wait_event));
             #ifndef NDEBUG
             {
-                cl_int tile_segs, active_tiles;
+                cl_int tile_segs = 0, active_tiles = 0;
                 CL_CHECK(clEnqueueReadBuffer(queue, context->a_num_tile_segs.mem, CL_TRUE, 0, sizeof(tile_segs), &tile_segs, 0, NULL, NULL));
                 CL_CHECK(clEnqueueReadBuffer(queue, context->a_num_active_tiles.mem, CL_TRUE, 0, sizeof(active_tiles), &active_tiles, 0, NULL, NULL));
                 printf("tile_segs=%d, max_tile_segs=%ld\n", tile_segs, __device_get_max_number_tile_segments());

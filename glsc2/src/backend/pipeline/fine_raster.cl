@@ -498,7 +498,7 @@ static inline void local_1dim_execute_rop(
     local volatile uint*                restrict l1_color, 
     local volatile ushort*              restrict l1_depth, 
     local volatile uchar*               restrict l1_stencil,
-    local volatile sg_tmp_mem_t*        restrict l1_temp,
+    local volatile sg_tmp_mem_t*        restrict l_temp,
     const rop_config_t rop_config,
     const uint pixel_in_tile,
     const fragment_shader_output_t fs_output,
@@ -507,8 +507,9 @@ static inline void local_1dim_execute_rop(
 ) {
     sub_group_mask_t thread_bit = get_thread_bit_sub_group_mask();
     sub_group_mask_t lt_mask = get_lane_sub_group_mask_lt();
-    sub_group_mask_t empty_mask;
-    clear_sub_group_mask(&empty_mask);
+    sub_group_mask_t active_mask;
+
+    local volatile sg_tmp_mem_t* l1_temp = &l_temp[get_sub_group_id()];
 
     do
     {
@@ -537,8 +538,12 @@ static inline void local_1dim_execute_rop(
             }
             
         }
+
         local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-    } while(any_sub_group_mask(local_1dim_ballot(active_rop_lane, &l1_temp->mask)));
+
+        active_mask = local_1dim_ballot(active_rop_lane, l_temp->mask);
+
+    } while(any_sub_group_mask(active_mask));
 }
 
 /*
@@ -933,7 +938,7 @@ void fine_raster_single_sample(
             // loop while multiple threads access to same pixel and run ROP
             
             local_1dim_execute_rop(
-                w_tile_color, w_tile_depth, w_tile_stencil, sg_temp,
+                w_tile_color, w_tile_depth, w_tile_stencil, l_temp,
                 rop_config, pixel_in_tile, fragment_shader_output, depth,
                 active_rop_lane
             );
