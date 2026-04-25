@@ -615,20 +615,23 @@ void coarse_raster(
                 tri_idx, origin_x, origin_y, 
                 max_tile_x_in_bin, max_tile_y_in_bin, tile_log);
 
-            barrier(CLK_LOCAL_MEM_FENCE);
+            #ifndef DEVICE_BARRIER_SYNC_LOCAL_ATOMIC
+            {
+                barrier(CLK_LOCAL_MEM_FENCE); // ensure all atomics commits
 
-            /*
-            // atomic do not ensure visibility after barrier
-            sub_group_mask_t empty_mask;
-            clear_sub_group_mask(&empty_mask);
+                sub_group_mask_t empty_mask = get_sub_group_mask_zero();
 
-            #pragma unroll
-            for(int tile_in_bin = get_local_id(0); tile_in_bin < CR_BIN_SQR; tile_in_bin += DEVICE_SUB_GROUP_THREADS) {
-                s_warp_emit_mask[get_local_id(1)][tile_in_bin] = atomic_or_sub_group_mask(&s_warp_emit_mask[get_local_id(1)][tile_in_bin], empty_mask);
+                // commit to local memory calling again atomic with 0
+                #pragma unroll
+                for(int tile_in_bin = get_local_id(0); tile_in_bin < CR_BIN_SQR; tile_in_bin += DEVICE_SUB_GROUP_THREADS) 
+                {
+                    s_warp_emit_mask[get_local_id(1)][tile_in_bin] = atomic_or_sub_group_mask(&s_warp_emit_mask[get_local_id(1)][tile_in_bin], empty_mask);
+                }
             }
+            #endif
 
             barrier(CLK_LOCAL_MEM_FENCE);
-            */
+            
             //------------------------------------------------------------------------
             // Count.
             //------------------------------------------------------------------------

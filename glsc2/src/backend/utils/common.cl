@@ -1,13 +1,32 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 PipeCL Authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 #ifndef BACKEND_UTILS_COMMON_CL
 #define BACKEND_UTILS_COMMON_CL
 
-#ifdef __COMPILER_RELATIVE_PATH__
 #include <constants.device.h>
 #include <types.device.h>
-#else
-#include "glsc2/src/constants.device.h"
-#include "glsc2/src/types.device.h"
-#endif
 
 //-----------------------------------------------------------------------------
 
@@ -19,36 +38,33 @@ inline uint get_num_sub_groups()        { return get_local_size(1); }
 
 // Utility functions
 
-inline uint     ugetLo           (ulong a)              { return a & 0x00000000FFFFFFFFu; }
-inline int      getLo            (long a)               { return a & 0x00000000FFFFFFFF; }
-inline uint     ugetHi           (ulong a)              { return a >> 32; }
-inline int      getHi            (long a)               { return a >> 32; }
-static inline ulong    ucombineLoHi     (uint lo, uint hi)     { return upsample(hi,lo); }
-static inline long     combineLoHi      (int lo, int hi)       { return upsample(hi,lo); }
-inline void     add_add_carry    (uint* rlo, uint alo, uint blo, uint* rhi, uint ahi, uint bhi) { ulong r = ucombineLoHi(alo, ahi) + ucombineLoHi(blo, bhi); *rlo = ugetLo(r); *rhi = ugetHi(r); }
+static inline uint ugetLo (ulong a) { return a & 0x00000000FFFFFFFFu; }
+static inline uint ugetHi (ulong a) { return a >> 32; }
+
+static inline void add_add_carry(
+    uint* rlo, uint alo, uint blo, 
+    uint* rhi, uint ahi, uint bhi
+) { 
+    ulong r = upsample(ahi, alo) + upsample(bhi, blo); 
+    *rlo = ugetLo(r); 
+    *rhi = ugetHi(r); 
+}
 
 static inline int findLeadingOne (uint v) { return 31 - clz(v); }
 
-inline uint     getLaneMaskLt       (void)                      { return (1 << get_local_id(0)) - 1; }
-inline uint     getLaneMaskLe       (void)                      { return (2 << get_local_id(0)) - 1; }
+static inline int add_s16lo_s16lo (int a, int b) { return (short)a + (short)b; }
+static inline int add_s16hi_s16lo (int a, int b) { return (a >> 16) + (short)b; }
+static inline int sub_s16lo_s16lo (int a, int b) { return (short)a - (short)b; }
+static inline int sub_s16hi_s16lo (int a, int b) { return (a >> 16) - (short)b; }
+static inline int sub_s16hi_s16hi (int a, int b) { return (a >> 16) - (b >> 16); }
 
-inline int      f32_to_s32_sat      (float a)                   { return (int)a; }
-inline uint     f32_to_u32_sat      (float a)                   { return (uint)a; }
-inline uint     f32_to_u32_sat_rmi  (float a)                   { return (uint)a; }
-inline long   f32_to_s64              (float a)                 { return (long)a; }
+static inline int  max_max       (int a,  int b,  int c)       { return max(a, max(b, c)); }
+static inline int  min_min       (int a,  int b,  int c)       { return min(a, min(b, c)); }
+static inline uint add_sub       (uint a, uint b, uint c)      { return a+b-c; }
+static inline int  add_clamp_0_x (int a,  int b,  int c)       { return clamp(a+b,0,c); }
 
-inline int      add_s16lo_s16lo     (int a, int b)              { return (short)a + (short)b; }
-inline int      add_s16hi_s16lo     (int a, int b)              { return (a >> 16) + (short)b; }
-inline int      sub_s16lo_s16lo     (int a, int b)              { return (short)a - (short)b; }
-inline int      sub_s16hi_s16lo     (int a, int b)			    { return (a >> 16) - (short)b; }
-inline int      sub_s16hi_s16hi     (int a, int b)              { return (a >> 16) - (b >> 16); }
-
-inline int      max_max             (int a, int b, int c)       { return max(a, max(b, c)); }
-inline int      min_min             (int a, int b, int c)       { return min(a, min(b, c)); }
-inline uint     add_sub             (uint a, uint b, uint c)    { return a+b-c; }
-inline uint     add_add             (uint a, uint b, uint c)    { return a+b+c; }
-inline int      add_clamp_0_x       (int a, int b, int c)       { return clamp(a+b,0,c); }
-inline uint     prmt				(uint a, uint b, uint c)    { 
+// TODO: refactor
+static inline uint     prmt				(uint a, uint b, uint c)    { 
     ulong tmp = (ulong)b << 32 | a;
     uint4 masks;
     uint v = 0;
@@ -64,21 +80,31 @@ inline uint     prmt				(uint a, uint b, uint c)    {
     
     return v;
 }
-inline uint     slct_ui             (uint a, uint b, int c)   { return (c >= 0) ? a : b; }
-inline int      slct_i              (int a, int b, int c)   { return (c >= 0) ? a : b; }
-inline float    slct_f              (float a, float b, int c)   { return (c >= 0) ? a : b; }
+static inline int      slct_i              (int a, int b, int c)   { return (c >= 0) ? a : b; }
+static inline float    slct_f              (float a, float b, int c)   { return (c >= 0) ? a : b; }
 
 #if __OPENCL_VERSION__ < 200
-static inline size_t get_local_linear_id() { return get_local_id(1) * get_local_size(0) + get_local_id(0); }
-static inline size_t get_global_linear_id() { return (get_global_id(1) - get_global_offset(1)) * get_global_size(0) + (get_global_id(0) - get_global_offset(0)); }
+    static inline size_t get_local_linear_id() 
+    { 
+        return get_local_id(1) * get_local_size(0) + get_local_id(0); 
+    }
+
+    static inline size_t get_global_linear_id() 
+    { 
+        return (get_global_id(1) - get_global_offset(1)) * get_global_size(0) 
+            +  (get_global_id(0) - get_global_offset(0)); 
+    }
 #endif
-inline size_t get_local_linear_size() { return get_local_size(0) * get_local_size(1) * get_local_size(2); }
+static inline size_t get_local_linear_size() 
+{
+    return get_local_size(0) * get_local_size(1) * get_local_size(2); 
+}
 
 // UTILS
 
 //------------------------------------------------------------------------
 
-inline uint cover8x8_selectFlips(int dx, int dy) // 10 instr
+static inline uint cover8x8_selectFlips(int dx, int dy) // 10 instr
 {
     uint flips = 0;
     if (dy > 0 || (dy == 0 && dx <= 0))
@@ -90,7 +116,7 @@ inline uint cover8x8_selectFlips(int dx, int dy) // 10 instr
     return flips;
 }
 
-inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, local volatile const ulong* lut)
+static inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, local volatile const ulong* lut)
 {
     // First half.
 
@@ -113,7 +139,7 @@ inline ulong cover8x8_lookup_mask(long yinit, uint yinc, uint flips, local volat
     return (flips >= (1 << CR_FLIPBIT_COMPL)) ? ~mask : mask;
 }
 
-inline void cover8x8_setupLUT(local volatile ulong* lut)
+static inline void cover8x8_setupLUT(local volatile ulong* lut)
 {
     for (int lutIdx = get_local_linear_id(); lutIdx < CR_COVER8X8_LUT_SIZE; lutIdx += get_local_linear_size())
     {
@@ -145,7 +171,7 @@ inline void cover8x8_setupLUT(local volatile ulong* lut)
     }
 }
 
-inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint flips, local volatile const ulong* lut) // 54 instr
+static inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint flips, local volatile const ulong* lut) // 54 instr
 {
     float  halfPixel  = (float)(1 << (CR_SUBPIXEL_LOG2 - 1));
     float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
@@ -172,15 +198,15 @@ inline ulong cover8x8_conservative_fast(int ox, int oy, int dx, int dy, uint fli
 
     float xrcp  = 1.0f / xabs;
     float yzero = det * yinitScale * xrcp + yinitBias;
-    long yinit = f32_to_s64(slct_f(yzero, -yzero, slctFlipY));
-    uint yinc  = f32_to_u32_sat(yabs * xrcp * yincScale);
+    long yinit = convert_long_rte(slct_f(yzero, -yzero, slctFlipY));
+    uint yinc  = convert_uint_sat_rte(yabs * xrcp * yincScale);
 
     // Lookup.
 
     return cover8x8_lookup_mask(yinit, yinc, flips, lut);
 }
 
-inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, local volatile const ulong* lut) // 52 instr
+static inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, local volatile const ulong* lut) // 52 instr
 {
     float  yinitBias  = (float)(1 << (31 - CR_MAXVIEWPORT_LOG2 - CR_SUBPIXEL_LOG2 * 2));
     float  yinitScale = (float)(1 << (32 - CR_SUBPIXEL_LOG2));
@@ -201,17 +227,17 @@ inline ulong cover8x8_exact_fast(int ox, int oy, int dx, int dy, uint flips, loc
 
     float xrcp  = 1.0f / (float) abs(slct_i(dx, dy, slctSwapXY));
     float yzero = det * yinitScale * xrcp + yinitBias;
-    long yinit = f32_to_s64(slct_f(yzero, -yzero, slctFlipY));
-    uint yinc  = f32_to_u32_sat((float)abs(slct_i(dy, dx, slctSwapXY)) * xrcp * yincScale);
+    long yinit = convert_long(slct_f(yzero, -yzero, slctFlipY));
+    uint yinc  = convert_uint_sat_rte((float)abs(slct_i(dy, dx, slctSwapXY)) * xrcp * yincScale);
 
     // Lookup.
 
     return cover8x8_lookup_mask(yinit, yinc, flips, lut);
 }
 
-inline uint idiv_fast(uint a, uint b)
+static inline uint idiv_fast(uint a, uint b)
 {
-    return f32_to_u32_sat_rmi(((float)a + 0.5f) / (float)b);
+    return convert_uint_sat_rtn(((float)a + 0.5f) / (float)b);
 }
 
 //------------------------------------------------------------------------
@@ -219,7 +245,7 @@ inline uint idiv_fast(uint a, uint b)
 
 static inline int float_to_bits(float value) { return *(int*) &value; }
 
-inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, int samplesLog2)
+static inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, int samplesLog2)
 {
     float mx = fmax(fmax(values.x, values.y), values.z);
     int sh = min(max((float_to_bits(mx) >> 23) - (127 + 22), 0), 8);
@@ -249,7 +275,7 @@ inline uint3 setupPleq(float3 values, int2 v0, int2 d1, int2 d2, float areaRcp, 
 
 //------------------------------------------------------------------------
 
-inline int clipPolygonWithPlane(float* baryOut, const float* baryIn, int numIn, float v0, float v1, float v2)
+static inline int clipPolygonWithPlane(float* baryOut, const float* baryIn, int numIn, float v0, float v1, float v2)
 {
     int numOut = 0;
     if (numIn >= 3)
@@ -287,7 +313,7 @@ inline int clipPolygonWithPlane(float* baryOut, const float* baryIn, int numIn, 
 // d1 = &Vec4f(clipPos1 - clipPos0)
 // d2 = &Vec4f(clipPos2 - clipPos0)
 
-inline int clipTriangleWithFrustum(float* bary, const float* v0, const float* v1, const float* v2, const float* d1, const float* d2)
+static inline int clipTriangleWithFrustum(float* bary, const float* v0, const float* v1, const float* v2, const float* d1, const float* d2)
 {
     int num = 3;
     bary[0] = 0.0f, bary[1] = 0.0f;

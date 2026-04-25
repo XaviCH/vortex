@@ -1,16 +1,15 @@
 #ifndef CONFIG_DEVICE_H
 #define CONFIG_DEVICE_H
 
-//
-// OpenCL Compiler
-//
-
 // TODO: support heteregeneous computing
+
+// -----------
+// general configuration
+// -----------
+
 #define DEVICE_PLATFORM_ID 0
 
 #define DEVICE_DEVICE_ID 0
-
-#define DEVICE_UNROLL_SUPPORT 1
 
 #define DEBUG_MODE 0
 #if (DEBUG_MODE == 0)
@@ -18,42 +17,39 @@
 #endif
 
 // -----------
-// DEVICE ARCH
+// device architecture description
 // -----------
-// Byte size of local memory available for core
-#define DEVICE_LOCAL_MEM_SIZE 0xc000u
-#define DEVICE_MEM_BASE_ADDR_ALIGN 512
 
+// byte size of local memory available for core
 #define DEVICE_NUM_CORES 36
 
-#define DEVICE_LOCAL_THREADS_LOG2 10
+#define DEVICE_LOCAL_MEM_SIZE 0xc000u
+
+#define DEVICE_CONSTANT_MEM_SIZE 0xc000u
+
+#define DEVICE_MEM_BASE_ADDR_ALIGN 512
+
+#define DEVICE_MAX_WORK_GROUP_SIZE 1024
 
 // if disable no images nor texture units where used
-#ifndef DEVICE_IMAGE_SUPPORT
 #define DEVICE_IMAGE_SUPPORT 0
-#endif
 
-#ifndef DEVICE_RW_IMAGE_SUPPORT
 #define DEVICE_RW_IMAGE_SUPPORT 0
-#endif
 
 #define DEVICE_SUB_GROUP_THREADS_LOG2 5
 
+#define DEVICE_BARRIER_SYNC_LOCAL_ATOMIC_SUPPORT 1
+
+// SUB-GROUP configuration
 // if disable the threads are executed as each local thread is independant of each other
 // otherwise local threads operates on sub-groups work
-#ifndef DEVICE_SUB_GROUP_SUPPORT
 #define DEVICE_SUB_GROUP_SUPPORT 1
-#endif
 
 // if enabled, sub group threads are executed in locksteps and sub-groups have raw at local memory / global memory.
-#ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT
 #define DEVICE_SUB_GROUP_LOCKSTEP_RAW_SUPPORT 0
-#endif
 
 // if enabled the device supports sub group intra-register operations as ballot, all, any, scan or reduce. 
-#ifndef DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT
 #define DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT 1
-#endif
 
 // ------
 // RENDER CONFIGURATIONS
@@ -61,6 +57,7 @@
 #define DEVICE_ORCHESTRATOR_ENABLED 1
 
 #define DEVICE_CONTEXT_NUMBER 1
+
 #define DEVICE_BIN_QUEUE_SIZE 1
 
 #define DEVICE_VERTEX_ATTRIBUTE_SIZE 16
@@ -97,7 +94,11 @@
 #define DEVICE_COARSE_THREADS (32 * 16)
 #define DEVICE_COARSE_SUB_GROUPS ((DEVICE_COARSE_THREADS) / (1 << DEVICE_SUB_GROUP_THREADS_LOG2)) 
 // Fine Raster Configuration
-#define DEVICE_FINE_THREADS ((1 << DEVICE_SUB_GROUP_THREADS_LOG2) * 20)
+#if (DEVICE_SUB_GROUP_INTRINSICTS_SUPPORT == 1)
+    #define DEVICE_FINE_THREADS ((1 << DEVICE_SUB_GROUP_THREADS_LOG2) * 20)
+#else
+    #define DEVICE_FINE_THREADS ((1 << DEVICE_SUB_GROUP_THREADS_LOG2) * 1)
+#endif
 #define DEVICE_FINE_SUB_GROUPS ((DEVICE_FINE_THREADS) / (1 << DEVICE_SUB_GROUP_THREADS_LOG2))
 
 // ------

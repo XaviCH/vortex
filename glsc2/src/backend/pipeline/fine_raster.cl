@@ -400,9 +400,7 @@ static inline void local_1dim_load_and_clean_framebuffer_to_local_mem(
         is_framebuffer_data_stencilbuffer_enabled(framebuffer_data) &&
         !is_enabled_data_all_stencil_bits(clear_enabled_data);
 
-    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
-    #endif
     for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
         
         int2 surf = get_2d_surface_from_tile(tile, pixel);
@@ -461,9 +459,7 @@ static inline void local_1dim_store_local_mem_to_framebuffer(
 
     store_stencilbuffer = is_framebuffer_data_stencilbuffer_enabled(framebuffer_data);
 
-    #ifdef DEVICE_UNROLL_ENABLED
     #pragma unroll
-    #endif
     for (int pixel = get_local_id(0); pixel < CR_TILE_SQR; pixel += get_local_size(0)) {
         
         int2 surf = get_2d_surface_from_tile(tile, pixel);
@@ -524,9 +520,16 @@ static inline void local_1dim_execute_rop(
 
         local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
 
-        if (active_rop_lane) {
-            sub_group_mask_t thread_pixel_mask = l1_temp->tile[pixel_in_tile]; // atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], empty_mask);
-            
+        if (active_rop_lane) 
+        {
+            sub_group_mask_t thread_pixel_mask;
+
+            #ifdef DEVICE_BARRIER_SYNC_LOCAL_ATOMIC
+                thread_pixel_mask = l1_temp->tile[pixel_in_tile];
+            #else
+                thread_pixel_mask = atomic_or_sub_group_mask(&l1_temp->tile[pixel_in_tile], get_sub_group_mask_zero());
+            #endif
+
             if (!any_sub_group_mask(and_sub_group_mask(thread_pixel_mask, lt_mask))) 
             {
                 execute_ROP_single_sample(
@@ -837,7 +840,7 @@ void fine_raster_single_sample(
             int rop_lane_idx = popcount_sub_group_mask(rop_lane_mask);
             bool tagged = sg_temp->integer[rop_lane_idx];
             local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-            sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, &l_temp->mask);
+            sub_group_mask_t boundary_mask = local_1dim_ballot(tagged, l_temp->mask);
 
             /* TODO: Check why does not work
             local_1dim_barrier(CLK_LOCAL_MEM_FENCE);

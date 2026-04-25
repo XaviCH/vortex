@@ -158,7 +158,6 @@ void triangle_setup_range(
 
     int task_idx = get_global_linear_id();
     
-    
     if (task_idx >= c_num_tris)
         return;
     

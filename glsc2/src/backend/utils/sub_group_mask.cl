@@ -1,28 +1,39 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 PipeCL Authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 #ifndef BACKEND_UTILS_SUB_GROUP_MASK_CL
 #define BACKEND_UTILS_SUB_GROUP_MASK_CL
 
-#ifdef __COMPILER_RELATIVE_PATH__
-    #include <backend/types.cl>
-    #include <backend/utils/common.cl>
-    #include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
-    #include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
-    #include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
-    
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
-    #include <backend/extensions/cl_khr_subgroups/include.cl>
-    #endif
+#include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
+#include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
+#include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
+#include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
+#include <backend/extensions/cl_khr_subgroups/include.cl>
 
-#else
-    #include "glsc2/src/backend/types.cl"
-    #include "glsc2/src/backend/utils/common.cl"
+#include <backend/types.cl>
+#include <backend/utils/common.cl>
 
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    #include "glsc2/src/backend/extensions/cl_khr_subgroup_ballot/include.cl"
-    #include "glsc2/src/backend/extensions/cl_khr_subgroups/include.cl"
-    #endif
-
-#endif
 
 static inline void __attribute__((overloadable)) clear_sub_group_mask(sub_group_mask_t* sub_group_mask) 
 {
@@ -156,7 +167,7 @@ inline uint popcount_sub_group_mask(sub_group_mask_t sub_group_mask) {
 }
 
 #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-inline sub_group_mask_t ballot_sub_group_mask(bool condition) 
+static inline sub_group_mask_t ballot_sub_group_mask(bool condition) 
 {
     sub_group_mask_t sub_group_mask;
 
@@ -175,7 +186,7 @@ inline sub_group_mask_t ballot_sub_group_mask(bool condition)
 }
 #endif
 
-inline bool get_bit_sub_group_mask(sub_group_mask_t sub_group_mask, uint position) {
+static inline bool get_bit_sub_group_mask(sub_group_mask_t sub_group_mask, uint position) {
     bool bit;
 
     #if (DEVICE_SUB_GROUP_THREADS <= 64)
@@ -189,8 +200,6 @@ inline bool get_bit_sub_group_mask(sub_group_mask_t sub_group_mask, uint positio
 
     return bit;
 }
-
-
 
 static inline sub_group_mask_t atomic_or_sub_group_mask(local volatile sub_group_mask_t* address, const sub_group_mask_t mask) 
 {

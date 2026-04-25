@@ -1,26 +1,34 @@
-/**
- * local_ functions may requiere all threads from a local group to enter
- * sub_group_ functions may requiere all threads from a sub group to enter
+/*
+ * MIT License
  *
+ * Copyright (c) 2026 PipeCL Authors
  *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  */
 
 #ifndef BACKEND_UTILS_SYNC_CL
 #define BACKEND_UTILS_SYNC_CL
 
-#ifdef __COMPILER_RELATIVE_PATH__
-    #include <backend/extensions/cl_khr_global_int32_base_atomics/include.cl>
-    #include <backend/extensions/cl_khr_local_int32_base_atomics/include.cl>
-    #include <backend/extensions/cl_khr_local_int32_extended_atomics/include.cl>
-    #include <backend/extensions/cl_khr_subgroups/include.cl>
-    #include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
-
-    #include <backend/utils/sub_group_mask.cl>
-    #include <backend/utils/common.cl>
-#else
-    #include "glsc2/src/backend/utils/sub_group_mask.cl"
-    #include "glsc2/src/backend/utils/common.cl"
-#endif
+#include <backend/extensions/cl_khr_subgroups/include.cl>
+#include <backend/extensions/cl_khr_subgroup_ballot/include.cl>
+#include <backend/utils/common.cl>
+#include <backend/utils/sub_group_mask.cl>
 
 // --------------
 // UTILS
@@ -222,65 +230,50 @@ static inline uint __attribute__((overloadable)) local_reduce_min(uint value, lo
     return l_temp[get_local_linear_size()-1];
 }
 
-// TODO: fix / revisit those functions
+// -------------
+// BALLOT
+// -------------
+
 #ifdef DEVICE_SUB_GROUP_ENABLED
-/*
-inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t (*sg_temp)[DEVICE_SUB_GROUP_THREADS]) {
-    sub_group_mask_t mask;
-
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-        sub_group_barrier(CLK_LOCAL_MEM_FENCE);
-        mask = ballot_sub_group_mask(value);
-    #else
+    static inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) 
     {
-        sub_group_mask_t tmp;
-        clear_sub_group_mask(&tmp);
-        if (value) set_bit_sub_group_mask(&tmp, get_sub_group_local_id());
+        sub_group_mask_t mask;
 
-        clear_sub_group_mask(&(*sg_temp)[0]);
-        atomic_or_sub_group_mask(&(*sg_temp)[0], tmp);
-        #ifndef DEVICE_SUB_GROUP_LOCKSTEP_RAW_ENABLED
+        #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
+        {
+            sub_group_barrier(CLK_LOCAL_MEM_FENCE); // ensure sync ballot
+            mask = ballot_sub_group_mask(value);
+        }
+        #else
+        {
+            sub_group_mask_t tmp;
+            clear_sub_group_mask(&tmp);
+            if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
+
+            clear_sub_group_mask(&l_temp[get_local_id(1)]);
+
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+
+            atomic_or_sub_group_mask(&l_temp[get_local_id(1)], tmp);
+            
+            local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
+            
+            #ifdef DEVICE_BARRIER_SYNC_LOCAL_ATOMIC
+            {
+                mask = l_temp[get_local_id(1)];
+            }
+            #else
+            {
+                mask = atomic_or_sub_group_mask(&l_temp[get_local_id(1)], get_sub_group_mask_zero());
+            }
+            #endif
+            
             barrier(CLK_LOCAL_MEM_FENCE);
+        }
         #endif
-        mask = (*sg_temp)[0];
-    }
-    #endif
-    
-    return mask;
-}
-*/
-
-static inline sub_group_mask_t __attribute__((overloadable)) local_1dim_ballot(bool value, local volatile sub_group_mask_t* l_temp) 
-{
-    sub_group_mask_t mask;
-
-    #ifdef DEVICE_SUB_GROUP_INTRINSICTS_ENABLED
-    {
-        sub_group_barrier(CLK_LOCAL_MEM_FENCE); // ensure sync ballot
-        mask = ballot_sub_group_mask(value);
-    }
-    #else
-    {
-        sub_group_mask_t tmp;
-        clear_sub_group_mask(&tmp);
-        if (value) set_bit_sub_group_mask(&tmp, get_local_id(0));
-
-        clear_sub_group_mask(&l_temp[get_local_id(1)]);
-
-        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-
-        atomic_or_sub_group_mask(&l_temp[get_local_id(1)], tmp);
         
-        local_1dim_barrier(CLK_LOCAL_MEM_FENCE);
-        
-        mask = l_temp[get_local_id(1)];
-        
-        barrier(CLK_LOCAL_MEM_FENCE);
+        return mask;
     }
-    #endif
-    
-    return mask;
-}
 #endif
 
 #endif // BACKEND_UTILS_SYNC_CL
